@@ -1116,3 +1116,4 @@ activity log — lives in your MySQL database. Only the encryption key stays on 
 The `projects` table is already in place, linking a server to a git, Docker Hub and Cloudflare credential
 plus a repo, branch and domain. The deployment pipeline and Cloudflare DNS management build on top of it.
 "# aj-pilot" 
+"# aj-pilot" 
