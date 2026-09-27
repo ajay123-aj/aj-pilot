@@ -53,6 +53,13 @@ gitOauthRouter.post("/config", async (req, res) => {
  */
 gitOauthRouter.get('/start', (req, res) => {
   const kind = gitKind(req.query.kind);
+  // Not set up (or the keys were taken out of .env since the page loaded): send the wizard to its setup step.
+  if (!config.oauth[kind]?.clientId || !config.oauth[kind]?.clientSecret) {
+    return res.status(400).send(resultPage({
+      ok: false, needsSetup: true, kind,
+      error: 'Browser sign-in for this provider is not set up yet. Go back to AJ Pilot to set it up — it takes a minute, once.',
+    }));
+  }
   try {
     const { url } = beginAuthorization(kind, { name: req.query.name });
     res.redirect(url);

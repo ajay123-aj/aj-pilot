@@ -2166,6 +2166,14 @@ function connectWithOauth(kind, label) {
     const d = event.data;
     if (!d || d.source !== 'auto-deploy-oauth') return;
     cleanup();
+    // The provider turned out not to be set up: stay in the wizard and show its one-time setup.
+    if (d.needsSetup) {
+      api('/git/oauth/providers').then((r) => { oauthInfo = r; }).catch(() => {}).finally(() => {
+        chosenProvider = oauthInfo.providers.find((p) => p.kind === d.kind) || { kind: d.kind, label: gitLabel(d.kind) };
+        showSetupStep();
+      });
+      return;
+    }
     $('#modal-git').classList.add('hidden');
     if (d.ok) {
       toast(`Connected as ${d.login}`);
@@ -2222,10 +2230,12 @@ $('#link-manual-token').addEventListener('click', () => {
 });
 
 /** Choosing a provider goes straight to sign-in, or to setup the first time. */
-$('#git-step-provider').addEventListener('click', (e) => {
+$('#git-step-provider').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-pick]');
   if (!btn) return;
   const kind = btn.dataset.pick;
+  // Ask again: what the wizard read when it opened may be out of date (keys added to or removed from .env since).
+  try { oauthInfo = await api('/git/oauth/providers'); } catch { /* go with what we have */ }
   chosenProvider = oauthInfo.providers.find((p) => p.kind === kind) || { kind, label: gitLabel(kind) };
 
   if (chosenProvider.configured) {
