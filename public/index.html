@@ -1,0 +1,2034 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AJ Pilot — Autopilot for Your Servers | App Deployment, Server Management &amp; Domains</title>
+<meta name="description" content="AJ Pilot is autopilot for your servers. Manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static sites from GitHub or GitLab, run Docker, MySQL, PostgreSQL, MongoDB and Redis, and put every app on your own domain with Cloudflare, Nginx and free SSL — from one self-hosted control panel." />
+<meta name="keywords" content="AJ Pilot, server autopilot, server management panel, VPS control panel, self-hosted PaaS, deploy Next.js app, deploy Node.js app, NestJS deployment, Docker management UI, Nginx SSL manager, Cloudflare DNS automation, Cloudflare Zero Trust tunnel, Let's Encrypt SSL, MySQL admin panel, PostgreSQL admin, MongoDB GUI, Redis GUI, GitHub Actions runner, GitLab runner, Ubuntu server dashboard, cron job manager, systemd service manager, server file manager" />
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+<meta name="author" content="AJ Pilot" />
+<meta name="application-name" content="AJ Pilot" />
+<meta name="theme-color" content="#2f64ea" />
+<link rel="canonical" href="%%SITE_URL%%/" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="AJ Pilot" />
+<meta property="og:locale" content="en_IN" />
+<meta property="og:url" content="%%SITE_URL%%/" />
+<meta property="og:title" content="AJ Pilot — Autopilot for your servers" />
+<meta property="og:description" content="Self-hosted control panel for Ubuntu servers: one-click app deploys from Git, Docker and databases, Nginx with free SSL, Cloudflare DNS and Zero Trust tunnels, teams and roles." />
+<meta property="og:image" content="%%SITE_URL%%/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="AJ Pilot — autopilot for your servers: deploy apps, manage servers and connect domains" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="AJ Pilot — Autopilot for your servers" />
+<meta name="twitter:description" content="Self-hosted control panel for Ubuntu servers: app deploys from Git, Docker, databases, Nginx + SSL and Cloudflare — in one place." />
+<meta name="twitter:image" content="%%SITE_URL%%/og-image.png" />
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<!--JSONLD-->
+<script>
+  // Set the theme before anything is drawn, so a light page never flashes dark (or back).
+  (function () {
+    var pref = 'system';
+    try { pref = localStorage.getItem('ad-theme') || 'system'; } catch (e) { /* storage blocked */ }
+    var dark = pref === 'dark' || (pref === 'system' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme-pref', pref);
+  })();
+</script>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="booting">
+
+<!-- ------------------------------------------------------- landing page -->
+<div class="landing" id="landing">
+  <header class="landing-head">
+    <a class="landing-brand" href="#top" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
+    <nav class="landing-nav" aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#deploy">Deploy</a>
+      <a href="#pricing" class="%%PRICING_HIDDEN%%" id="nav-pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a href="/docs">Docs</a>
+      <a href="#contact">Contact</a>
+    </nav>
+    <div class="landing-actions">
+      <div class="theme-menu">
+        <button type="button" class="icon-btn" data-theme-toggle aria-haspopup="true" aria-expanded="false" title="Theme">
+          <span class="theme-current" aria-hidden="true">🌙</span><span class="sr-only">Theme</span>
+        </button>
+        <div class="menu-pop hidden" role="menu">
+          <div class="menu-title">Theme</div>
+          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="light"><span class="dropdown-icon">☀️</span>Light<span class="menu-check">✓</span></button>
+          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="dark"><span class="dropdown-icon">🌙</span>Dark<span class="menu-check">✓</span></button>
+          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="system"><span class="dropdown-icon">🖥️</span>System<span class="menu-check">✓</span></button>
+        </div>
+      </div>
+      <button class="btn" id="btn-open-signin">Sign in</button>
+      <button class="btn primary hidden" id="btn-open-setup">Get started</button>
+    </div>
+  </header>
+
+  <main id="top">
+  <section class="hero">
+    <div class="hero-text">
+      <span class="pill">AJ Pilot · autopilot for your servers</span>
+      <h1>Deploy apps, manage servers and connect domains — from one panel.</h1>
+      <p>
+        AJ Pilot connects to your Ubuntu servers over SSH and does the work you would otherwise do by hand:
+        deploy <b>Next.js, NestJS, Node.js, React, Angular, Nuxt</b> and static sites straight from GitHub or GitLab,
+        run <b>Docker</b>, <b>MySQL, PostgreSQL, MongoDB and Redis</b>, publish every app on your domain with
+        <b>Nginx and free SSL</b> or a <b>Cloudflare Zero Trust tunnel</b> — and give your team exactly the access it needs.
+      </p>
+      <div class="hero-buttons">
+        <button class="btn primary big" id="btn-hero-primary">Get started free</button>
+        <a class="btn big" href="#features">See every feature</a>
+      </div>
+      <p class="muted small" id="hero-note">No agent on your servers. Every password, key and token is encrypted before it touches disk.</p>
+    </div>
+
+    <div class="hero-visual" aria-hidden="true">
+      <div class="mock">
+        <div class="mock-head"><span class="dot online"></span> prod-web-01 <span class="badge ok">online</span></div>
+        <div class="mock-row"><span>Ubuntu 24.04 LTS</span><span class="muted">4 vCPU · 8 GB</span></div>
+        <div class="mock-meter"><span style="width:39%"></span></div>
+        <div class="mock-row"><span>shop-frontend · Next.js</span><span class="badge ok">running</span></div>
+        <div class="mock-row"><span>shop.example.com</span><span class="badge ok">SSL live</span></div>
+        <div class="mock-row"><span>10 containers</span><span class="badge ok">docker</span></div>
+        <div class="mock-chips"><span class="chip">mysql</span><span class="chip">redis</span><span class="chip">nginx</span><span class="chip">node</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="stack-wall" aria-labelledby="stack-title">
+    <div class="stack-head">
+      <div>
+        <span class="eyebrow">Works with</span>
+        <h2 id="stack-title">Your whole stack, in one panel</h2>
+        <p>Frameworks are detected from your repository, services install in one click, and domains get DNS and SSL on their own.</p>
+      </div>
+      <dl class="stack-stats">
+        <div><dt>7</dt><dd>frameworks detected</dd></div>
+        <div><dt>8</dt><dd>one-click services</dd></div>
+        <div><dt>4</dt><dd>databases managed</dd></div>
+      </dl>
+    </div>
+    <div class="stack-rows">
+      <div class="stack-row">
+        <ul><li class="tech tech-mono" style="--brand:#111111"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Next.js</b><small>Framework</small></span></li><li class="tech " style="--brand:#E0234E"><span class="tech-mark" aria-hidden="true">Ns</span><span class="tech-text"><b>NestJS</b><small>Framework</small></span></li><li class="tech " style="--brand:#5FA04E"><span class="tech-mark" aria-hidden="true">JS</span><span class="tech-text"><b>Node.js</b><small>Runtime</small></span></li><li class="tech " style="--brand:#149ECA"><span class="tech-mark" aria-hidden="true">⚛</span><span class="tech-text"><b>React</b><small>Framework</small></span></li><li class="tech " style="--brand:#42B883"><span class="tech-mark" aria-hidden="true">V</span><span class="tech-text"><b>Vue</b><small>Framework</small></span></li><li class="tech " style="--brand:#DD0031"><span class="tech-mark" aria-hidden="true">A</span><span class="tech-text"><b>Angular</b><small>Framework</small></span></li><li class="tech " style="--brand:#00C16A"><span class="tech-mark" aria-hidden="true">Nx</span><span class="tech-text"><b>Nuxt</b><small>Framework</small></span></li><li class="tech " style="--brand:#8B5CF6"><span class="tech-mark" aria-hidden="true">Vi</span><span class="tech-text"><b>Vite</b><small>Build tool</small></span></li><li class="tech tech-mono" style="--brand:#24292F"><span class="tech-mark" aria-hidden="true">GH</span><span class="tech-text"><b>GitHub</b><small>Git & CI</small></span></li><li class="tech " style="--brand:#FC6D26"><span class="tech-mark" aria-hidden="true">GL</span><span class="tech-text"><b>GitLab</b><small>Git & CI</small></span></li></ul>
+        <ul aria-hidden="true"><li class="tech tech-mono" style="--brand:#111111"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Next.js</b><small>Framework</small></span></li><li class="tech " style="--brand:#E0234E"><span class="tech-mark" aria-hidden="true">Ns</span><span class="tech-text"><b>NestJS</b><small>Framework</small></span></li><li class="tech " style="--brand:#5FA04E"><span class="tech-mark" aria-hidden="true">JS</span><span class="tech-text"><b>Node.js</b><small>Runtime</small></span></li><li class="tech " style="--brand:#149ECA"><span class="tech-mark" aria-hidden="true">⚛</span><span class="tech-text"><b>React</b><small>Framework</small></span></li><li class="tech " style="--brand:#42B883"><span class="tech-mark" aria-hidden="true">V</span><span class="tech-text"><b>Vue</b><small>Framework</small></span></li><li class="tech " style="--brand:#DD0031"><span class="tech-mark" aria-hidden="true">A</span><span class="tech-text"><b>Angular</b><small>Framework</small></span></li><li class="tech " style="--brand:#00C16A"><span class="tech-mark" aria-hidden="true">Nx</span><span class="tech-text"><b>Nuxt</b><small>Framework</small></span></li><li class="tech " style="--brand:#8B5CF6"><span class="tech-mark" aria-hidden="true">Vi</span><span class="tech-text"><b>Vite</b><small>Build tool</small></span></li><li class="tech tech-mono" style="--brand:#24292F"><span class="tech-mark" aria-hidden="true">GH</span><span class="tech-text"><b>GitHub</b><small>Git & CI</small></span></li><li class="tech " style="--brand:#FC6D26"><span class="tech-mark" aria-hidden="true">GL</span><span class="tech-text"><b>GitLab</b><small>Git & CI</small></span></li></ul>
+      </div>
+      <div class="stack-row reverse">
+        <ul><li class="tech " style="--brand:#2496ED"><span class="tech-mark" aria-hidden="true">D</span><span class="tech-text"><b>Docker</b><small>Containers</small></span></li><li class="tech " style="--brand:#009639"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Nginx</b><small>Web server</small></span></li><li class="tech " style="--brand:#F7A800"><span class="tech-mark" aria-hidden="true">LE</span><span class="tech-text"><b>Let&#39;s Encrypt</b><small>Free SSL</small></span></li><li class="tech " style="--brand:#F38020"><span class="tech-mark" aria-hidden="true">CF</span><span class="tech-text"><b>Cloudflare</b><small>DNS & tunnels</small></span></li><li class="tech " style="--brand:#E95420"><span class="tech-mark" aria-hidden="true">U</span><span class="tech-text"><b>Ubuntu</b><small>Server OS</small></span></li><li class="tech " style="--brand:#4479A1"><span class="tech-mark" aria-hidden="true">My</span><span class="tech-text"><b>MySQL</b><small>Database</small></span></li><li class="tech " style="--brand:#4169E1"><span class="tech-mark" aria-hidden="true">Pg</span><span class="tech-text"><b>PostgreSQL</b><small>Database</small></span></li><li class="tech " style="--brand:#47A248"><span class="tech-mark" aria-hidden="true">M</span><span class="tech-text"><b>MongoDB</b><small>Database</small></span></li><li class="tech " style="--brand:#DC382D"><span class="tech-mark" aria-hidden="true">R</span><span class="tech-text"><b>Redis</b><small>Cache</small></span></li><li class="tech " style="--brand:#00A9A5"><span class="tech-mark" aria-hidden="true">Es</span><span class="tech-text"><b>Elasticsearch</b><small>Search</small></span></li><li class="tech " style="--brand:#7B61FF"><span class="tech-mark" aria-hidden="true">Mq</span><span class="tech-text"><b>EMQX</b><small>MQTT broker</small></span></li></ul>
+        <ul aria-hidden="true"><li class="tech " style="--brand:#2496ED"><span class="tech-mark" aria-hidden="true">D</span><span class="tech-text"><b>Docker</b><small>Containers</small></span></li><li class="tech " style="--brand:#009639"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Nginx</b><small>Web server</small></span></li><li class="tech " style="--brand:#F7A800"><span class="tech-mark" aria-hidden="true">LE</span><span class="tech-text"><b>Let&#39;s Encrypt</b><small>Free SSL</small></span></li><li class="tech " style="--brand:#F38020"><span class="tech-mark" aria-hidden="true">CF</span><span class="tech-text"><b>Cloudflare</b><small>DNS & tunnels</small></span></li><li class="tech " style="--brand:#E95420"><span class="tech-mark" aria-hidden="true">U</span><span class="tech-text"><b>Ubuntu</b><small>Server OS</small></span></li><li class="tech " style="--brand:#4479A1"><span class="tech-mark" aria-hidden="true">My</span><span class="tech-text"><b>MySQL</b><small>Database</small></span></li><li class="tech " style="--brand:#4169E1"><span class="tech-mark" aria-hidden="true">Pg</span><span class="tech-text"><b>PostgreSQL</b><small>Database</small></span></li><li class="tech " style="--brand:#47A248"><span class="tech-mark" aria-hidden="true">M</span><span class="tech-text"><b>MongoDB</b><small>Database</small></span></li><li class="tech " style="--brand:#DC382D"><span class="tech-mark" aria-hidden="true">R</span><span class="tech-text"><b>Redis</b><small>Cache</small></span></li><li class="tech " style="--brand:#00A9A5"><span class="tech-mark" aria-hidden="true">Es</span><span class="tech-text"><b>Elasticsearch</b><small>Search</small></span></li><li class="tech " style="--brand:#7B61FF"><span class="tech-mark" aria-hidden="true">Mq</span><span class="tech-text"><b>EMQX</b><small>MQTT broker</small></span></li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="landing-section" id="features">
+    <h2>Everything you need to run production servers</h2>
+    <p class="section-lead">One panel instead of a dozen SSH sessions, dashboards and shell scripts. Everything talks to your own machines over the SSH connection you already have.</p>
+
+    <h3 class="feature-group">🖥️ Servers</h3>
+    <div class="feature-grid">
+      <article class="feature"><h4>Full server inventory</h4>
+        <p>Distribution, kernel, CPU, memory, disks, network interfaces, DNS, every listening port with its process, pending security updates, firewall and SSH posture — read in one pass and kept as a history.</p></article>
+      <article class="feature"><h4>Live monitoring</h4>
+        <p>CPU, memory, disk and network in real time, plus a background health check that marks a server offline within seconds and tells you why.</p></article>
+      <article class="feature"><h4>systemd services</h4>
+        <p>Start, stop, restart and enable any unit, read its journal, or write a new service from a form and have it enabled and running.</p></article>
+      <article class="feature"><h4>File manager</h4>
+        <p>Browse folders with their sizes, upload, download, edit, rename, copy, move, extract archives and change permissions — no SFTP client needed.</p></article>
+      <article class="feature"><h4>Cron jobs</h4>
+        <p>See, add, edit and remove scheduled jobs with a readable schedule, on any server.</p></article>
+      <article class="feature"><h4>Nginx sites &amp; SSL</h4>
+        <p>Create sites and upstreams, edit configs safely with a syntax check, and issue or renew free Let's Encrypt certificates.</p></article>
+    </div>
+
+    <h3 class="feature-group" id="deploy">🚀 App deployment</h3>
+    <div class="feature-grid">
+      <article class="feature"><h4>Deploy from GitHub or GitLab</h4>
+        <p>Pick a repository, a branch and a server. The framework is detected — Next.js, NestJS, Nuxt, Angular, React, Vue, Vite, plain Node.js or a static site — and built and run in Docker.</p></article>
+      <article class="feature"><h4>Monorepos welcome</h4>
+        <p>One repository, several projects? Choose the folder to deploy, and each app gets its own build, settings and domain.</p></article>
+      <article class="feature"><h4>Progress, timeline &amp; logs</h4>
+        <p>Every deploy shows each step as it happens — clone, install, build, start — with full logs, so a failure explains itself.</p></article>
+      <article class="feature"><h4>Environment &amp; scaling</h4>
+        <p>Edit environment variables, ports and volumes, run several instances, restart, redeploy or roll forward from one page.</p></article>
+      <article class="feature"><h4>Multiple domains per app</h4>
+        <p>Attach as many domains as an app needs. Each one is created in Cloudflare, served through Nginx and secured with SSL — automatically.</p></article>
+      <article class="feature"><h4>Cloudflare Zero Trust tunnels</h4>
+        <p>No open ports? Publish an app through a Cloudflare tunnel instead of DNS, pointed at the right server and port for you.</p></article>
+    </div>
+
+    <h3 class="feature-group">🐳 Docker &amp; one-click installs</h3>
+    <div class="feature-grid">
+      <article class="feature"><h4>Container management</h4>
+        <p>Every container with its image, ports, health and logs. Start, stop, restart, pause or remove, and clean up images, networks and volumes.</p></article>
+      <article class="feature"><h4>One-click services</h4>
+        <p>Install Docker and Compose, then MySQL, PostgreSQL, MongoDB, Redis, EMQX or Elasticsearch as containers with named volumes on a port you choose.</p></article>
+      <article class="feature"><h4>Docker Hub</h4>
+        <p>Connect Docker Hub to browse your repositories and tags, and pull private images onto your servers.</p></article>
+    </div>
+
+    <h3 class="feature-group">🗄️ Databases</h3>
+    <div class="feature-grid">
+      <article class="feature"><h4>MySQL, PostgreSQL, MongoDB &amp; Redis</h4>
+        <p>Connect to any of them — even one bound to localhost, through the server's own SSH — and browse databases, tables, collections and keys.</p></article>
+      <article class="feature"><h4>Users, grants &amp; configuration</h4>
+        <p>Create databases and users, grant exactly the privileges they need, and read or tune server variables from a form.</p></article>
+      <article class="feature"><h4>Statistics &amp; queries</h4>
+        <p>Sizes, connections and the largest tables at a glance, and a query runner for the questions the dashboard does not answer.</p></article>
+    </div>
+
+    <h3 class="feature-group">👥 Teams, security &amp; CI</h3>
+    <div class="feature-grid">
+      <article class="feature"><h4>Organisations &amp; roles</h4>
+        <p>Admin, editor or view-only for each person. Servers and credentials belong to an organisation, and nothing crosses between them.</p></article>
+      <article class="feature"><h4>Encrypted secrets</h4>
+        <p>SSH keys, passwords and provider tokens are encrypted with AES-256-GCM; sign-in passwords are hashed with scrypt; no API ever returns a secret.</p></article>
+      <article class="feature"><h4>CI runners in minutes</h4>
+        <p>Install a GitHub Actions or GitLab runner on any server, registered and kept alive under systemd, with its live status.</p></article>
+      <article class="feature"><h4>Activity log</h4>
+        <p>Who changed what and when — every deploy, domain, service and permission change is recorded.</p></article>
+      <article class="feature"><h4>Git sign-in without tokens</h4>
+        <p>Connect GitHub or GitLab with a sign-in popup; tokens are stored encrypted and refreshed automatically.</p></article>
+      <article class="feature"><h4>Light &amp; dark themes</h4>
+        <p>A clean, fast interface that follows your system theme — or the one you pick.</p></article>
+    </div>
+  </section>
+
+  <section class="landing-section alt" id="how">
+    <h2>How it works</h2>
+    <p class="section-lead">From a bare Ubuntu server to a live app on your domain in four steps.</p>
+    <ol class="steps">
+      <li><span class="step-n">1</span><div><h3>Add a server</h3><p>Host, SSH user and a password or key. The connection is tested before it is saved, and the panel says exactly what went wrong if it cannot get in.</p></div></li>
+      <li><span class="step-n">2</span><div><h3>Install what it needs</h3><p>Docker, Nginx and any database or cache, with one click each. Everything runs in containers with its data kept safe in volumes.</p></div></li>
+      <li><span class="step-n">3</span><div><h3>Deploy your app</h3><p>Pick a repository, branch and folder. Watch it build and start step by step, with the full log.</p></div></li>
+      <li><span class="step-n">4</span><div><h3>Put it on your domain</h3><p>Choose a Cloudflare domain and a subdomain. DNS, Nginx and SSL — or a Zero Trust tunnel — are set up for you.</p></div></li>
+    </ol>
+  </section>
+
+  <section class="landing-section" id="use-cases">
+    <h2>Built for teams that ship</h2>
+    <div class="feature-grid">
+      <article class="feature"><h3>Agencies</h3><p>Host every client's site on your own servers, one organisation per client, with their own people and domains.</p></article>
+      <article class="feature"><h3>Startups</h3><p>Get the convenience of a PaaS on affordable VPS servers — without giving up control of your infrastructure or data.</p></article>
+      <article class="feature"><h3>Freelancers</h3><p>Deploy, update and hand over projects in minutes, and keep all your servers and domains in one place.</p></article>
+      <article class="feature"><h3>IT &amp; DevOps teams</h3><p>Standardise how servers are set up, give developers safe self-service, and keep a record of every change.</p></article>
+    </div>
+  </section>
+
+  <section class="landing-section alt" id="security">
+    <h2>Built to be trusted with root</h2>
+    <div class="two-col">
+      <ul class="tick-list">
+        <li><b>Your infrastructure only.</b> The panel talks straight to your servers over SSH. No agents, no vendor in the middle, no telemetry.</li>
+        <li><b>Encrypted at rest.</b> Every credential is AES-256-GCM encrypted with a master key that stays on your disk.</li>
+        <li><b>Roles enforced server-side.</b> The API checks permission on every change, whatever the browser sends.</li>
+      </ul>
+      <ul class="tick-list">
+        <li><b>Sessions you can end.</b> HttpOnly cookies with random tokens stored only as hashes; a new role or password signs that person out everywhere.</li>
+        <li><b>Careful with destructive work.</b> Removing an installation keeps its data volume unless you say otherwise.</li>
+        <li><b>Nothing typed into a shell.</b> Names, ports and units are validated against strict patterns before anything runs.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="landing-section pricing-section %%PRICING_HIDDEN%%" id="pricing">
+    <div class="pricing-head">
+      <div>
+        <h2>Simple pricing</h2>
+        <p class="section-lead">Start free on one server. Upgrade when you need more servers, apps and people.</p>
+      </div>
+      <div class="cycle-toggle" role="group" aria-label="Billing cycle">
+        <button type="button" class="active" data-cycle="monthly">Monthly</button>
+        <button type="button" data-cycle="yearly">Yearly <span class="save-tag" id="pricing-save"></span></button>
+      </div>
+    </div>
+    <div class="price-grid" id="price-grid"><!--PRICING_CARDS--></div>
+  </section>
+
+  <section class="landing-section alt" id="faq">
+    <h2>Frequently asked questions</h2>
+    <div class="faq-list"><!--FAQ--></div>
+    <p class="muted" style="margin-top:18px">Looking for step-by-step help? Read the <a href="/docs">AJ Pilot documentation</a>.</p>
+  </section>
+
+  <section class="landing-section" id="contact">
+    <div class="contact-grid">
+      <div>
+        <h2>Get started</h2>
+        <p class="section-lead">Tell us a little about what you run. We will set up your account and help you deploy your first app.</p>
+        <ul class="tick-list">
+          <li><b>Free plan</b> on one server to try everything.</li>
+          <li><b>Setup help</b> for your first server, app and domain.</li>
+          <li><b>A reply within one working day.</b></li>
+        </ul>
+        <p class="muted small">Already have an account? <a href="#top" id="link-contact-signin">Sign in</a>.</p>
+      </div>
+      <form class="card lead-form" id="form-lead" novalidate>
+        <div class="row">
+          <label>Your name<input name="name" required maxlength="190" autocomplete="name" /></label>
+          <label>Work email<input name="email" type="email" required maxlength="190" autocomplete="email" /></label>
+        </div>
+        <div class="row">
+          <label>Phone <span class="muted small">(optional)</span><input name="phone" type="tel" maxlength="40" autocomplete="tel" /></label>
+          <label>Company <span class="muted small">(optional)</span><input name="company" maxlength="190" autocomplete="organization" /></label>
+        </div>
+        <div class="row">
+          <label>Servers you run<select name="servers"><option value="">Choose…</option><option value="1">1</option><option value="2-5">2–5</option><option value="6-20">6–20</option><option value="20+">More than 20</option></select></label>
+          <label>Plan you are interested in<select name="plan_id" id="lead-plan"><option value="">Not sure yet</option></select></label>
+        </div>
+        <label>What would you like to do? <span class="muted small">(optional)</span><textarea name="message" rows="4" maxlength="5000" placeholder="e.g. Deploy three Next.js apps and a NestJS API with MySQL on two servers"></textarea></label>
+        <div class="hp" aria-hidden="true"><label>Leave this empty<input name="hp_check" type="text" tabindex="-1" autocomplete="off" data-lpignore="true" data-1p-ignore /></label></div>
+        <input type="hidden" name="cycle" value="monthly" />
+        <input type="hidden" name="form" value="contact" />
+        <div id="lead-msg" class="msg hidden" role="status"></div>
+        <button type="submit" class="btn primary big" style="width:100%;margin-top:14px">Send — we will get back to you</button>
+        <p class="muted small" style="margin:10px 0 0">We only use your details to reply to you. With your message we receive basic information about your browser and device (operating system, screen, language, timezone), your IP address and its approximate location, and a random ID this browser keeps so we can recognise a repeat enquiry.</p>
+      </form>
+    </div>
+  </section>
+
+  <section class="landing-section alt" id="about">
+    <h2>About AJ Pilot</h2>
+    <div class="about-grid">
+      <div>
+        <p>
+          AJ Pilot started as a way to stop keeping a dozen SSH sessions open just to answer simple questions:
+          what is running on that box, is the disk filling up, which port is that, did the app come back after the reboot.
+        </p>
+        <p>
+          It grew into a complete control panel: servers, apps, domains, databases and teams, all in one place.
+          It is a single Node.js process with a MySQL database and a plain browser UI — and everything it does, it does
+          over the same SSH connection you would have used by hand, telling you exactly what it ran when something fails.
+        </p>
+      </div>
+      <div class="about-stats">
+        <div class="stat"><b>7</b><span>frameworks detected</span></div>
+        <div class="stat"><b>8</b><span>one-click services</span></div>
+        <div class="stat"><b>0</b><span>agents on your servers</span></div>
+        <div class="stat"><b>AES-256</b><span>on every secret</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <h2>Ready to deploy?</h2>
+    <p class="muted">Start on the free plan, or sign in if you already have an account.</p>
+    <button class="btn primary big" id="btn-cta">Get started free</button>
+  </section>
+  </main>
+
+  <footer class="landing-foot">
+    <div>
+      <span class="foot-brand"><span class="logo small" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span> AJ Pilot — autopilot for your servers</span>
+      <nav class="foot-links" aria-label="Footer">
+        <a href="#features">Features</a><a href="#deploy">Deploy</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a><a href="/docs">Docs</a><a href="#contact">Contact</a>
+      </nav>
+    </div>
+    <span class="muted small">© <span id="year">2026</span> AJ Pilot. Runs on your hardware — your keys never leave it.</span>
+  </footer>
+</div>
+
+<!-- ------------------------------------------------------- sign-in gate -->
+<div class="gate hidden" id="auth-gate">
+  <div class="gate-card">
+    <button type="button" class="gate-close" id="btn-close-gate" aria-label="Close">✕</button>
+    <div class="brand" style="justify-content:center;margin-bottom:18px">
+      <span class="logo"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span><div><strong>AJ Pilot</strong><small>autopilot for your servers</small></div>
+    </div>
+
+    <!-- first run: there are no accounts yet -->
+    <form id="form-setup" class="hidden">
+      <h2>Set up your panel</h2>
+      <p class="muted small">
+        Nobody has an account here yet. The first one is the <b>super admin</b>: it runs the platform —
+        client organisations, their people, plans and payments — and belongs to no organisation itself.
+      </p>
+      <div class="row">
+        <label>Your name<input name="name" placeholder="Jane Doe" required /></label>
+        <label>Email<input name="email" type="email" placeholder="jane@company.com" required autocomplete="username" /></label>
+      </div>
+      <label>Mobile number <span class="muted small">(with country code)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" required /></label>
+      <label>Password<input name="password" type="password" required autocomplete="new-password" /></label>
+      <p class="muted small">At least 10 characters, with letters and numbers.</p>
+      <div id="setup-msg" class="msg hidden"></div>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Create the super admin</button>
+    </form>
+
+    <!-- every run after that -->
+    <form id="form-login" class="hidden">
+      <h2>Sign in</h2>
+      <p class="muted small">Your servers and credentials are behind this.</p>
+      <label>Email<input name="email" type="email" required autocomplete="username" /></label>
+      <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
+      <div id="login-msg" class="msg hidden"></div>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Sign in</button>
+      <p class="muted small" style="margin-top:14px">No account? An admin of your organisation creates one for you.</p>
+    </form>
+  </div>
+</div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <span class="logo"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span>
+    <div class="brand-text"><strong>AJ Pilot</strong><small>autopilot for your servers</small></div>
+    <button class="nav-toggle" id="btn-nav-toggle" title="Collapse the sidebar" aria-label="Collapse the sidebar">«</button>
+  </div>
+  <nav>
+    <!-- a super admin on the platform -->
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="dashboard" title="Dashboard"><span class="nav-icon">📊</span><span class="nav-label">Dashboard</span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="leads" title="Leads"><span class="nav-icon">🎯</span><span class="nav-label">Leads</span><span class="nav-badge" id="nav-leads-badge" hidden></span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="leads" data-leadform="contact" title="Contact leads"><span class="nav-icon">✉️</span><span class="nav-label">Contact leads</span><span class="nav-badge" id="nav-contact-badge" hidden></span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="leadstats" title="Lead analysis"><span class="nav-icon">📈</span><span class="nav-label">Lead analysis</span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="orgs" title="Organisations"><span class="nav-icon">🏢</span><span class="nav-label">Organisations</span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="users" title="Clients"><span class="nav-icon">👥</span><span class="nav-label">Clients</span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="plans" title="Plans"><span class="nav-icon">💎</span><span class="nav-label">Plans</span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="payments" title="Payments"><span class="nav-icon">💳</span><span class="nav-label">Payments</span></button>
+    <button class="nav-item pf-nav" data-view="platform" data-pftab="admins" title="Super admins"><span class="nav-icon">👑</span><span class="nav-label">Super admins</span></button>
+    <button class="nav-item pf-nav" data-view="docs" title="Docs"><span class="nav-icon">📘</span><span class="nav-label">Docs</span></button>
+
+    <!-- a client organisation (or a super admin who opened one) -->
+    <button class="nav-item client-nav active" data-view="servers" title="Servers"><span class="nav-icon">🖥️</span><span class="nav-label">Servers</span></button>
+    <button class="nav-item client-nav" data-view="apps" title="Apps"><span class="nav-icon">🚀</span><span class="nav-label">Apps</span></button>
+    <button class="nav-item client-nav" data-view="installs" title="Installations"><span class="nav-icon">📦</span><span class="nav-label">Installations</span></button>
+    <button class="nav-item client-nav" data-view="databases" title="Databases"><span class="nav-icon">🗄️</span><span class="nav-label">Databases</span></button>
+    <button class="nav-item client-nav" data-view="accounts" title="Account management"><span class="nav-icon">🔑</span><span class="nav-label">Account management</span></button>
+    <button class="nav-item client-nav" data-view="billing" title="Plan &amp; billing"><span class="nav-icon">💎</span><span class="nav-label">Plan &amp; billing</span></button>
+    <button class="nav-item client-nav" data-view="docs" title="Docs"><span class="nav-icon">📘</span><span class="nav-label">Docs</span></button>
+    <button class="nav-item sa-back" data-view="platform-back" title="Back to super admin"><span class="nav-icon">👑</span><span class="nav-label">Back to super admin</span></button>
+  </nav>
+  <div class="sidebar-foot">
+    <div class="health"><span class="dot" id="health-dot"></span><span id="health-text">connecting…</span></div>
+  </div>
+</aside>
+
+<div class="shell">
+  <header class="topbar">
+    <div class="topbar-title">
+      <h2 id="topbar-heading">Servers</h2>
+      <span class="muted small" id="topbar-org">—</span>
+    </div>
+
+    <div class="topbar-right">
+      <div class="theme-menu">
+        <button type="button" class="icon-btn" data-theme-toggle aria-haspopup="true" aria-expanded="false" title="Theme">
+          <span class="theme-current" aria-hidden="true">🌙</span><span class="sr-only">Theme</span>
+        </button>
+        <div class="menu-pop hidden" role="menu">
+          <div class="menu-title">Theme</div>
+          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="light"><span class="dropdown-icon">☀️</span>Light<span class="menu-check">✓</span></button>
+          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="dark"><span class="dropdown-icon">🌙</span>Dark<span class="menu-check">✓</span></button>
+          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="system"><span class="dropdown-icon">🖥️</span>System<span class="menu-check">✓</span></button>
+        </div>
+      </div>
+
+      <span class="org-pick hidden" id="org-pick"></span>
+
+      <div class="user-menu">
+        <button class="user-button" id="btn-user-menu" aria-haspopup="true" aria-expanded="false">
+          <span class="who-avatar" id="who-avatar">—</span>
+          <span class="user-button-text">
+            <span class="who-name" id="who-name">—</span>
+            <span class="who-org muted small" id="who-org">—</span>
+          </span>
+          <span class="caret">▾</span>
+        </button>
+        <div class="user-dropdown hidden" id="user-dropdown">
+          <div class="dropdown-head">
+            <div id="menu-name">—</div>
+            <div class="muted small" id="menu-email">—</div>
+          </div>
+          <button class="dropdown-item" id="btn-edit-profile"><span class="dropdown-icon">👤</span>Edit profile</button>
+          <button class="dropdown-item" id="btn-password"><span class="dropdown-icon">🔒</span>Change password</button>
+          <div class="dropdown-sep"></div>
+          <button class="dropdown-item" id="btn-open-settings"><span class="dropdown-icon">⚙️</span>Settings</button>
+          <button class="dropdown-item" id="btn-open-activity"><span class="dropdown-icon">📋</span>Activity</button>
+          <button class="dropdown-item" id="btn-open-docs"><span class="dropdown-icon">📘</span>Help &amp; docs</button>
+          <div class="dropdown-sep"></div>
+          <button class="dropdown-item danger" id="btn-signout"><span class="dropdown-icon">↩</span>Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+<main>
+  <div class="sa-banner" id="sa-banner">
+    <span>👑 You are inside <b id="sa-banner-org">—</b> as super admin. Changes here are made on this client's behalf.</span>
+    <button class="btn tiny" id="btn-sa-leave">Back to super admin</button>
+  </div>
+
+  <!-- ------------------------------------------------------------ docs -->
+  <section id="view-docs" class="view hidden">
+    <header class="page-head">
+      <div><h2 class="page-title">Docs</h2><p class="muted">Step-by-step guides for everything in AJ Pilot.</p></div>
+      <div class="actions"><a class="btn" href="/docs" target="_blank" rel="noopener">Open public docs ↗</a></div>
+    </header>
+    <div class="docs-shell in-app">
+      <aside class="docs-side">
+        <input type="search" class="docs-search" id="app-docs-search" placeholder="Search the docs…" aria-label="Search the docs" />
+        <nav id="app-docs-nav"></nav>
+      </aside>
+      <div class="docs-main" id="app-docs-body"><div class="empty">Loading…</div></div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------- a client's plan -->
+  <section id="view-billing" class="view hidden">
+    <header class="page-head"><div><h2 class="page-title">Plan &amp; billing</h2><p class="muted" id="billing-sub">Your organisation's plan and what it allows.</p></div></header>
+    <div id="billing-body"><div class="empty">Loading…</div></div>
+  </section>
+
+  <!-- ------------------------------------------------------ servers -->
+  <section id="view-servers" class="view">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Servers</h2>
+        <p class="muted">Add an Ubuntu server, connect over SSH and read its full system profile.</p>
+        <p class="muted small" id="server-list-updated">&nbsp;</p>
+      </div>
+      <button class="btn primary" id="btn-add-server" data-needs="create">+ Add server</button>
+    </header>
+    <div id="server-list" class="grid"></div>
+  </section>
+
+  <!-- ------------------------------------------------ server detail -->
+  <section id="view-server-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-back">← Servers</button>
+        <h2 class="page-title" id="detail-name">—</h2>
+        <p class="muted" id="detail-sub">—</p>
+        <p class="muted small" id="detail-status">&nbsp;</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-detail-test">Test connection</button>
+        <button class="btn" id="btn-detail-edit" data-needs="edit">Edit server</button>
+        <button class="btn" id="btn-add-service" data-needs="create">+ Add service</button>
+        <button class="btn primary" id="btn-detail-refresh">Fetch system details</button>
+      </div>
+    </header>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="detail-tabs"></nav>
+      <div id="detail-body" class="tab-content"></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ apps -->
+  <section id="view-apps" class="view hidden">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Apps</h2>
+        <p class="muted">Deploy a Node.js repository straight onto one of your servers: cloned, built into an image, and run as a container.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-apps-refresh">Refresh</button>
+        <button class="btn primary" id="btn-add-app" data-needs="create">+ Custom service</button>
+      </div>
+    </header>
+    <div id="app-list"></div>
+  </section>
+
+  <!-- -------------------------------------------------- installations -->
+  <section id="view-installs" class="view hidden">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Installations</h2>
+        <p class="muted">Install Docker on a server, then run everything else on it as a container. Nothing here is installed onto the machine by hand.</p>
+      </div>
+      <button class="btn" id="btn-installs-refresh">Refresh</button>
+    </header>
+    <div id="install-catalog" class="cards"></div>
+    <div class="section" id="install-list-panel" style="margin-top:26px"></div>
+  </section>
+
+  <!-- --------------------------------------------- account management -->
+  <section id="view-accounts" class="view hidden">
+    <header class="page-head">
+      <div><h2 class="page-title">Account management</h2><p class="muted" id="accounts-intro">—</p></div>
+      <div class="actions">
+        <button class="btn primary" id="btn-add-git-account" data-needs="create">+ Add git account</button>
+        <button class="btn primary hidden" id="btn-add-cloudflare" data-needs="create">+ Connect Cloudflare</button>
+        <button class="btn primary hidden" id="btn-add-dockerhub" data-needs="create">+ Connect Docker Hub</button>
+      </div>
+    </header>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="accounts-tabs"></nav>
+      <div class="tab-content">
+        <div class="tab-panel" data-accounts-panel="git"><div id="git-list" class="grid"></div></div>
+        <div class="tab-panel" data-accounts-panel="cloudflare" hidden><div id="cf-list" class="grid"></div></div>
+        <div class="tab-panel" data-accounts-panel="dockerhub" hidden><div id="cred-list" class="grid"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------- git detail -->
+  <section id="view-git-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-git-back">← Account management</button>
+        <h2 class="page-title" id="git-name">—</h2>
+        <p class="muted" id="git-sub">—</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-git-reauth">Re-authenticate</button>
+        <button class="btn" id="btn-git-add-runner" data-needs="create">+ Add runner</button>
+        <button class="btn primary" id="btn-git-repos">Refresh repositories</button>
+      </div>
+    </header>
+    <div id="git-body"></div>
+  </section>
+
+  <!-- ----------------------------------------------- cloudflare detail -->
+  <section id="view-cf-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-cf-back">← Account management</button>
+        <h2 class="page-title" id="cf-name">—</h2>
+        <p class="muted" id="cf-sub">—</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-cf-zt">Zero Trust</button>
+        <button class="btn primary" id="btn-cf-refresh">Refresh details</button>
+      </div>
+    </header>
+    <div id="cf-body"></div>
+  </section>
+
+  <!-- ----------------------------------------------- docker hub detail -->
+  <section id="view-dh-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-dh-back">← Account management</button>
+        <h2 class="page-title" id="dh-title">—</h2>
+        <p class="muted" id="dh-sub">—</p>
+      </div>
+      <div class="actions">
+        <select id="dh-namespace" title="Account or organisation"></select>
+        <button class="btn" id="btn-dh-refresh">Refresh</button>
+        <button class="btn primary" id="btn-dh-connect-top" data-needs="create">+ Connect Docker Hub</button>
+      </div>
+    </header>
+    <div id="dh-body"></div>
+  </section>
+
+  <!-- ---------------------------------------------------- databases -->
+  <section id="view-databases" class="view hidden">
+    <header class="page-head">
+      <div><h2 class="page-title">Databases</h2><p class="muted">MySQL, PostgreSQL, MongoDB and Redis on your machines — statistics, databases, users and configuration. Connections tied to a server are tunnelled over its SSH.</p></div>
+      <button class="btn primary" id="btn-add-mysql" data-needs="create">+ Add database connection</button>
+    </header>
+    <div class="chips" id="db-engine-filter" style="margin-bottom:14px"></div>
+    <div id="mysql-list" class="grid"></div>
+  </section>
+
+  <!-- ------------------------------ postgres / mongodb / redis detail -->
+  <section id="view-db-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-db-back">← Databases</button>
+        <h2 class="page-title" id="db-name">—</h2>
+        <p class="muted" id="db-sub">—</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-db-edit" data-needs="edit">Edit connection</button>
+        <button class="btn" id="btn-db-query">Run query</button>
+        <button class="btn primary" id="btn-db-refresh">Refresh</button>
+      </div>
+    </header>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="db-tabs"></nav>
+      <div id="db-body" class="tab-content"></div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------- mysql detail -->
+  <section id="view-mysql-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-mysql-back">← Databases</button>
+        <h2 class="page-title" id="mysql-name">—</h2>
+        <p class="muted" id="mysql-sub">—</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-mysql-edit" data-needs="edit">Edit connection</button>
+        <button class="btn" id="btn-mysql-query">Run query</button>
+        <button class="btn primary" id="btn-mysql-refresh">Refresh</button>
+      </div>
+    </header>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="mysql-tabs"></nav>
+      <div id="mysql-body" class="tab-content"></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ super admin -->
+  <section id="view-platform" class="view hidden">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title" id="pf-title">Dashboard</h2>
+        <p class="muted" id="pf-sub"></p>
+      </div>
+      <div class="actions" id="pf-actions"></div>
+    </header>
+    <div id="pf-body"></div>
+  </section>
+
+  <!-- ------------------------------------------ custom service details -->
+  <section id="view-app-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-app-detail-back">← Apps</button>
+        <h2 class="page-title" id="ad-title">—</h2>
+        <p class="muted" id="ad-sub">—</p>
+        <p style="margin:8px 0 0" id="ad-state"></p>
+      </div>
+    </header>
+    <div class="actions" id="ad-actions" style="margin:-8px 0 22px"></div>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="ad-tabs"></nav>
+      <div id="ad-body" class="tab-content"></div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------- settings -->
+  <section id="view-settings" class="view hidden">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Settings</h2>
+        <p class="muted">Your account, the people in this organisation, and the panel itself.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-add-org" data-needs="orgs">+ Organisation</button>
+        <button class="btn primary" id="btn-add-member" data-needs="members">+ Add person</button>
+      </div>
+    </header>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="settings-tabs"></nav>
+      <div id="settings-body" class="tab-content"></div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------- activity -->
+  <section id="view-activity" class="view hidden">
+    <header class="page-head"><div><h2 class="page-title">Activity</h2><p class="muted">Last 50 actions.</p></div></header>
+    <div id="activity-list" class="card"></div>
+  </section>
+</main>
+</div>
+
+<!-- ----------------------------------------------- add server modal -->
+<div class="modal-backdrop hidden" id="modal-server">
+  <div class="modal">
+    <h2 id="server-modal-title">Add server</h2>
+    <p class="muted small" id="server-modal-hint">Ubuntu hosts only. Credentials are encrypted before they touch disk.</p>
+    <form id="form-server">
+      <div class="row">
+        <label>Name<input name="name" placeholder="prod-web-01" required /></label>
+        <label>Host / IP<input name="host" placeholder="203.0.113.10" required /></label>
+        <label class="narrow">Port<input name="port" type="number" value="22" required /></label>
+      </div>
+      <div class="row">
+        <label>SSH username<input name="username" placeholder="root" required /></label>
+        <label>Authentication
+          <select name="auth_type">
+            <option value="password">Password</option>
+            <option value="key">Private key</option>
+          </select>
+        </label>
+      </div>
+      <label id="field-password">Password<input name="password" type="password" autocomplete="off" /></label>
+      <div id="field-key" class="hidden">
+        <label>Private key (full PEM / OpenSSH block)
+          <textarea name="private_key" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----"></textarea>
+        </label>
+        <label>Key passphrase <span class="muted small">(optional)</span><input name="passphrase" type="password" autocomplete="off" /></label>
+      </div>
+      <label>Sudo password <span class="muted small">(optional — only if this user needs one for sudo)</span>
+        <input name="sudo_password" type="password" autocomplete="off" />
+      </label>
+      <p class="muted small" style="margin:6px 0 0">Managing services and installing runners needs root. Leave this empty when you connect as root or the user has passwordless sudo.</p>
+      <div class="row">
+        <label>Tags <span class="muted small">(comma separated)</span><input name="tags" placeholder="production, web" /></label>
+        <label>Notes<input name="notes" placeholder="Hetzner CX41, Mumbai" /></label>
+      </div>
+      <div id="server-form-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="button" class="btn" id="btn-test-conn">Test connection</button>
+        <button type="submit" class="btn primary" id="btn-server-save">Save &amp; connect</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------- add credential modal -->
+<div class="modal-backdrop hidden" id="modal-cred">
+  <div class="modal">
+    <h2 id="cred-title">Add credential</h2>
+    <form id="form-cred">
+      <div class="row">
+        <label>Provider
+          <select name="provider">
+            <option value="git">Git (GitHub)</option>
+            <option value="dockerhub">Docker Hub</option>
+            <option value="cloudflare">Cloudflare</option>
+            <option value="mysql">MySQL</option>
+            <option value="postgres">PostgreSQL</option>
+            <option value="mongodb">MongoDB</option>
+            <option value="redis">Redis</option>
+          </select>
+        </label>
+        <label>Name<input name="name" placeholder="main-github" required /></label>
+      </div>
+
+      <div id="cred-git-fields" class="hidden">
+        <div class="row">
+          <label>Hosting
+            <select name="kind">
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
+              <option value="bitbucket">Bitbucket</option>
+            </select>
+          </label>
+          <label id="cred-apiurl-field">API URL <span class="muted small">(self-hosted only)</span><input name="apiUrl" placeholder="https://api.github.com" /></label>
+          <label id="cred-authuser-field" class="hidden">Atlassian email <span class="muted small">(API token only)</span><input name="authUser" placeholder="you@example.com" autocomplete="off" /></label>
+        </div>
+        <p class="muted small hidden" id="cred-bitbucket-hint" style="margin:6px 0 0">
+          Use an <b>Atlassian API token</b> with your account email, or a <b>workspace / repository access token</b> with the email left empty.
+          It needs read access to your account, workspaces and repositories.
+        </p>
+      </div>
+
+      <div id="cred-mysql-fields" class="hidden">
+        <label>Connect through server
+          <select name="server_id">
+            <option value="">Direct connection (no tunnel)</option>
+          </select>
+        </label>
+        <p class="muted small" style="margin:6px 0 0">Databases usually listen on 127.0.0.1 only. Pick the server it runs on and the panel reaches it over that server's SSH connection.</p>
+        <div class="row">
+          <label>Host<input name="host" value="127.0.0.1" /></label>
+          <label class="narrow">Port<input name="port" type="number" value="3306" /></label>
+        </div>
+        <div class="row">
+          <label><span id="cred-db-label">Default database</span> <span class="muted small">(optional)</span><input name="database" placeholder="leave empty to see all databases" /></label>
+          <label id="cred-authsource-field" class="hidden">Auth database<input name="authSource" value="admin" /></label>
+        </div>
+        <label class="check hidden" id="cred-tls-field" style="margin-top:10px"><input type="checkbox" name="tls" /> Use TLS (managed / cloud databases usually need it)</label>
+      </div>
+
+      <label id="cred-username-field">Username<input name="username" placeholder="account username" /></label>
+      <label>Token / password<input name="secret" type="password" autocomplete="off" required /></label>
+      <p class="muted small" id="cred-hint"></p>
+      <div id="cred-form-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="button" class="btn hidden" id="btn-test-mysql">Test connection</button>
+        <button type="button" class="btn hidden" id="btn-test-git">Authenticate</button>
+        <button type="submit" class="btn primary" id="btn-cred-save">Save credential</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ add git account -->
+<div class="modal-backdrop hidden" id="modal-git">
+  <div class="modal" style="max-width:560px">
+    <h2>Add git account</h2>
+
+    <!-- step 1: pick where the code lives -->
+    <div id="git-step-provider">
+      <p class="muted small">Where does your code live? You will sign in on their site and choose your account there.</p>
+      <div class="provider-picker">
+        <button class="provider" data-pick="github">
+          <svg viewBox="0 0 16 16" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span><b>GitHub</b><small>github.com or Enterprise</small></span>
+        </button>
+        <button class="provider" data-pick="gitlab">
+          <svg viewBox="0 0 16 16" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="m8 15-2.2-6.8H10.2L8 15Zm-5.8-6.8H5.8L8 15 2.2 8.2Zm-.9-.9L.4 9.9c-.1.4 0 .8.3 1L8 15 1.3 7.3Zm.9.9L2.2 1.6c0-.2.3-.3.4-.1l1.6 5h-2Zm11.6 0h-2l1.6-5c.1-.2.4-.1.4.1l0 4.9ZM8 15l7.3-4.1c.3-.2.4-.6.3-1l-.9-2.6L8 15Zm5.8-6.8H10.2L8 15l5.8-6.8Z"/></svg>
+          <span><b>GitLab</b><small>gitlab.com or self-hosted</small></span>
+        </button>
+        <button class="provider" data-pick="bitbucket">
+          <svg viewBox="0 0 16 16" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M.5 1.3a.5.5 0 0 0-.5.58l2.1 12.86c.05.33.33.56.66.56h10.33a.5.5 0 0 0 .5-.42L15.99 1.9a.5.5 0 0 0-.5-.58L.5 1.3Zm9.12 9.3H6.4L5.53 6.05h4.87l-.78 4.55Z"/></svg>
+          <span><b>Bitbucket</b><small>bitbucket.org</small></span>
+        </button>
+      </div>
+      <p class="muted small" style="margin-top:16px">
+        Prefer not to sign in? <button type="button" class="link-inline" id="link-manual-token">Paste an access token instead</button>
+      </p>
+    </div>
+
+    <!-- step 2: only shown the first time, to register the app -->
+    <div id="git-step-setup" class="hidden">
+      <p class="muted small" id="setup-intro"></p>
+      <ol class="setup-steps">
+        <li>
+          <b>Create the app</b>
+          <p class="muted small" id="setup-hint"></p>
+          <button type="button" class="btn" id="btn-open-register">Open <span id="setup-provider-name">GitHub</span> ↗</button>
+          <div class="callback-box">
+            Callback URL — paste this into the form:
+            <code id="setup-callback"></code>
+            <button type="button" class="btn tiny" id="btn-copy-callback">Copy</button>
+          </div>
+        </li>
+        <li>
+          <b>Paste what the app page gives you back</b>
+          <p class="muted small" id="setup-id-hint"></p>
+          <label>Client ID<input id="setup-client-id" autocomplete="off" spellcheck="false" /></label>
+          <label>Client secret<input id="setup-client-secret" type="password" autocomplete="off" /></label>
+          <p class="muted small">These come from the app you just created — not your username, email or password.</p>
+        </li>
+      </ol>
+      <div id="git-setup-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="btn-setup-back">← Back</button>
+        <button type="button" class="btn primary" id="btn-setup-save">Save &amp; sign in</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">You only do this once. It is saved to your <code>.env</code>.</p>
+    </div>
+
+    <!-- step 3: waiting on the popup -->
+    <div id="git-step-waiting" class="hidden">
+      <p><span class="spinner"></span> Waiting for you to finish signing in…</p>
+      <p class="muted small">A window opened at your git provider. Choose the account you want to connect and approve access.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="button" class="btn" id="btn-reopen-popup">Reopen the sign-in window</button>
+      </div>
+    </div>
+
+    <div class="modal-actions" id="git-modal-close-row">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------ connect cloudflare -->
+<div class="modal-backdrop hidden" id="modal-cloudflare">
+  <div class="modal" style="max-width:560px">
+    <h2>Connect Cloudflare</h2>
+
+    <!-- step 1: open the dashboard -->
+    <div id="cf-step-start">
+      <p class="muted small">You sign in on Cloudflare itself. The panel opens your dashboard with an API token already filled in — you only press <b>Continue to summary</b> and <b>Create Token</b>.</p>
+      <ol class="setup-steps">
+        <li>
+          <b>Sign in and create the token</b>
+          <p class="muted small">The token is limited to: <span id="cf-permissions"></span>, on all your zones.</p>
+          <button type="button" class="btn primary" id="btn-cf-open">Sign in with Cloudflare ↗</button>
+        </li>
+        <li>
+          <b>Bring the token back</b>
+          <p class="muted small">Cloudflare shows the token once, with a <b>Copy</b> button. Copy it and come back — the panel picks it up from your clipboard, or paste it below.</p>
+          <label>API token<input id="cf-token" type="password" autocomplete="off" spellcheck="false" placeholder="paste the token here" /></label>
+          <label>Name <span class="muted small">(optional — defaults to your Cloudflare email)</span><input id="cf-token-name" autocomplete="off" /></label>
+        </li>
+      </ol>
+      <p class="muted small" id="cf-waiting" hidden><span class="spinner"></span> Waiting for the token… <span id="cf-timer">0:00</span></p>
+      <div id="cf-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="button" class="btn primary" id="btn-cf-connect">Connect</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------- connect docker hub -->
+<div class="modal-backdrop hidden" id="modal-dockerhub">
+  <div class="modal" style="max-width:560px">
+    <h2>Connect Docker Hub</h2>
+    <p class="muted small">You sign in on Docker Hub itself and create an access token there. The panel picks it up, signs in with it and reads your account — no password is stored.</p>
+    <ol class="setup-steps">
+      <li>
+        <b>Your Docker ID</b>
+        <label>Docker ID <span class="muted small">(your username, not your email)</span><input id="dh-username" autocomplete="username" spellcheck="false" placeholder="yourname" /></label>
+      </li>
+      <li>
+        <b>Sign in and create the token</b>
+        <p class="muted small">In the page that opens: description <code id="dh-description">AJ Pilot</code>, access permissions <b>Read, Write, Delete</b> (so deploys can push images), then <b>Generate</b>.</p>
+        <button type="button" class="btn primary" id="btn-dh-open">Sign in with Docker Hub ↗</button>
+      </li>
+      <li>
+        <b>Bring the token back</b>
+        <p class="muted small">Docker Hub shows the token once, with a <b>Copy</b> button. Copy it and come back — the panel picks it up from your clipboard, or paste it below.</p>
+        <label>Access token<input id="dh-token" type="password" autocomplete="off" spellcheck="false" placeholder="dckr_pat_…" /></label>
+        <label>Name <span class="muted small">(optional — defaults to your Docker ID)</span><input id="dh-name" autocomplete="off" /></label>
+      </li>
+    </ol>
+    <p class="muted small" id="dh-waiting" hidden><span class="spinner"></span> Waiting for the token… <span id="dh-timer">0:00</span></p>
+    <div id="dh-msg" class="msg hidden"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Cancel</button>
+      <button type="button" class="btn primary" id="btn-dh-connect">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ dns record modal -->
+<div class="modal-backdrop hidden" id="modal-dns">
+  <div class="modal" style="max-width:560px">
+    <h2 id="dns-title">Add DNS record</h2>
+    <p class="muted small" id="dns-zone-note"></p>
+    <form id="form-dns">
+      <div class="row">
+        <label class="narrow">Type
+          <select name="type" id="dns-type">
+            <option>A</option><option>AAAA</option><option>CNAME</option><option>TXT</option>
+            <option>MX</option><option>NS</option><option>PTR</option>
+          </select>
+        </label>
+        <label>Name<input name="name" id="dns-name" placeholder="@ for the domain itself, or www" autocomplete="off" spellcheck="false" required /></label>
+      </div>
+      <label><span id="dns-content-label">IPv4 address</span><input name="content" id="dns-content" autocomplete="off" spellcheck="false" required /></label>
+      <div class="row">
+        <label>TTL
+          <select name="ttl" id="dns-ttl">
+            <option value="1">Auto</option>
+            <option value="60">1 min</option><option value="300">5 min</option><option value="1800">30 min</option>
+            <option value="3600">1 hour</option><option value="14400">4 hours</option><option value="86400">1 day</option>
+          </select>
+        </label>
+        <label class="narrow hidden" id="dns-priority-field">Priority<input name="priority" type="number" min="0" max="65535" value="10" /></label>
+      </div>
+      <label class="check" id="dns-proxied-field"><input type="checkbox" name="proxied" id="dns-proxied" /> Proxied through Cloudflare (orange cloud — hides the origin IP, TTL becomes Auto)</label>
+      <label>Comment <span class="muted small">(optional)</span><input name="comment" maxlength="100" autocomplete="off" /></label>
+      <div id="dns-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-dns-save">Add record</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- -------------------------------------------------- nginx upstream -->
+<div class="modal-backdrop hidden" id="modal-upstream">
+  <div class="modal" style="max-width:820px">
+    <h2 id="upstream-title">Add upstream</h2>
+    <p class="muted small" id="upstream-note"></p>
+    <form id="form-upstream">
+      <div class="row">
+        <label>Name<input name="name" id="upstream-name" placeholder="app_backend" autocomplete="off" spellcheck="false" required /></label>
+        <label class="narrow">Balancing
+          <select name="method" id="upstream-method">
+            <option value="round-robin">Round robin</option>
+            <option value="least_conn">Least connections</option>
+            <option value="ip_hash">IP hash (sticky)</option>
+            <option value="hash">Hash on a key</option>
+            <option value="random">Random</option>
+          </select>
+        </label>
+        <label class="narrow hidden" id="upstream-hash-field">Hash key<input name="hashKey" placeholder="$remote_addr" autocomplete="off" spellcheck="false" /></label>
+        <label class="narrow">Keepalive <span class="muted small">(optional)</span><input name="keepalive" type="number" min="1" max="10000" placeholder="32" /></label>
+      </div>
+      <div class="section-head" style="margin-top:6px"><h3 style="margin:0">Servers</h3>
+        <div class="section-tools"><button type="button" class="btn tiny" id="btn-upstream-add-server">+ Add server / port</button></div>
+      </div>
+      <p class="muted small" style="margin:4px 0 8px">A bare port like <code>3004</code> means a port on this server (127.0.0.1). Traffic is shared by weight; a <b>backup</b> only gets traffic when the others fail, and <b>down</b> takes a server out without deleting it.</p>
+      <div style="overflow-x:auto">
+        <table class="small" id="upstream-servers">
+          <thead><tr><th>Address (host:port)</th><th>Weight</th><th>Max fails</th><th>Fail timeout</th><th>Max conns</th><th>Backup</th><th>Down</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="upstream-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-upstream-save">Add upstream</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ---------------------------------------------- zero trust: tunnel -->
+<div class="modal-backdrop hidden" id="modal-tunnel">
+  <div class="modal" style="max-width:640px">
+    <h2 id="tunnel-title">Create tunnel</h2>
+    <form id="form-tunnel">
+      <p class="muted small">A tunnel connects a machine to Cloudflare without opening any ports. Name it after the machine or network it runs on.</p>
+      <label>Tunnel name<input name="name" id="tunnel-name" placeholder="office-pc or web-server-1" maxlength="64" autocomplete="off" spellcheck="false" required /></label>
+      <div id="tunnel-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-tunnel-save">Create tunnel</button>
+      </div>
+    </form>
+    <div id="tunnel-install" hidden>
+      <p class="muted small">Run one of these on the machine the tunnel should run on. It shows as <b>healthy</b> once cloudflared connects. The token is a secret — anyone with it can run this tunnel.</p>
+      <div id="tunnel-os" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>
+      <pre class="log" id="tunnel-cmd" style="white-space:pre-wrap;word-break:break-all"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btn-tunnel-copy">Copy command</button>
+        <button type="button" class="btn primary" data-close>Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- -------------------------------------- zero trust: public hostname -->
+<div class="modal-backdrop hidden" id="modal-hostname">
+  <div class="modal" style="max-width:600px">
+    <h2 id="hostname-title">Add public hostname</h2>
+    <p class="muted small" id="hostname-note"></p>
+    <form id="form-hostname">
+      <label>Tunnel<select name="tunnelId" id="hostname-tunnel" required></select></label>
+      <div class="row">
+        <label>Subdomain <span class="muted small">(blank for the domain itself)</span><input name="subdomain" id="hostname-sub" placeholder="app" autocomplete="off" spellcheck="false" /></label>
+        <label>Domain<select name="domain" id="hostname-domain" required></select></label>
+      </div>
+      <label>Path <span class="muted small">(optional — only requests under this path)</span><input name="path" placeholder="api" autocomplete="off" spellcheck="false" /></label>
+      <div class="row">
+        <label class="narrow">Service type
+          <select name="serviceType" id="hostname-type">
+            <option value="http">HTTP</option><option value="https">HTTPS</option>
+            <option value="ssh">SSH</option><option value="rdp">RDP (remote PC)</option>
+            <option value="tcp">TCP</option><option value="smb">SMB</option>
+            <option value="unix">UNIX socket</option><option value="http_status">HTTP status</option>
+          </select>
+        </label>
+        <label>URL<input name="serviceUrl" id="hostname-url" placeholder="localhost:8080" autocomplete="off" spellcheck="false" required /></label>
+      </div>
+      <label class="check"><input type="checkbox" name="noTLSVerify" /> Skip TLS verification of the origin (self-signed certificate)</label>
+      <label>HTTP Host header <span class="muted small">(optional)</span><input name="httpHostHeader" autocomplete="off" spellcheck="false" /></label>
+      <div id="hostname-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-hostname-save">Add hostname</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- --------------------------------------- zero trust: private network -->
+<div class="modal-backdrop hidden" id="modal-route">
+  <div class="modal" style="max-width:560px">
+    <h2 id="route-title">Add private network</h2>
+    <p class="muted small">PCs signed in with the Cloudflare WARP client can reach this range through the tunnel, as if they were on the network. WARP routing is switched on for the tunnel automatically.</p>
+    <form id="form-route">
+      <label>Network (CIDR)<input name="network" placeholder="10.0.0.0/24 or 192.168.1.20" autocomplete="off" spellcheck="false" required /></label>
+      <label>Tunnel<select name="tunnelId" id="route-tunnel" required></select></label>
+      <label>Comment <span class="muted small">(optional)</span><input name="comment" maxlength="100" autocomplete="off" /></label>
+      <div id="route-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-route-save">Add network</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------- member modal -->
+<div class="modal-backdrop hidden" id="modal-member">
+  <div class="modal" style="max-width:560px">
+    <h2 id="member-title">Add person</h2>
+    <p class="muted small">They sign in with this email and password, and can do whatever their role allows in <b id="member-org-name">this organisation</b>.</p>
+    <form id="form-member">
+      <div class="row">
+        <label>Name<input name="name" placeholder="Jane Doe" required /></label>
+        <label>Email<input name="email" type="email" placeholder="jane@company.com" required /></label>
+      </div>
+      <label id="member-phone-label">Mobile number <span class="muted small" id="member-phone-hint">(optional)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" /></label>
+      <label id="member-org-field" class="hidden">Organisation
+        <select name="org_id" id="member-org"></select>
+      </label>
+      <label>Role<select name="role" id="member-role"></select></label>
+      <p class="muted small" id="member-role-detail"></p>
+      <label id="member-password-label">Password<input name="password" type="password" autocomplete="new-password" /></label>
+      <label id="member-status-field" class="hidden">Account
+        <select name="status">
+          <option value="active">Active — can sign in</option>
+          <option value="disabled">Disabled — cannot sign in</option>
+        </select>
+      </label>
+      <div id="member-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-member-save">Add person</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------- organisation modal -->
+<div class="modal-backdrop hidden" id="modal-org">
+  <div class="modal" style="max-width:480px">
+    <h2 id="org-title">Add organisation</h2>
+    <p class="muted small">An organisation owns its own servers, credentials, runners and installations. Nothing is shared between them.</p>
+    <form id="form-org">
+      <label>Name<input name="name" placeholder="Acme Ltd" required /></label>
+      <label>Notes <span class="muted small">(optional)</span><input name="notes" placeholder="Production tenant" /></label>
+      <div id="org-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- --------------------------------------------------------- profile modal -->
+<div class="modal-backdrop hidden" id="modal-profile">
+  <div class="modal" style="max-width:460px">
+    <h2 id="profile-title">Edit profile</h2>
+    <p class="muted small" id="profile-intro">Your name is what other people in <b id="profile-org">this organisation</b> see next to your actions.</p>
+    <div class="msg info hidden" id="profile-phone-needed" style="margin:0 0 12px">📱 Admins and super admins need a mobile number on their account. Add yours to carry on.</div>
+    <form id="form-profile">
+      <label>Name<input name="name" required /></label>
+      <label>Email <span class="muted small">(this is what you sign in with)</span><input name="email" type="email" required /></label>
+      <label>Mobile number <span class="muted small" id="profile-phone-hint">(optional)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" /></label>
+      <div id="profile-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close id="btn-profile-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ---------------------------------------------------- password modal -->
+<div class="modal-backdrop hidden" id="modal-password">
+  <div class="modal" style="max-width:440px">
+    <h2>Change your password</h2>
+    <p class="muted small">Every other session you have open is signed out.</p>
+    <form id="form-password">
+      <label>Current password<input name="current" type="password" required autocomplete="current-password" /></label>
+      <label>New password<input name="password" type="password" required autocomplete="new-password" /></label>
+      <p class="muted small">At least 10 characters, with letters and numbers.</p>
+      <div id="password-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Change it</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------ install modal -->
+<div class="modal-backdrop hidden" id="modal-install">
+  <div class="modal">
+    <h2><span id="install-icon">📦</span> <span id="install-title">Install</span></h2>
+    <p class="muted small" id="install-detail"></p>
+    <form id="form-install">
+      <div class="row">
+        <label>Service
+          <select name="kind" id="install-kind" required></select>
+        </label>
+        <label>Install on server
+          <select name="server_id" id="install-server" required></select>
+        </label>
+      </div>
+
+      <div id="install-docker-state" class="msg hidden"></div>
+
+      <div id="install-container-fields">
+        <div class="row">
+          <label>Container name<input name="name" id="install-name" required /></label>
+          <label>Version<select name="tag" id="install-tag"></select></label>
+          <label class="narrow">Port<input name="port" id="install-port" type="number" min="1" max="65535" required /></label>
+        </div>
+
+        <div id="install-extra-ports"></div>
+
+        <div class="row">
+          <label>Docker network
+            <select name="network" id="install-network">
+              <option value="">Default bridge</option>
+            </select>
+          </label>
+          <label>Reachable from
+            <select name="bind">
+              <option value="all">Anywhere — 0.0.0.0</option>
+              <option value="localhost">This server only — 127.0.0.1</option>
+            </select>
+          </label>
+        </div>
+
+        <div id="install-fields"></div>
+      </div>
+
+      <div id="install-msg" class="msg hidden"></div>
+      <pre id="install-log" class="log hidden"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-install-go">Install</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">The image is pulled on the server, so a first install can take a minute.</p>
+    </form>
+  </div>
+</div>
+
+<!-- -------------------------------------------------------- deploy modal -->
+<div class="modal-backdrop hidden" id="modal-app">
+  <div class="modal" style="max-width:680px">
+    <h2>Custom service</h2>
+    <p class="muted small">
+      Pick a repository and the panel checks it is a Node.js project before anything else happens. It is then
+      cloned onto your server, built into a Docker image and run as a container.
+    </p>
+
+    <!-- step 1: which repository -->
+    <form id="form-app-pick">
+      <div class="row">
+        <label>Git account<select name="credential_id" id="app-account" required></select></label>
+        <label>Repository<select name="repo" id="app-repo" required></select></label>
+      </div>
+      <label>Branch<select name="branch" id="app-branch"></select></label>
+      <label>Project folder <span class="muted small">(for a repository with several projects in it)</span>
+        <select name="root_dir" id="app-folder"><option value="">Repository root</option></select>
+      </label>
+      <p class="muted small" style="margin:6px 0 0" id="app-folder-hint">Every folder with its own package.json on this branch is listed. Leave it on the root for a single-project repository.</p>
+      <div id="app-pick-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-app-inspect">Check this repository</button>
+      </div>
+    </form>
+
+    <!-- step 2: how to build and run it -->
+    <form id="form-app-deploy" class="hidden">
+      <div id="app-detected" class="msg ok"></div>
+
+      <div class="row">
+        <label>App name<input name="name" id="app-name" required /></label>
+        <label>Deploy onto<select name="server_id" id="app-server" required></select></label>
+      </div>
+
+      <label>Project type<select name="type" id="app-type"></select></label>
+      <p class="muted small" style="margin:6px 0 0" id="app-type-hint"></p>
+
+      <div class="row">
+        <label>Node version<select name="node_version" id="app-node"></select></label>
+        <label class="narrow">In container<input name="container_port" id="app-container-port" type="number" min="1" max="65535" required /></label>
+      </div>
+
+      <div class="field-block">
+        <div class="section-head" style="margin-bottom:6px">
+          <h2 style="font-size:13px">Containers</h2>
+          <div class="section-tools">
+            <button type="button" class="btn tiny" id="btn-app-add-container">+ Add container</button>
+          </div>
+        </div>
+        <div id="app-container-rows" class="item-rows"></div>
+        <p class="muted small" style="margin:8px 0 0">
+          One container per row, each published on the port you give it. Add as many as you need and
+          remove the ones you do not — the same list can be changed later without rebuilding.
+        </p>
+      </div>
+
+      <div class="field-block">
+        <div class="section-head" style="margin-bottom:6px">
+          <h2 style="font-size:13px">Volumes</h2>
+          <div class="section-tools">
+            <button type="button" class="btn tiny" id="btn-app-default-volume">Use the default</button>
+            <button type="button" class="btn tiny" id="btn-app-add-volume">+ Add volume</button>
+          </div>
+        </div>
+        <div id="app-volume-rows" class="item-rows"></div>
+        <p class="muted small" style="margin:8px 0 0" id="app-volume-hint">
+          Every deploy replaces the container, and anything written inside it goes with it. A volume is
+          where uploads, a SQLite file or generated files survive that. The default is
+          <code>&lt;name&gt;-data</code> mounted at <code>/app/data</code>.
+        </p>
+      </div>
+
+      <label>Install command<input name="install" id="app-install" /></label>
+      <label>Build command <span class="muted small">(leave empty if there is nothing to build)</span><input name="build" id="app-build" /></label>
+      <label id="app-start-field">Start command<input name="start" id="app-start" /></label>
+      <label id="app-output-field" class="hidden">Build output folder <span class="muted small">(served by nginx)</span>
+        <input name="output_dir" id="app-output" placeholder="dist" />
+      </label>
+
+      <label>Environment <span class="muted small">(one KEY=value per line — PORT is set for you)</span>
+        <textarea name="env" id="app-env" rows="3" placeholder="DATABASE_URL=mysql://…&#10;API_KEY=…"></textarea>
+      </label>
+      <div class="inline-tools">
+        <button type="button" class="btn tiny" id="btn-app-env-import">Import a .env file</button>
+        <input type="file" id="app-env-file" accept=".env,.txt,text/plain" hidden />
+        <span class="muted small" id="app-env-note">Imported exactly as written — comments and quotes included.</span>
+      </div>
+
+      <div class="row">
+        <label>Docker network<select name="network" id="app-network"><option value="">Default bridge</option></select></label>
+        <label>Restart policy
+          <select name="restart">
+            <option value="unless-stopped">unless-stopped</option>
+            <option value="always">always</option>
+            <option value="on-failure">on-failure</option>
+            <option value="no">no</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <label class="check" style="margin-bottom:8px">
+          <input type="checkbox" name="push" id="app-push" /> Push the image to Docker Hub
+        </label>
+        <p class="muted small" style="margin:0 0 10px">
+          Leave this off and the image is built and run on the server only — nothing leaves it.
+        </p>
+        <div id="app-registry-missing" class="msg info hidden">
+          No Docker Hub account is saved yet, so there is nothing to push to.
+          <button type="button" class="btn tiny" id="btn-app-add-hub">Add a Docker Hub account</button>
+        </div>
+        <div id="app-registry-fields" class="hidden">
+          <div class="row">
+            <label>Docker Hub account<select name="registry_cred_id" id="app-registry"></select></label>
+            <label class="narrow">Tag<input name="tag" id="app-tag" value="latest" /></label>
+          </div>
+          <p class="muted small" style="margin:6px 0 0">
+            Pushed as <code id="app-image-preview">user/app:latest</code> — the account's access token needs
+            <b>Read &amp; Write</b>, and the namespace is always lowercased.
+          </p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <label class="check" style="margin-bottom:8px">
+          <input type="checkbox" name="domain_enabled" id="app-domain-on" /> Add a domain
+        </label>
+        <p class="muted small" style="margin:0 0 10px">
+          Once the container is running, the panel points a hostname at it through Cloudflare — no manual DNS,
+          nginx or certificate work.
+        </p>
+        <div id="app-domain-missing" class="msg info hidden">
+          No Cloudflare account is connected yet, so there is nowhere to put the domain.
+          <button type="button" class="btn tiny" id="btn-app-add-cf">Connect a Cloudflare account</button>
+        </div>
+        <div id="app-domain-fields" class="hidden">
+          <label>Cloudflare account<select name="domain_cred_id" id="app-domain-cred"></select></label>
+          <div class="row">
+            <label>Subdomain <span class="muted small">(empty for the main domain itself)</span>
+              <input name="domain_sub" id="app-domain-sub" placeholder="shop" autocomplete="off" />
+            </label>
+            <label>Main domain<select name="domain_zone" id="app-domain-zone"></select></label>
+          </div>
+          <p class="muted small" style="margin:6px 0 10px" id="app-domain-preview"></p>
+
+          <div class="chips">
+            <label class="check"><input type="radio" name="domain_mode" value="dns" checked /> DNS — nginx + free SSL certificate</label>
+            <label class="check"><input type="radio" name="domain_mode" value="zerotrust" /> Zero Trust — Cloudflare Tunnel</label>
+          </div>
+
+          <div id="app-domain-dns" style="margin-top:10px">
+            <p class="muted small" style="margin:0 0 8px">
+              Creates the DNS record in Cloudflare (→ the server's public IP), an nginx site in front of the app,
+              and a Let's Encrypt certificate with HTTP redirected to HTTPS. nginx and certbot are installed if
+              missing. Ports 80 and 443 must be open on the server.
+            </p>
+            <label>Email for the certificate <span class="muted small">(optional — expiry notices from Let's Encrypt)</span>
+              <input name="domain_email" id="app-domain-email" type="email" />
+            </label>
+            <label class="check" style="margin-top:10px">
+              <input type="checkbox" name="domain_proxied" id="app-domain-proxied" /> Then proxy it through Cloudflare (orange cloud)
+            </label>
+          </div>
+
+          <div id="app-domain-zt" class="hidden" style="margin-top:10px">
+            <p class="muted small" style="margin:0 0 8px">
+              Adds the hostname to a Cloudflare Tunnel pointing at the app. No open ports, no nginx, and HTTPS comes
+              from Cloudflare. A new tunnel is created with its connector (cloudflared) installed on the server as a service.
+            </p>
+            <label>Tunnel<select name="domain_tunnel" id="app-domain-tunnel"></select></label>
+          </div>
+        </div>
+      </div>
+
+      <label class="check" id="app-dockerfile-field" style="margin-top:12px">
+        <input type="checkbox" name="use_repo_dockerfile" id="app-use-dockerfile" /> Use the Dockerfile in the repository
+      </label>
+
+      <div id="app-deploy-msg" class="msg hidden"></div>
+      <pre id="app-deploy-log" class="log hidden"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="btn-app-back">← Back</button>
+        <button type="submit" class="btn primary" id="btn-app-deploy">Build &amp; deploy</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">The first build pulls a Node image and installs dependencies on the server — give it a few minutes. A domain is set up right after, and its progress shows on the app's card.</p>
+    </form>
+  </div>
+</div>
+
+<!-- -------------------------------------------------------- cron job -->
+<div class="modal-backdrop hidden" id="modal-cron">
+  <div class="modal" style="max-width:640px">
+    <h2 id="cron-title">Add a scheduled job</h2>
+    <p class="muted small">
+      Written into a user's crontab on the server. cron checks the whole table before it is replaced, so a
+      job it will not accept changes nothing.
+    </p>
+
+    <form id="form-cron">
+      <div class="row">
+        <label class="narrow">Run as<input name="user" id="cron-user" value="root" required /></label>
+        <label>Schedule
+          <input name="schedule" id="cron-schedule" placeholder="0 3 * * *" required spellcheck="false" />
+        </label>
+      </div>
+      <div class="inline-tools" id="cron-presets"></div>
+      <p class="muted small" style="margin:6px 0 0" id="cron-schedule-hint">minute · hour · day of month · month · day of week</p>
+
+      <label>Command
+        <textarea name="command" id="cron-command" rows="3" spellcheck="false"
+          placeholder="/usr/bin/docker system prune -f >> /var/log/prune.log 2>&amp;1"></textarea>
+      </label>
+      <p class="muted small" style="margin:6px 0 0">
+        cron runs with a bare environment and no shell profile, so use full paths. Send the output somewhere —
+        anything a job prints is emailed to the user, which on most servers means it is lost.
+      </p>
+
+      <div id="cron-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-cron-save">Add the job</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ----------------------------------------------------- nginx domain -->
+<div class="modal-backdrop hidden" id="modal-domain">
+  <div class="modal" style="max-width:720px">
+    <h2 id="domain-title">Add domain</h2>
+    <p class="muted small" id="domain-sub">
+      Writes an nginx site on the server. The configuration is tested before nginx is reloaded, and put back
+      as it was if the test fails.
+    </p>
+
+    <form id="form-domain">
+      <label>Domain names <span class="muted small">(space or comma separated — include www if you use it)</span>
+        <input name="domains" id="domain-names" placeholder="example.com www.example.com" required />
+      </label>
+
+      <div id="domain-form-fields">
+        <label>What it serves
+          <select name="kind" id="domain-kind">
+            <option value="proxy">An app running on this server — reverse proxy</option>
+            <option value="static">Files on disk — static site</option>
+          </select>
+        </label>
+
+        <div class="row" id="domain-proxy-fields">
+          <label class="narrow">Port<input name="port" id="domain-port" type="number" min="1" max="65535" placeholder="3000" /></label>
+          <label>or the full address <span class="muted small">(optional)</span>
+            <input name="upstream" id="domain-upstream" placeholder="http://127.0.0.1:3000" />
+          </label>
+        </div>
+
+        <label id="domain-root-field" class="hidden">Folder to serve
+          <input name="root" id="domain-root" placeholder="/var/www/example.com" />
+        </label>
+
+        <div class="row">
+          <label class="narrow">Max upload<input name="max_body_size" id="domain-max-body" value="25m" /></label>
+          <label class="check" id="domain-ws-field"><input type="checkbox" name="websockets" id="domain-ws" checked /> Pass WebSocket connections through</label>
+          <label class="check hidden" id="domain-spa-field"><input type="checkbox" name="spa" id="domain-spa" /> Single-page app — unknown paths return index.html</label>
+        </div>
+      </div>
+
+      <label class="check" id="domain-raw-toggle" style="margin-top:14px">
+        <input type="checkbox" id="domain-raw-check" /> Edit the nginx file directly
+      </label>
+      <div id="domain-raw-field" class="hidden">
+        <textarea name="config" id="domain-config" rows="16" spellcheck="false"></textarea>
+        <p class="muted small" style="margin:6px 0 0">
+          Saved exactly as written, then tested with <code>nginx -t</code>.
+        </p>
+      </div>
+
+      <label class="check" style="margin-top:12px">
+        <input type="checkbox" id="domain-enabled" checked /> Enabled — linked into sites-enabled
+      </label>
+
+      <div id="domain-msg" class="msg hidden"></div>
+      <pre id="domain-log" class="log hidden"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-domain-save">Add domain</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- --------------------------------------------------------- nginx SSL -->
+<div class="modal-backdrop hidden" id="modal-ssl">
+  <div class="modal">
+    <h2>🔒 Get an SSL certificate</h2>
+    <p class="muted small">
+      certbot asks Let's Encrypt for a certificate and installs it into this site's nginx configuration.
+      The domain must already point at this server and port 80 must be reachable from the internet — that is
+      how the challenge is answered.
+    </p>
+
+    <form id="form-ssl">
+      <label>Domains on the certificate
+        <input name="domains" id="ssl-domains" required />
+      </label>
+      <label>Email for expiry notices <span class="muted small">(optional but recommended)</span>
+        <input name="email" id="ssl-email" type="email" placeholder="you@example.com" />
+      </label>
+      <label class="check"><input type="checkbox" id="ssl-redirect" checked /> Redirect HTTP to HTTPS</label>
+      <label class="check"><input type="checkbox" id="ssl-staging" /> Use Let's Encrypt staging — a test certificate browsers will not trust</label>
+
+      <div id="ssl-msg" class="msg hidden"></div>
+      <pre id="ssl-log" class="log hidden"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-ssl-go">Get the certificate</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">Issuing takes about half a minute.</p>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------- app environment -->
+<div class="modal-backdrop hidden" id="modal-app-env">
+  <div class="modal" style="max-width:720px">
+    <h2>Environment</h2>
+    <p class="muted small" id="app-env-sub">—</p>
+
+    <form id="form-app-env">
+      <div class="section-head" style="margin-bottom:6px">
+        <h2 style="font-size:13px">Variables</h2>
+        <div class="section-tools">
+          <button type="button" class="btn tiny" id="btn-env-add">+ Add variable</button>
+          <button type="button" class="btn tiny" id="btn-env-import">Import a .env file</button>
+          <input type="file" id="env-file" accept=".env,.txt,text/plain" hidden />
+        </div>
+      </div>
+      <div id="env-rows" class="item-rows"></div>
+      <p class="muted small" style="margin:8px 0 0">
+        An imported file is taken as it is — comments are skipped, quoted values keep their spaces,
+        and a key already here is replaced by the one in the file.
+      </p>
+
+      <label class="check" style="margin-top:14px">
+        <input type="checkbox" id="env-apply" checked /> Restart the containers now so the change takes effect
+      </label>
+      <p class="muted small" style="margin:4px 0 0">
+        Docker fixes the environment when a container is created, so the containers are recreated from the
+        image already on the server. Nothing is rebuilt and no code changes. Unticked, the values are saved
+        and picked up at the next deploy.
+      </p>
+
+      <div id="app-env-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-env-save">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- --------------------------------------------------- app containers -->
+<div class="modal-backdrop hidden" id="modal-app-containers">
+  <div class="modal" style="max-width:640px">
+    <h2>Containers</h2>
+    <p class="muted small" id="app-containers-sub">—</p>
+
+    <form id="form-app-containers">
+      <div class="section-head" style="margin-bottom:6px">
+        <h2 style="font-size:13px">One row per container</h2>
+        <div class="section-tools">
+          <button type="button" class="btn tiny" id="btn-containers-add">+ Add container</button>
+        </div>
+      </div>
+      <div id="containers-rows" class="item-rows"></div>
+      <p class="muted small" style="margin:8px 0 0">
+        Each container publishes the port you give it on the server. Removing a row deletes that container;
+        adding one starts another from the image already built. The service is not rebuilt.
+      </p>
+
+      <div id="app-containers-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-containers-save">Apply</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ---------------------------------------------------------- app logs -->
+<div class="modal-backdrop hidden" id="modal-app-logs">
+  <div class="modal" style="max-width:880px">
+    <h2 id="app-logs-name">Logs</h2>
+    <p class="muted small" id="app-logs-sub">—</p>
+    <div class="section-head" style="margin-bottom:8px">
+      <h2 style="font-size:13px">Container output</h2>
+      <div class="section-tools"><button class="btn tiny" id="btn-app-logs-refresh">Refresh</button></div>
+    </div>
+    <pre id="app-logs-body" class="log tall">Loading…</pre>
+    <div id="app-logs-deploy"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------- docker registry modal -->
+<div class="modal-backdrop hidden" id="modal-docker-login">
+  <div class="modal" style="max-width:520px">
+    <h2>Sign in to a registry</h2>
+    <p class="muted small">
+      Runs <code>docker login</code> on <b id="registry-server-name">this server</b>, so it can pull private
+      images. Docker stores the credentials on that machine, exactly as it would if you had run the command
+      yourself.
+    </p>
+    <form id="form-docker-login">
+      <label>Registry
+        <input name="registry" id="registry-host" placeholder="Docker Hub (leave empty), or ghcr.io" />
+      </label>
+
+      <label id="registry-saved-field" class="hidden">Use a saved Docker Hub account
+        <select name="credential_id" id="registry-credential"></select>
+      </label>
+
+      <div id="registry-manual-fields">
+        <div class="row">
+          <label>Username<input name="username" id="registry-username" placeholder="docker-hub-user" /></label>
+          <label>Password or access token<input name="secret" id="registry-secret" type="password" autocomplete="off" /></label>
+        </div>
+        <p class="muted small" style="margin:6px 0 0">
+          For Docker Hub use an access token from <b>Account Settings → Security</b> rather than your password.
+        </p>
+      </div>
+
+      <div id="registry-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Sign in</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ docker network modal -->
+<div class="modal-backdrop hidden" id="modal-network">
+  <div class="modal" style="max-width:480px">
+    <h2>Add Docker network</h2>
+    <p class="muted small">A user-defined network lets containers on <b id="network-server-name">this server</b> reach each other by name.</p>
+    <form id="form-network">
+      <div class="row">
+        <label>Name<input name="name" placeholder="app-net" required /></label>
+        <label>Driver
+          <select name="driver">
+            <option value="bridge">bridge</option>
+            <option value="macvlan">macvlan</option>
+            <option value="overlay">overlay</option>
+          </select>
+        </label>
+      </div>
+      <div id="network-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Create network</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- --------------------------------------------------- change port modal -->
+<div class="modal-backdrop hidden" id="modal-port">
+  <div class="modal" style="max-width:520px">
+    <h2>Change port</h2>
+    <p class="muted small">
+      <b id="port-service-name">this service</b> is rebuilt on the new port. Its data volume is kept, so nothing is lost —
+      but it is briefly unavailable while the container restarts.
+    </p>
+    <form id="form-port">
+      <div class="row">
+        <label class="narrow">Port<input name="port" type="number" min="1" max="65535" required /></label>
+        <label>Docker network
+          <select name="network" id="port-network"><option value="">Default bridge</option></select>
+        </label>
+      </div>
+      <div id="port-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Apply</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ container logs modal -->
+<div class="modal-backdrop hidden" id="modal-container-logs">
+  <div class="modal" style="max-width:860px">
+    <h2 id="container-logs-name">Logs</h2>
+    <p class="muted small" id="container-logs-sub">—</p>
+    <pre id="container-logs-body" class="log tall">Loading…</pre>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- --------------------------------------------------- add runner modal -->
+<div class="modal-backdrop hidden" id="modal-runner">
+  <div class="modal">
+    <h2>Add runner</h2>
+    <p class="muted small">A self-hosted CI runner: it registers with your git account and runs the jobs on one of your servers.</p>
+    <form id="form-runner">
+      <div class="row">
+        <label>Git account
+          <select name="credential_id" id="runner-account" required></select>
+        </label>
+        <label>Register against
+          <select name="scope" id="runner-scope">
+            <option value="repo">One repository</option>
+            <option value="org">A whole organisation / group</option>
+          </select>
+        </label>
+      </div>
+
+      <label><span id="runner-target-label">Repository</span>
+        <select name="target" id="runner-target" required>
+          <option value="">Loading…</option>
+        </select>
+      </label>
+
+      <label>Install on server
+        <select name="server_id" id="runner-server" required>
+          <option value="">Loading…</option>
+        </select>
+      </label>
+      <p class="muted small" style="margin:6px 0 0" id="runner-server-hint">The runner is installed over this server's SSH connection and kept alive by systemd.</p>
+
+      <div class="row">
+        <label>Runner name<input name="name" id="runner-name" placeholder="prod-web-01" required /></label>
+        <label>Labels <span class="muted small">(comma separated)</span><input name="labels" id="runner-labels" placeholder="self-hosted, linux, x64" /></label>
+      </div>
+
+      <div id="runner-github-fields">
+        <label>Run the service as <span class="muted small">(a user on that server)</span><input name="service_user" id="runner-service-user" placeholder="root" /></label>
+      </div>
+
+      <div id="runner-gitlab-fields" class="hidden">
+        <div class="row">
+          <label>Executor
+            <select name="executor">
+              <option value="shell">shell — run jobs directly on the server</option>
+              <option value="docker">docker — run each job in a container</option>
+            </select>
+          </label>
+          <label>Default image<input name="docker_image" placeholder="alpine:latest" /></label>
+        </div>
+      </div>
+
+      <div id="runner-form-msg" class="msg hidden"></div>
+      <pre id="runner-form-log" class="log hidden"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Install runner</button>
+      </div>
+      <p class="muted small" style="margin-top:10px">A first install downloads the runner on the server — give it a minute or two.</p>
+    </form>
+  </div>
+</div>
+
+<!-- -------------------------------------------------- add service modal -->
+<div class="modal-backdrop hidden" id="modal-service">
+  <div class="modal" style="max-width:720px">
+    <h2>Add service</h2>
+    <p class="muted small">Writes a systemd unit to <code>/etc/systemd/system</code> on <b id="service-server-name">this server</b>, then enables and starts it.</p>
+    <form id="form-service">
+      <div class="row">
+        <label>Service name<input name="unit" placeholder="my-app" required /></label>
+        <label>Description<input name="description" placeholder="My application" /></label>
+      </div>
+
+      <label>Start command <span class="muted small">(absolute path)</span>
+        <input name="execStart" placeholder="/usr/bin/node /srv/my-app/index.js" required />
+      </label>
+      <p class="muted small" style="margin:6px 0 0">systemd does not use a shell, so <code>npm start</code> will not work — use the full path, e.g. <code>/usr/bin/npm run start</code>.</p>
+
+      <div class="row">
+        <label>Working directory<input name="workingDirectory" placeholder="/srv/my-app" /></label>
+        <label>Run as user<input name="user" placeholder="root" /></label>
+        <label class="narrow">Group<input name="group" placeholder="" /></label>
+      </div>
+
+      <label>Environment <span class="muted small">(one KEY=value per line)</span>
+        <textarea name="environment" rows="3" placeholder="NODE_ENV=production&#10;PORT=3000"></textarea>
+      </label>
+      <label>Environment file <span class="muted small">(optional)</span><input name="environmentFile" placeholder="/srv/my-app/.env" /></label>
+
+      <div class="row">
+        <label>Type
+          <select name="type">
+            <option value="simple">simple — the command stays in the foreground</option>
+            <option value="exec">exec</option>
+            <option value="forking">forking — the command daemonises itself</option>
+            <option value="oneshot">oneshot — runs once and exits</option>
+            <option value="notify">notify</option>
+          </select>
+        </label>
+        <label>Restart
+          <select name="restart">
+            <option value="on-failure">on-failure</option>
+            <option value="always">always</option>
+            <option value="no">no</option>
+            <option value="on-abnormal">on-abnormal</option>
+          </select>
+        </label>
+        <label class="narrow">Wait<input name="restartSec" type="number" value="5" min="1" /></label>
+      </div>
+
+      <label>Start after<input name="after" value="network.target" /></label>
+
+      <div class="chips" style="margin-top:14px">
+        <label class="check"><input type="checkbox" name="enable" checked /> Start on boot</label>
+        <label class="check"><input type="checkbox" name="start" checked /> Start it now</label>
+        <label class="check"><input type="checkbox" name="overwrite" /> Replace it if it already exists</label>
+      </div>
+
+      <div id="service-form-msg" class="msg hidden"></div>
+      <pre id="service-form-log" class="log hidden"></pre>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary">Create service</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------- service detail modal -->
+<div class="modal-backdrop hidden" id="modal-service-detail">
+  <div class="modal" style="max-width:860px">
+    <h2 id="service-detail-name">—</h2>
+    <p class="muted small" id="service-detail-sub">—</p>
+    <div id="service-detail-body"><div class="empty"><span class="spinner"></span>Reading…</div></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------------------------------------------- query modal -->
+<div class="modal-backdrop hidden" id="modal-query">
+  <div class="modal" style="max-width:860px">
+    <h2>Run query</h2>
+    <p class="muted small">Read-only: SELECT, SHOW, DESCRIBE and EXPLAIN. One statement at a time.</p>
+    <form id="form-query">
+      <label>SQL<textarea name="sql" rows="4" placeholder="SELECT * FROM shopdb.customers LIMIT 20" required></textarea></label>
+      <div id="query-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Close</button>
+        <button type="submit" class="btn primary">Run</button>
+      </div>
+    </form>
+    <div id="query-result"></div>
+  </div>
+</div>
+
+<!-- ------------------------------ postgres / mongodb / redis query -->
+<div class="modal-backdrop hidden" id="modal-db-query">
+  <div class="modal" style="max-width:860px">
+    <h2>Run query</h2>
+    <p class="muted small" id="db-query-hint"></p>
+    <form id="form-db-query">
+      <label><span id="db-query-db-label">Database</span><input name="database" id="db-query-db" /></label>
+      <label>Query<textarea name="text" id="db-query-text" rows="4" required></textarea></label>
+      <div id="db-query-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Close</button>
+        <button type="submit" class="btn primary">Run</button>
+      </div>
+    </form>
+    <div id="db-query-result"></div>
+  </div>
+</div>
+
+
+<!-- -------------------------------------------- container details -->
+<div class="modal-backdrop hidden" id="modal-container">
+  <div class="modal" style="max-width:1100px">
+    <div class="section-head" style="margin-bottom:4px">
+      <h2 id="ct-title" style="margin:0;word-break:break-all">—</h2>
+      <span id="ct-state"></span>
+    </div>
+    <p class="muted small" id="ct-sub" style="margin-top:0"></p>
+    <div class="row-actions" id="ct-actions" style="justify-content:flex-start;margin-bottom:12px"></div>
+    <div id="ct-body"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ file editor -->
+<div class="modal-backdrop hidden" id="modal-file-edit">
+  <div class="modal" style="max-width:1100px">
+    <div class="section-head" style="margin-bottom:4px">
+      <h2 id="file-edit-title" style="margin:0;word-break:break-all">—</h2>
+      <span class="muted small" id="file-edit-meta"></span>
+    </div>
+    <div id="file-edit-msg" class="msg hidden"></div>
+    <textarea id="file-edit-text" class="code-editor" spellcheck="false" wrap="off"></textarea>
+    <div class="modal-actions">
+      <span class="muted small" style="margin-right:auto">Ctrl+S saves. The file keeps its permissions and owner.</span>
+      <a class="btn ghost" id="file-edit-download" href="#">Download</a>
+      <button type="button" class="btn ghost" data-close>Close</button>
+      <button type="button" class="btn primary" id="file-edit-save" data-needs="edit">Save</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="files-upload-input" multiple hidden />
+
+<!-- -------------------------------------- custom service progress -->
+<div class="modal-backdrop hidden" id="modal-app-progress">
+  <div class="modal" style="max-width:980px">
+    <div class="section-head" style="margin-bottom:4px">
+      <h2 id="progress-title" style="margin:0">—</h2>
+      <span id="progress-state"></span>
+    </div>
+    <p class="muted small" id="progress-sub" style="margin-top:0"></p>
+    <div class="progress-layout">
+      <ol class="steps" id="progress-steps"></ol>
+      <div class="progress-log-wrap">
+        <div class="section-head" style="margin-bottom:6px">
+          <h2 style="font-size:13px;margin:0">Log</h2>
+          <label class="check"><input type="checkbox" id="progress-follow" checked /> Follow</label>
+        </div>
+        <pre class="log tall" id="progress-log"></pre>
+        <div id="progress-domain" class="hidden">
+          <h2 style="font-size:13px;margin:14px 0 6px">Domain setup</h2>
+          <pre class="log" id="progress-domain-log"></pre>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------ mysql management dialog -->
+<div class="modal-backdrop hidden" id="modal-mysql-action">
+  <div class="modal" style="max-width:640px">
+    <h2 id="mysql-action-title">—</h2>
+    <div class="muted small" id="mysql-action-intro"></div>
+    <form id="form-mysql-action">
+      <div id="mysql-action-fields"></div>
+      <div id="mysql-action-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="mysql-action-submit">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
