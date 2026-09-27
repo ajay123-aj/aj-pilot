@@ -676,6 +676,7 @@ server, so it takes a minute or two; the install log comes back either way.
 | --- | --- |
 | GitHub | `actions/runner` (latest release) into `/opt/auto-deploy/runners/<name>`, registered with a repository or organisation token, then `svc.sh install` writes its own systemd unit |
 | GitLab | the `gitlab-runner` package (once per server), registered against the project or group with the `shell` or `docker` executor |
+| Bitbucket | not supported — Bitbucket Pipelines runners work differently, so Bitbucket accounts are left out of the runner form. They can still deploy apps. |
 
 Once installed, a runner can be checked (live status from the provider), restarted, stopped and removed.
 Removing it unregisters it at the provider, deletes it from the server and forgets it here.
@@ -769,62 +770,134 @@ you want that enforced by the database itself.
 
 ## Git accounts
 
-Click **+ Add git account**, pick GitHub or GitLab, and you are sent to their sign-in page. You choose the
-account there and approve access; the panel receives a short-lived code, swaps it for an access token
-server-side, fetches the account behind it, and stores it. Nothing is typed in by hand, and the token never
-appears in a URL or in the browser.
+Three git hosts are supported: **GitHub** (github.com or Enterprise), **GitLab** (gitlab.com or
+self-hosted) and **Bitbucket** (bitbucket.org). All three can be connected by signing in through the browser
+or by pasting a token, and a connected account of any of them can deploy apps. Runners are GitHub and GitLab
+only — see [CI runners](#ci-runners).
+
+| | GitHub | GitLab | Bitbucket |
+| --- | --- | --- | --- |
+| Browser sign-in | OAuth app | OAuth application (with PKCE) | OAuth consumer |
+| Paste a token | ✓ | ✓ | ✓ |
+| Repositories, branches, commits | ✓ | ✓ | ✓ |
+| Deploy apps (clone with the token) | ✓ | ✓ | ✓ |
+| Organisations / groups / workspaces | organisations | groups | workspaces |
+| CI runners | GitHub Actions runner | `gitlab-runner` | — |
+| Self-hosted server | GitHub Enterprise | self-hosted GitLab | — (Bitbucket Cloud only) |
+
+### Connecting through the browser
+
+Click **+ Add git account**, pick GitHub, GitLab or Bitbucket, and you are sent to their sign-in page. You
+choose the account there and approve access; the panel receives a short-lived code, swaps it for an access
+token server-side, fetches the account behind it, and stores it. Nothing is typed in by hand, and the token
+never appears in a URL or in the browser.
 
 ### First time only: registering the app
 
-GitHub and GitLab will not let anyone sign in until an OAuth app exists, so the very first time you pick a
+No provider lets anyone sign in until an OAuth app exists for the panel, so the very first time you pick a
 provider the panel walks you through it in two steps:
 
-1. **Open the provider** — for GitHub the registration form opens with the name and callback URL already
-   filled in, so you just press *Register application* and *Generate a new client secret*. For GitLab the
-   callback URL is shown with a copy button, along with the scopes to tick.
+1. **Open the provider** and create the app, pasting the **callback URL** the wizard shows (it has a copy
+   button). It is always `<OAUTH_CALLBACK_BASE>/api/git/oauth/callback`, e.g.
+   `http://localhost:4000/api/git/oauth/callback`.
 2. **Paste the client ID and secret back** — the panel saves them to `.env` and starts using them
    immediately. No restart, and you never edit a file by hand.
+
+What to do on each provider:
+
+| | GitHub | GitLab | Bitbucket |
+| --- | --- | --- | --- |
+| Where | Settings → Developer settings → OAuth Apps → *New OAuth App* | Preferences → Applications → *Add new application* | your workspace → Settings → OAuth consumers → *Add consumer* |
+| What to do | the form opens with the name and callback already filled in — press *Register application*, then *Generate a new client secret* | paste the callback URL and tick the scopes below | paste the callback URL, tick *This is a private consumer*, and tick the permissions below |
+| Access it gets | scopes `repo`, `read:org`, `read:user` (requested at sign-in) | scopes `read_api`, `read_repository`, `read_user` | permissions **Account: Read**, **Workspace membership: Read**, **Repositories: Read** (set on the consumer) |
+| Client ID is called | Client ID (`Ov23li…` or `Iv1.…`) | Application ID (long hex string) | Key |
+| Client secret is called | Client secret | Secret | Secret |
+| Access token lifetime | does not expire | 2 hours, renewed automatically | 2 hours, renewed automatically |
 
 Before saving, the panel checks the pair against the provider's token endpoint. A Client ID the provider has
 never heard of, or a secret that does not match it, is rejected there and then with the reason — rather than
 sending you to a sign-in page that answers **404**, which is what GitHub does for an unknown app. Your
-GitHub username, email or password are *not* the Client ID; it comes from the app you register.
+username, email or password are *not* the Client ID; it comes from the app you register.
 
 After that, adding an account is just: pick provider → sign in → done.
 
-| | GitHub | GitLab |
+The flow is protected with a single-use `state` value (rejected on replay or after 10 minutes), and GitLab
+additionally uses PKCE. GitLab and Bitbucket access tokens expire after two hours; the refresh token is
+stored encrypted and the panel renews the access token automatically before it lapses, so a connection keeps
+working.
+
+### Git settings in `.env`
+
+None of these are needed to run the panel — they are left out of `.env.example` on purpose. Without them,
+browser sign-in is simply not set up yet and the wizard offers to set it up; pasting a token always works.
+The wizard writes the `*_CLIENT_ID` / `*_CLIENT_SECRET` lines (and `OAUTH_CALLBACK_BASE`) to `.env` for you
+when you register an app. To set them by hand instead, add any of these and restart:
+
+```ini
+# Where the provider sends the browser back after sign-in. Set it when the panel
+# is reached on another host or port, and register that host's callback instead.
+OAUTH_CALLBACK_BASE=http://localhost:4000
+
+# GitHub OAuth app — Settings -> Developer settings -> OAuth Apps -> New OAuth App
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# GitLab application — Preferences -> Applications (read_api, read_repository, read_user)
+GITLAB_CLIENT_ID=
+GITLAB_CLIENT_SECRET=
+
+# Bitbucket OAuth consumer — workspace -> Settings -> OAuth consumers -> Add consumer
+# (Account: Read, Workspace membership: Read, Repositories: Read). The consumer's Key is the client ID.
+BITBUCKET_CLIENT_ID=
+BITBUCKET_CLIENT_SECRET=
+
+# Self-hosted GitHub Enterprise / GitLab only
+# GITHUB_WEB_URL=https://github.example.com
+# GITHUB_API_URL=https://github.example.com/api/v3
+# GITLAB_WEB_URL=https://gitlab.example.com
+# GITLAB_API_URL=https://gitlab.example.com/api/v4
+```
+
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| Scopes requested | `repo`, `read:org`, `read:user` | `read_api`, `read_repository`, `read_user` |
-| Register at | Settings → Developer settings → OAuth Apps | Preferences → Applications |
+| `OAUTH_CALLBACK_BASE` | `http://localhost:<PORT>` | base URL the provider redirects back to |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | OAuth app for GitHub browser sign-in |
+| `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET` | — | OAuth application for GitLab browser sign-in |
+| `BITBUCKET_CLIENT_ID` / `BITBUCKET_CLIENT_SECRET` | — | OAuth consumer (Key / Secret) for Bitbucket browser sign-in |
+| `GITHUB_WEB_URL` / `GITHUB_API_URL` | `https://github.com` / `https://api.github.com` | self-hosted GitHub Enterprise |
+| `GITLAB_WEB_URL` / `GITLAB_API_URL` | `https://gitlab.com` / `https://gitlab.com/api/v4` | self-hosted GitLab |
 
 If you reach the panel on a different port or host, set `OAUTH_CALLBACK_BASE` to match before registering —
 the callback URL the wizard shows is the one that must be registered with the provider.
 
-The flow is protected with a single-use `state` value (rejected on replay or after 10 minutes), and GitLab
-additionally uses PKCE. GitLab access tokens expire after two hours; the refresh token is stored encrypted
-and the panel renews the access token automatically before it lapses, so a connection keeps working.
+### Pasting a token instead
 
-**Pasting a token still works** — there is a small *Paste an access token instead* link on the picker, for a
-CI token or a machine account where browser sign-in makes no sense.
+There is a small *Paste an access token instead* link on the picker, for a CI token or a machine account
+where browser sign-in makes no sense. Pick the **Hosting** (GitHub, GitLab or Bitbucket), paste the token and
+press **Authenticate** to check it before saving.
 
-For each connected account you get:
+| | GitHub | GitLab | Bitbucket |
+| --- | --- | --- | --- |
+| Token | personal access token, classic or fine-grained | personal access token | Atlassian API token, or a workspace / repository access token |
+| Scope needed | `repo` | `read_api` (plus `read_repository`) | read access to account, workspaces and repositories |
+| Create it at | Settings → Developer settings → Personal access tokens | Preferences → Access tokens | Atlassian account → Security → API tokens; or workspace / repository settings → Access tokens |
+| Extra field | API URL (Enterprise only) | API URL (self-hosted only) | **Atlassian email** — fill it in for an API token, leave it empty for an access token |
 
-- **Identity** — login, display name, avatar, account type, company, and whether the token is a classic one
-  (with its scopes listed) or fine-grained
-- **API budget** — requests left in the current rate-limit window
+How the token is used for Bitbucket: with an email it is sent as `email:token` (basic auth) and git clones as
+`x-bitbucket-api-token-auth`; without one it is a bearer token and git clones as `x-token-auth`. An older
+Bitbucket *app password* also works: put your Bitbucket username in the email field.
+
+(Those tables are for **Paste a token**; browser sign-in gets its access from the app you registered.)
+
+### What you see for each account
+
+- **Identity** — login, display name, avatar, account type, company, and what kind of token it is (a
+  classic GitHub token with its scopes listed, fine-grained, OAuth, or a Bitbucket API / access token)
+- **API budget** — requests left in the current rate-limit window (GitHub)
 - **Repositories** — everything the token can reach, with visibility, default branch, language and last push
-- **Drill-down** — click a repository for its branches (protected ones flagged), click a branch for its
-  recent commits
-
-Self-hosted GitHub Enterprise and GitLab instances work — set the API URL when connecting.
-
-| | GitHub | GitLab |
-| --- | --- | --- |
-| Token | personal access token, classic or fine-grained | personal access token |
-| Scope needed | `repo` | `read_api` (plus `read_repository`) |
-| Create it at | Settings → Developer settings → Personal access tokens | Preferences → Access tokens |
-
-(That table is for **Paste a token**; browser sign-in requests its scopes itself.)
+- **Drill-down** — click a repository for its branches (protected ones flagged on GitHub and GitLab), click a
+  branch for its recent commits
+- **Organisations** — GitHub organisations, GitLab groups or Bitbucket workspaces the account belongs to
 
 `Re-authenticate` re-checks a token and refreshes the stored account — useful after rotating a token or
 changing its scopes.
@@ -836,7 +909,7 @@ written to disk and never leaves the API — the UI only ever sees a masked hint
 
 | Provider | What to supply | Verified against |
 | --- | --- | --- |
-| Git | GitHub/GitLab access token (see **Git accounts** above) | `GET /user` |
+| Git | GitHub / GitLab / Bitbucket access token (see **Git accounts** above) | `GET /user` |
 | Docker Hub | username + access token | `POST /v2/users/login` |
 | Cloudflare | browser sign-in (**Account management → Cloudflare**) or an API token with `Zone:Read` + `DNS:Edit` | `GET /user/tokens/verify`, then `/user`, `/accounts`, `/zones` |
 | MySQL | user + password, host/port, optional server to tunnel through | `SELECT VERSION()` over the real connection |
@@ -885,11 +958,6 @@ Copy `.env.example` to `.env` to override any of:
 | `DB_PASSWORD` | *(empty)* | MySQL password |
 | `DB_NAME` | `auto_deploy` | database name, created if missing |
 | `DB_POOL_SIZE` | `10` | connection pool size |
-| `OAUTH_CALLBACK_BASE` | `http://localhost:<PORT>` | base URL the provider redirects back to |
-| `GITHUB_CLIENT_ID` / `_SECRET` | — | OAuth app for GitHub browser sign-in |
-| `GITLAB_CLIENT_ID` / `_SECRET` | — | OAuth app for GitLab browser sign-in |
-| `GITHUB_WEB_URL` / `GITHUB_API_URL` | github.com | self-hosted GitHub Enterprise |
-| `GITLAB_WEB_URL` / `GITLAB_API_URL` | gitlab.com | self-hosted GitLab |
 | `APP_ENCRYPTION_KEY` | generated | master key for secret encryption |
 | `SSH_CONNECT_TIMEOUT` | `15000` | SSH handshake timeout (ms) |
 | `SSH_EXEC_TIMEOUT` | `45000` | remote command timeout (ms) |
@@ -961,7 +1029,7 @@ page, the same line under its name, kept up to date while you are on it.
 | `GET` | `/api/servers/:id/history` | every profile collected for a server |
 | `GET` | `/api/git/oauth/providers` | which providers are configured, the callback URL, and the pre-filled registration link |
 | `POST` | `/api/git/oauth/config` | save an OAuth app's client ID/secret to `.env` and use it without restarting |
-| `GET` | `/api/git/oauth/start?kind=` | begin browser sign-in (redirects to the provider) |
+| `GET` | `/api/git/oauth/start?kind=` | begin browser sign-in (`github`, `gitlab` or `bitbucket`; redirects to the provider) |
 | `GET` | `/api/git/oauth/callback` | the provider returns here; token exchanged and account stored |
 | `GET` | `/api/servers` | list servers with a profile summary |
 | `POST` | `/api/servers/test` | test credentials *before* saving |
@@ -1028,7 +1096,7 @@ page, the same line under its name, kept up to date while you are on it.
 | `POST` | `/api/runners/:id/refresh` | live status from GitHub / GitLab |
 | `POST` | `/api/runners/:id/action` | `start` / `stop` / `restart` its systemd service |
 | `DELETE` | `/api/runners/:id` | unregister, remove from the server, forget here |
-| `POST` | `/api/credentials/:id/git/organizations` | organisations (GitHub) or groups (GitLab) |
+| `POST` | `/api/credentials/:id/git/organizations` | organisations (GitHub), groups (GitLab) or workspaces (Bitbucket) |
 | `POST` | `/api/credentials/:id/git/runners` | runners registered for one repository / organisation |
 | `GET` | `/api/credentials` | list (secrets masked); `?provider=mysql` to filter |
 | `POST` | `/api/credentials` | add a git / dockerhub / cloudflare / mysql credential |
@@ -1082,7 +1150,7 @@ src/
   lib/auth.js         scrypt passwords, session tokens, cookies, the role table
   lib/authGuard.js    who is signed in, and what their role may do
   lib/context.js      the current user and organisation, for code far from the route
-  lib/git.js          GitHub / GitLab accounts, repositories, branches, commits, runners
+  lib/git.js          GitHub / GitLab / Bitbucket accounts, repositories, branches, commits, runners
   lib/gitAccounts.js  loading a git credential and keeping its token fresh
   lib/oauth.js        browser sign-in: state, PKCE, code exchange, token refresh
   lib/envFile.js      updates .env in place, keeping comments and ordering
