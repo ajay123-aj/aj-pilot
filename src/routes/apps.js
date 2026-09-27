@@ -743,8 +743,10 @@ appsRouter.put('/:id/env', async (req, res, next) => {
     const after = parsed.pairs.map(([k]) => k);
     const added = after.filter((k) => !before.includes(k));
     const removed = before.filter((k) => !after.includes(k));
-    const summary = [added.length ? `added ${added.join(', ')}` : '', removed.length ? `removed ${removed.join(', ')}` : '']
-      .filter(Boolean).join('; ') || 'no keys added or removed';
+    // PORT / INSTANCE in the pasted file are the panel's to set, so they are left out rather than refused.
+    const skippedNote = parsed.skipped?.length ? ` (${parsed.skipped.join(', ')} left out — set by the panel)` : '';
+    const summary = ([added.length ? `added ${added.join(', ')}` : '', removed.length ? `removed ${removed.join(', ')}` : '']
+      .filter(Boolean).join('; ') || 'no keys added or removed') + skippedNote;
 
     const save = () => run('UPDATE apps SET env_enc = ? WHERE id = ?', [encrypt(JSON.stringify(parsed.pairs)), row.id]);
 

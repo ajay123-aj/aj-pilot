@@ -10,7 +10,10 @@
 
 const KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Docker's own variables are set by the deploy itself and cannot be overridden here. */
+/**
+ * Set by the deploy itself for every container. A pasted .env almost always has
+ * PORT in it, so these are left out quietly (and reported) rather than refused.
+ */
 export const RESERVED = new Set(['PORT', 'INSTANCE']);
 
 export const MAX_VARS = 200;
@@ -29,11 +32,13 @@ function unquote(raw) {
 
 /**
  * Parse `.env` text into `[[key, value], …]`.
- * Returns `{ pairs, error }` — the first bad line wins, so the person is told
- * about one problem at a time rather than a wall of them.
+ * Returns `{ pairs, skipped, error }` — the first bad line wins, so the person is
+ * told about one problem at a time rather than a wall of them. `skipped` lists
+ * the reserved keys (PORT, INSTANCE) that were left out.
  */
 export function parseEnvText(text) {
   const pairs = [];
+  const skipped = new Set();
   const index = new Map();
   const lines = String(text ?? '').split(/\r?\n/);
 
@@ -52,7 +57,8 @@ export function parseEnvText(text) {
       return { pairs: [], error: `"${key.slice(0, 40)}" on line ${i + 1} is not a valid environment variable name` };
     }
     if (RESERVED.has(key)) {
-      return { pairs: [], error: `${key} is set by the panel for every container and cannot be given here` };
+      skipped.add(key);
+      continue;
     }
 
     // A file that repeats a key keeps the last one, exactly as a shell would.
@@ -65,9 +71,9 @@ export function parseEnvText(text) {
   }
 
   if (pairs.length > MAX_VARS) {
-    return { pairs: [], error: `That is ${pairs.length} variables — ${MAX_VARS} is the most one service can take` };
+    return { pairs: [], skipped: [...skipped], error: `That is ${pairs.length} variables — ${MAX_VARS} is the most one service can take` };
   }
-  return { pairs, error: null };
+  return { pairs, skipped: [...skipped], error: null };
 }
 
 /**
@@ -76,7 +82,7 @@ export function parseEnvText(text) {
  */
 export function parseEnvInput(input) {
   if (typeof input === 'string' || input === null || input === undefined) return parseEnvText(input);
-  if (!Array.isArray(input)) return { pairs: [], error: 'The environment must be a list of KEY=value pairs' };
+  if (!Array.isArray(input)) return { pairs: [], skipped: [], error: 'The environment must be a list of KEY=value pairs' };
 
   const asText = input.map((entry) => {
     const [k, v] = Array.isArray(entry) ? entry : [entry?.key, entry?.value];
