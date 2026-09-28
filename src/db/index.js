@@ -554,6 +554,8 @@ async function addOrgScoping() {
     ['apps', 'auto_seen_sha', 'VARCHAR(64) NULL'],
     ['apps', 'auto_checked_at', 'DATETIME NULL'],
     ['apps', 'auto_error', 'TEXT'],
+    // A super admin can end any plan on a date (or now): after it the organisation is view-only.
+    ['subscriptions', 'expires_at', 'DATETIME NULL'],
     ['installations', 'environment_id', 'INT NULL'],
   ];
   for (const [table, column, definition] of LATER_COLUMNS) {

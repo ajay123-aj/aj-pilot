@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>AJ Pilot — Autopilot for Your Servers | App Deployment, Server Management &amp; Domains</title>
-<meta name="description" content="AJ Pilot is autopilot for your servers. Manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static sites from GitHub or GitLab, run Docker, MySQL, PostgreSQL, MongoDB and Redis, and put every app on your own domain with Cloudflare, Nginx and free SSL — from one self-hosted control panel." />
-<meta name="keywords" content="AJ Pilot, server autopilot, server management panel, VPS control panel, self-hosted PaaS, deploy Next.js app, deploy Node.js app, NestJS deployment, Docker management UI, Nginx SSL manager, Cloudflare DNS automation, Cloudflare Zero Trust tunnel, Let's Encrypt SSL, MySQL admin panel, PostgreSQL admin, MongoDB GUI, Redis GUI, GitHub Actions runner, GitLab runner, Ubuntu server dashboard, cron job manager, systemd service manager, server file manager" />
+<meta name="description" content="AJ Pilot is autopilot for your servers. Manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static sites from GitHub or GitLab — automatically on every merge or push — run Docker, MySQL, PostgreSQL, MongoDB and Redis, keep environment variables in one place, and put every app on your own domain with Cloudflare, Nginx and free SSL — from one self-hosted control panel." />
+<meta name="keywords" content="AJ Pilot, server autopilot, server management panel, VPS control panel, self-hosted PaaS, auto deploy on git push, deploy on merge, GitHub webhook deploy, environment variables manager, .env management, deploy Next.js app, deploy Node.js app, NestJS deployment, Docker management UI, Nginx SSL manager, Cloudflare DNS automation, Cloudflare Zero Trust tunnel, Let's Encrypt SSL, MySQL admin panel, PostgreSQL admin, MongoDB GUI, Redis GUI, GitHub Actions runner, GitLab runner, Ubuntu server dashboard, cron job manager, systemd service manager, server file manager" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta name="author" content="AJ Pilot" />
 <meta name="application-name" content="AJ Pilot" />
@@ -34,8 +34,8 @@
 <script>
   // Set the theme before anything is drawn, so a light page never flashes dark (or back).
   (function () {
-    var pref = 'system';
-    try { pref = localStorage.getItem('ad-theme') || 'system'; } catch (e) { /* storage blocked */ }
+    var pref = 'dark';
+    try { pref = localStorage.getItem('ad-theme') || 'dark'; } catch (e) { /* storage blocked */ }
     var dark = pref === 'dark' || (pref === 'system' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     document.documentElement.setAttribute('data-theme-pref', pref);
@@ -63,8 +63,10 @@
         <a href="#contact">Contact</a>
       </nav>
       <div class="landing-actions">
-        <button class="btn" id="btn-open-signin">Sign in</button>
-        <button class="btn primary hidden" id="btn-open-setup">Get started</button>
+        <button type="button" class="icon-btn landing-theme-btn" id="btn-landing-theme" data-theme-flip aria-label="Switch to dark theme" title="Switch to dark theme"><span class="lt-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="lt-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg></span></button>
+        <button class="btn head-btn" id="btn-open-signin" aria-label="Sign in" title="Sign in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg><span class="head-btn-label">Sign in</span></button>
+        <button class="btn primary head-btn" id="btn-open-signup" aria-label="Sign up" title="Sign up — create a free account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><path d="M19 8v6M16 11h6"/></svg><span class="head-btn-label">Sign up</span></button>
+        <button class="btn primary head-btn hidden" id="btn-open-setup" aria-label="Get started" title="Get started"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4.5c3-1.3 6-1.5 6-1.5s-.2 3-1.5 6L13 14.5 9.5 11z"/><path d="M9.5 11 6 11.5 3.5 14l4 .8M13 14.5l-.5 3.5L10 20.5l-.8-4"/></svg><span class="head-btn-label">Get started</span></button>
         <button type="button" class="landing-burger" aria-controls="landing-nav" aria-expanded="false" aria-label="Menu"><span></span><span></span><span></span></button>
       </div>
     </div>
@@ -73,183 +75,534 @@
   <main id="top">
   <section class="hero">
     <div class="hero-text">
-      <span class="pill"><span class="pulse" aria-hidden="true"></span>Autopilot for your Ubuntu servers</span>
+      <span class="pill"><span class="pulse" aria-hidden="true"></span><span>Autopilot<span class="pill-long"> for your Ubuntu servers</span></span> <span class="pill-new">New · Auto deploy</span></span>
       <h1>Deploy apps, manage servers and connect domains — <span class="gradient-text">from one panel.</span></h1>
-      <p>
+      <p class="hero-short">Deploy from GitHub or GitLab, run Docker and databases, put every app on your domain with free SSL — and <b>auto deploy on every merge</b>. All over SSH, nothing to install.</p>
+      <p class="hero-long">
         AJ Pilot connects to your Ubuntu servers over SSH and does the work you would otherwise do by hand:
         deploy <b>Next.js, NestJS, Node.js, React, Angular, Nuxt</b> and static sites straight from GitHub or GitLab,
         run <b>Docker</b>, <b>MySQL, PostgreSQL, MongoDB and Redis</b>, publish every app on your domain with
-        <b>Nginx and free SSL</b> or a <b>Cloudflare Zero Trust tunnel</b> — and give your team exactly the access it needs.
+        <b>Nginx and free SSL</b> or a <b>Cloudflare Zero Trust tunnel</b>, <b>auto deploy</b> the moment you merge or push to a branch,
+        keep every <b>environment</b> in one place — and give your team exactly the access it needs.
       </p>
       <div class="hero-buttons">
         <button class="btn primary big" id="btn-hero-primary">Get started free</button>
         <a class="btn big" href="#features">See every feature</a>
       </div>
       <ul class="hero-points">
-        <li>No agent to install</li>
-        <li>Free SSL on every domain</li>
-        <li>Free plan for one server</li>
+        <li style="--uc:#10b981"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/><path d="M4 4l16 16"/></svg>No agent to install</li>
+        <li style="--uc:#6366f1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-11.5 6.5"/></svg>Auto deploy on merge</li>
+        <li style="--uc:#0ea5e9"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Free SSL on every domain</li>
+        <li style="--uc:#f59e0b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/></svg>Free plan for one server</li>
       </ul>
       <p class="muted small" id="hero-note">No agent on your servers. Every password, key and token is encrypted before it touches disk.</p>
     </div>
 
-    <div class="hero-visual" aria-hidden="true">
-      <div class="mock">
-        <div class="mock-bar"><i></i><i></i><i></i><span>aj-pilot / servers</span></div>
-        <div class="mock-head"><span class="dot online"></span> prod-web-01 <span class="badge ok">online</span></div>
-        <div class="mock-row"><span>Ubuntu 24.04 LTS</span><span class="muted">4 vCPU · 8 GB</span></div>
-        <div class="mock-meter"><span style="width:39%"></span></div>
-        <div class="mock-row"><span>shop-frontend · Next.js</span><span class="badge ok">running</span></div>
-        <div class="mock-row"><span>shop.example.com</span><span class="badge ok">SSL live</span></div>
-        <div class="mock-row"><span>10 containers</span><span class="badge ok">docker</span></div>
-        <div class="mock-chips"><span class="chip">mysql</span><span class="chip">redis</span><span class="chip">nginx</span><span class="chip">node</span></div>
+    <div class="hero-visual hv" aria-hidden="true">
+      <div class="hv-window">
+        <div class="hv-bar"><i></i><i></i><i></i><span>aj-pilot / servers / prod-web-01</span></div>
+        <div class="hv-body">
+          <div class="hv-server">
+            <span class="hv-srv-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>
+            <div><b>prod-web-01</b><small>Ubuntu 24.04 · 4 vCPU · 8 GB</small></div>
+            <span class="hv-online">online</span>
+          </div>
+          <div class="hv-meters">
+            <div><span>CPU</span><b>39%</b><i style="--w:39%"></i></div>
+            <div><span>Memory</span><b>62%</b><i style="--w:62%"></i></div>
+            <div><span>Disk</span><b>48%</b><i style="--w:48%"></i></div>
+          </div>
+          <div class="hv-apps">
+            <div><span class="hv-app" style="--a:#111">N</span><b>shop-frontend</b><em>Next.js</em><span class="hv-ok">running</span></div>
+            <div><span class="hv-app" style="--a:#E0234E">Ns</span><b>shop-api</b><em>NestJS</em><span class="hv-ok">running</span></div>
+            <div><span class="hv-app" style="--a:#4479A1">My</span><b>mysql-main</b><em>MySQL 8</em><span class="hv-ok">running</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hv-float hv-auto">
+        <div class="hv-f-top"><span class="hv-f-icon" style="--uc:#6366f1">⚡</span><div><b>Auto deploy</b><small>#57 merged · dev → main</small></div></div>
+        <div class="hv-progress"><span>Build the image</span><b>69%</b></div>
+        <div class="hv-segs"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i><i></i><i></i></div>
+      </div>
+
+      <div class="hv-float hv-ssl">
+        <span class="hv-f-icon" style="--uc:#10b981">🔒</span>
+        <div><b>shop.example.com</b><small>DNS · Nginx · SSL live</small></div>
+      </div>
+
+      <div class="hv-float hv-env">
+        <span class="hv-f-icon" style="--uc:#8b5cf6">🧩</span>
+        <div><b>shop-production</b><small>6 variables · encrypted</small></div>
       </div>
     </div>
   </section>
 
   <section class="stat-band" aria-label="AJ Pilot in numbers">
     <dl>
-      <div><dt>0</dt><dd>agents on your servers</dd></div>
-      <div><dt>7</dt><dd>frameworks detected</dd></div>
-      <div><dt>8</dt><dd>one-click services</dd></div>
-      <div><dt>4</dt><dd>databases managed</dd></div>
-      <div><dt>AES-256</dt><dd>on every secret</dd></div>
+      <div class="sb-card" style="--uc:#10b981">
+        <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/><path d="M4 4l16 16"/></svg></span>
+        <dt>0</dt>
+        <dd><b>agents on your servers</b><small>Everything runs over SSH</small></dd>
+      </div>
+      <div class="sb-card" style="--uc:#8b5cf6">
+        <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg></span>
+        <dt>7</dt>
+        <dd><b>frameworks detected</b><small>Next.js to static sites</small></dd>
+      </div>
+      <div class="sb-card" style="--uc:#0ea5e9">
+        <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span>
+        <dt>8</dt>
+        <dd><b>one-click services</b><small>Docker, databases, brokers</small></dd>
+      </div>
+      <div class="sb-card" style="--uc:#3b82f6">
+        <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13"/><path d="M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/></svg></span>
+        <dt>4</dt>
+        <dd><b>databases managed</b><small>MySQL · Postgres · Mongo · Redis</small></dd>
+      </div>
+      <div class="sb-card" style="--uc:#f59e0b">
+        <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span>
+        <dt>AES-256</dt>
+        <dd><b>on every secret</b><small>Keys, passwords and tokens</small></dd>
+      </div>
     </dl>
   </section>
 
-  <section class="stack-wall" aria-labelledby="stack-title">
-    <div class="stack-head">
-      <div>
-        <span class="eyebrow">Works with</span>
-        <h2 id="stack-title">Your whole stack, <span class="gradient-text">in one panel</span></h2>
-        <p>Frameworks are detected from your repository, services install in one click, and domains get DNS and SSL on their own.</p>
+  <section class="landing-section" id="stack" aria-labelledby="stack-title">
+    <div class="uc-head">
+      <span class="eyebrow">Works with</span>
+      <h2 id="stack-title">Your whole stack, <span class="gradient-text">in one panel</span></h2>
+      <p class="section-lead">Frameworks are detected from your repository, services install in one click, and domains get DNS and SSL on their own.</p>
+    </div>
+
+    <div class="st-grid">
+      <article class="uc-card st-card st-wide" style="--uc:#8b5cf6;--uc2:#c4b5fd">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg></span><span class="uc-tag">Detected automatically</span></div>
+        <h3>Frameworks &amp; runtimes</h3>
+        <p>Point it at a repository — the framework, the build and the start command are read from the project, built in Docker and served.</p>
+        <ul class="st-techs"><li class="st-tech tech-mono" style="--brand:#111111"><span class="tech-mark" aria-hidden="true">N</span><span><b>Next.js</b><small>React framework</small></span></li><li class="st-tech" style="--brand:#E0234E"><span class="tech-mark" aria-hidden="true">Ns</span><span><b>NestJS</b><small>Node framework</small></span></li><li class="st-tech" style="--brand:#5FA04E"><span class="tech-mark" aria-hidden="true">JS</span><span><b>Node.js</b><small>Runtime</small></span></li><li class="st-tech" style="--brand:#149ECA"><span class="tech-mark" aria-hidden="true">⚛</span><span><b>React</b><small>UI library</small></span></li><li class="st-tech" style="--brand:#42B883"><span class="tech-mark" aria-hidden="true">V</span><span><b>Vue</b><small>UI framework</small></span></li><li class="st-tech" style="--brand:#DD0031"><span class="tech-mark" aria-hidden="true">A</span><span><b>Angular</b><small>Framework</small></span></li><li class="st-tech" style="--brand:#00C16A"><span class="tech-mark" aria-hidden="true">Nx</span><span><b>Nuxt</b><small>Vue framework</small></span></li><li class="st-tech" style="--brand:#8B5CF6"><span class="tech-mark" aria-hidden="true">Vi</span><span><b>Vite</b><small>Build tool</small></span></li></ul>
+      </article>
+
+      <article class="uc-card st-card st-hub" style="--uc:#3b82f6;--uc2:#93c5fd">
+        <div class="st-hub-logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></div>
+        <h3>One panel for all of it</h3>
+        <p>20+ tools you already use — no plugins, no agents, nothing new to learn.</p>
+        <div class="st-detect" aria-hidden="true">
+          <div><code>package.json</code><span>→</span><b>Next.js 14</b><i>✓</i></div>
+          <div><code>Dockerfile</code><span>→</span><b>used as is</b><i>✓</i></div>
+          <div><code>apps/api</code><span>→</span><b>NestJS</b><i>✓</i></div>
+        </div>
+        <div class="st-count"><b>20+</b><span>technologies<br />supported</span></div>
+      </article>
+
+      <article class="uc-card st-card" style="--uc:#10b981;--uc2:#6ee7b7">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5"/><path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12"/></svg></span><span class="uc-tag">One click each</span></div>
+        <h3>Data &amp; services</h3>
+        <p>Installed as containers with their data in volumes — and added under Databases to browse straight away.</p>
+        <ul class="st-techs"><li class="st-tech" style="--brand:#4479A1"><span class="tech-mark" aria-hidden="true">My</span><span><b>MySQL</b><small>Database</small></span></li><li class="st-tech" style="--brand:#4169E1"><span class="tech-mark" aria-hidden="true">Pg</span><span><b>PostgreSQL</b><small>Database</small></span></li><li class="st-tech" style="--brand:#47A248"><span class="tech-mark" aria-hidden="true">M</span><span><b>MongoDB</b><small>Database</small></span></li><li class="st-tech" style="--brand:#DC382D"><span class="tech-mark" aria-hidden="true">R</span><span><b>Redis</b><small>Cache</small></span></li><li class="st-tech" style="--brand:#00A9A5"><span class="tech-mark" aria-hidden="true">Es</span><span><b>Elasticsearch</b><small>Search</small></span></li><li class="st-tech" style="--brand:#7B61FF"><span class="tech-mark" aria-hidden="true">Mq</span><span><b>EMQX</b><small>MQTT broker</small></span></li></ul>
+      </article>
+
+      <article class="uc-card st-card" style="--uc:#f97316;--uc2:#fdba74">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-11.5 6.5"/></svg></span><span class="uc-tag">Sign in, no tokens</span></div>
+        <h3>Git &amp; CI</h3>
+        <p>Connect with a sign-in popup, deploy any branch, run CI runners — and deploy on every merge.</p>
+        <ul class="st-techs"><li class="st-tech tech-mono" style="--brand:#24292F"><span class="tech-mark" aria-hidden="true">GH</span><span><b>GitHub</b><small>Actions</small></span></li><li class="st-tech" style="--brand:#FC6D26"><span class="tech-mark" aria-hidden="true">GL</span><span><b>GitLab</b><small>CI runners</small></span></li><li class="st-tech" style="--brand:#2684FF"><span class="tech-mark" aria-hidden="true">Bb</span><span><b>Bitbucket</b><small>Repos</small></span></li><li class="st-tech" style="--brand:#6366F1"><span class="tech-mark" aria-hidden="true">⚡</span><span><b>Webhooks</b><small>Auto deploy</small></span></li></ul>
+      </article>
+
+      <article class="uc-card st-card" style="--uc:#0ea5e9;--uc2:#7dd3fc">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span><span class="uc-tag">Set up for you</span></div>
+        <h3>Infrastructure &amp; domains</h3>
+        <p>Docker and Nginx on your Ubuntu servers, DNS in Cloudflare and free certificates — all done for you.</p>
+        <ul class="st-techs"><li class="st-tech" style="--brand:#2496ED"><span class="tech-mark" aria-hidden="true">D</span><span><b>Docker</b><small>Containers</small></span></li><li class="st-tech" style="--brand:#009639"><span class="tech-mark" aria-hidden="true">N</span><span><b>Nginx</b><small>Web server</small></span></li><li class="st-tech" style="--brand:#E95420"><span class="tech-mark" aria-hidden="true">U</span><span><b>Ubuntu</b><small>Server OS</small></span></li><li class="st-tech" style="--brand:#F38020"><span class="tech-mark" aria-hidden="true">CF</span><span><b>Cloudflare</b><small>DNS &amp; tunnels</small></span></li><li class="st-tech" style="--brand:#F7A800"><span class="tech-mark" aria-hidden="true">LE</span><span><b>Let's Encrypt</b><small>Free SSL</small></span></li></ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ------------------------------------ showcase: auto deploy + environments -->
+  <section class="landing-section showcase" id="auto-deploy" aria-labelledby="auto-title">
+    <div class="showcase-row">
+      <div class="showcase-copy">
+        <span class="eyebrow">Auto deploy</span>
+        <h2 id="auto-title">Merge or push — <span class="gradient-text">it deploys itself</span></h2>
+        <p class="section-lead">Pick the branch an app runs — <code>main</code>, <code>master</code>, <code>dev</code> or any other — and choose what deploys it. The panel rebuilds and restarts the app on its own, and shows you exactly which change went live.</p>
+        <ul class="tick-list">
+          <li><b>Every push or commit</b> — any new commit on the branch goes live, ideal for a staging or dev server.</li>
+          <li><b>Only merged pull / merge requests</b> — a reviewed <code>dev → main</code> merge deploys production; direct pushes are left alone.</li>
+          <li><b>Instant with a webhook</b> on GitHub, GitLab or Bitbucket, added for you — or the branch is checked every minute, even behind a firewall.</li>
+          <li><b>Live progress and full history</b> — step by step with the live log, and every deploy kept with its branch, merge or commit, time and author.</li>
+        </ul>
+      </div>
+      <div class="showcase-visual" aria-hidden="true">
+        <div class="flow">
+          <div class="flow-card">
+            <div class="flow-top"><span class="flow-icon merge">⇄</span><div><b>Pull request #57 merged</b><small><code>dev</code> → <code>main</code> · Add order tracking</small></div><span class="flow-time">2m ago</span></div>
+          </div>
+          <div class="flow-line"></div>
+          <div class="flow-card active">
+            <div class="flow-top"><span class="flow-icon bolt">⚡</span><div><b>Auto deploy in progress</b><small>shop-web · commit <code>a3f9c21</code> by Asha</small></div><span class="flow-time">1m 12s</span></div>
+            <div class="flow-progress"><span>Step 6 of 8 · Build the image</span><span>69%</span></div>
+            <div class="flow-segs"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i><i></i><i></i></div>
+          </div>
+          <div class="flow-line"></div>
+          <div class="flow-card">
+            <div class="flow-top"><span class="flow-icon live">✓</span><div><b>Live on shop.example.com</b><small>Deployed <code>a3f9c21</code> · kept in the deploy history</small></div><span class="flow-time">next</span></div>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="stack-rows">
-      <div class="stack-row">
-        <ul><li class="tech tech-mono" style="--brand:#111111"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Next.js</b><small>Framework</small></span></li><li class="tech " style="--brand:#E0234E"><span class="tech-mark" aria-hidden="true">Ns</span><span class="tech-text"><b>NestJS</b><small>Framework</small></span></li><li class="tech " style="--brand:#5FA04E"><span class="tech-mark" aria-hidden="true">JS</span><span class="tech-text"><b>Node.js</b><small>Runtime</small></span></li><li class="tech " style="--brand:#149ECA"><span class="tech-mark" aria-hidden="true">⚛</span><span class="tech-text"><b>React</b><small>Framework</small></span></li><li class="tech " style="--brand:#42B883"><span class="tech-mark" aria-hidden="true">V</span><span class="tech-text"><b>Vue</b><small>Framework</small></span></li><li class="tech " style="--brand:#DD0031"><span class="tech-mark" aria-hidden="true">A</span><span class="tech-text"><b>Angular</b><small>Framework</small></span></li><li class="tech " style="--brand:#00C16A"><span class="tech-mark" aria-hidden="true">Nx</span><span class="tech-text"><b>Nuxt</b><small>Framework</small></span></li><li class="tech " style="--brand:#8B5CF6"><span class="tech-mark" aria-hidden="true">Vi</span><span class="tech-text"><b>Vite</b><small>Build tool</small></span></li><li class="tech tech-mono" style="--brand:#24292F"><span class="tech-mark" aria-hidden="true">GH</span><span class="tech-text"><b>GitHub</b><small>Git & CI</small></span></li><li class="tech " style="--brand:#FC6D26"><span class="tech-mark" aria-hidden="true">GL</span><span class="tech-text"><b>GitLab</b><small>Git & CI</small></span></li></ul>
-        <ul aria-hidden="true"><li class="tech tech-mono" style="--brand:#111111"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Next.js</b><small>Framework</small></span></li><li class="tech " style="--brand:#E0234E"><span class="tech-mark" aria-hidden="true">Ns</span><span class="tech-text"><b>NestJS</b><small>Framework</small></span></li><li class="tech " style="--brand:#5FA04E"><span class="tech-mark" aria-hidden="true">JS</span><span class="tech-text"><b>Node.js</b><small>Runtime</small></span></li><li class="tech " style="--brand:#149ECA"><span class="tech-mark" aria-hidden="true">⚛</span><span class="tech-text"><b>React</b><small>Framework</small></span></li><li class="tech " style="--brand:#42B883"><span class="tech-mark" aria-hidden="true">V</span><span class="tech-text"><b>Vue</b><small>Framework</small></span></li><li class="tech " style="--brand:#DD0031"><span class="tech-mark" aria-hidden="true">A</span><span class="tech-text"><b>Angular</b><small>Framework</small></span></li><li class="tech " style="--brand:#00C16A"><span class="tech-mark" aria-hidden="true">Nx</span><span class="tech-text"><b>Nuxt</b><small>Framework</small></span></li><li class="tech " style="--brand:#8B5CF6"><span class="tech-mark" aria-hidden="true">Vi</span><span class="tech-text"><b>Vite</b><small>Build tool</small></span></li><li class="tech tech-mono" style="--brand:#24292F"><span class="tech-mark" aria-hidden="true">GH</span><span class="tech-text"><b>GitHub</b><small>Git & CI</small></span></li><li class="tech " style="--brand:#FC6D26"><span class="tech-mark" aria-hidden="true">GL</span><span class="tech-text"><b>GitLab</b><small>Git & CI</small></span></li></ul>
+
+    <div class="showcase-row reverse" id="environments">
+      <div class="showcase-copy">
+        <span class="eyebrow">Environments</span>
+        <h2>Every variable, <span class="gradient-text">kept once</span></h2>
+        <p class="section-lead">Keep database URLs, API keys and secrets as named environments — <code>shop-production</code>, <code>shop-staging</code> — and use them for any app or service instead of pasting <code>.env</code> files around.</p>
+        <ul class="tick-list">
+          <li><b>Import a .env file</b> when you add or edit one — comments and quoted values are read as they are.</li>
+          <li><b>Pick one when you create</b> an app, a one-click database or a systemd service — its values fill the form.</li>
+          <li><b>Or save as you go</b> — name a new environment while creating an app or service, and it is there next time.</li>
+          <li><b>Encrypted, and safe to share</b> — values are AES-256 encrypted; view-only teammates see the names, never the secrets.</li>
+        </ul>
       </div>
-      <div class="stack-row reverse">
-        <ul><li class="tech " style="--brand:#2496ED"><span class="tech-mark" aria-hidden="true">D</span><span class="tech-text"><b>Docker</b><small>Containers</small></span></li><li class="tech " style="--brand:#009639"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Nginx</b><small>Web server</small></span></li><li class="tech " style="--brand:#F7A800"><span class="tech-mark" aria-hidden="true">LE</span><span class="tech-text"><b>Let&#39;s Encrypt</b><small>Free SSL</small></span></li><li class="tech " style="--brand:#F38020"><span class="tech-mark" aria-hidden="true">CF</span><span class="tech-text"><b>Cloudflare</b><small>DNS & tunnels</small></span></li><li class="tech " style="--brand:#E95420"><span class="tech-mark" aria-hidden="true">U</span><span class="tech-text"><b>Ubuntu</b><small>Server OS</small></span></li><li class="tech " style="--brand:#4479A1"><span class="tech-mark" aria-hidden="true">My</span><span class="tech-text"><b>MySQL</b><small>Database</small></span></li><li class="tech " style="--brand:#4169E1"><span class="tech-mark" aria-hidden="true">Pg</span><span class="tech-text"><b>PostgreSQL</b><small>Database</small></span></li><li class="tech " style="--brand:#47A248"><span class="tech-mark" aria-hidden="true">M</span><span class="tech-text"><b>MongoDB</b><small>Database</small></span></li><li class="tech " style="--brand:#DC382D"><span class="tech-mark" aria-hidden="true">R</span><span class="tech-text"><b>Redis</b><small>Cache</small></span></li><li class="tech " style="--brand:#00A9A5"><span class="tech-mark" aria-hidden="true">Es</span><span class="tech-text"><b>Elasticsearch</b><small>Search</small></span></li><li class="tech " style="--brand:#7B61FF"><span class="tech-mark" aria-hidden="true">Mq</span><span class="tech-text"><b>EMQX</b><small>MQTT broker</small></span></li></ul>
-        <ul aria-hidden="true"><li class="tech " style="--brand:#2496ED"><span class="tech-mark" aria-hidden="true">D</span><span class="tech-text"><b>Docker</b><small>Containers</small></span></li><li class="tech " style="--brand:#009639"><span class="tech-mark" aria-hidden="true">N</span><span class="tech-text"><b>Nginx</b><small>Web server</small></span></li><li class="tech " style="--brand:#F7A800"><span class="tech-mark" aria-hidden="true">LE</span><span class="tech-text"><b>Let&#39;s Encrypt</b><small>Free SSL</small></span></li><li class="tech " style="--brand:#F38020"><span class="tech-mark" aria-hidden="true">CF</span><span class="tech-text"><b>Cloudflare</b><small>DNS & tunnels</small></span></li><li class="tech " style="--brand:#E95420"><span class="tech-mark" aria-hidden="true">U</span><span class="tech-text"><b>Ubuntu</b><small>Server OS</small></span></li><li class="tech " style="--brand:#4479A1"><span class="tech-mark" aria-hidden="true">My</span><span class="tech-text"><b>MySQL</b><small>Database</small></span></li><li class="tech " style="--brand:#4169E1"><span class="tech-mark" aria-hidden="true">Pg</span><span class="tech-text"><b>PostgreSQL</b><small>Database</small></span></li><li class="tech " style="--brand:#47A248"><span class="tech-mark" aria-hidden="true">M</span><span class="tech-text"><b>MongoDB</b><small>Database</small></span></li><li class="tech " style="--brand:#DC382D"><span class="tech-mark" aria-hidden="true">R</span><span class="tech-text"><b>Redis</b><small>Cache</small></span></li><li class="tech " style="--brand:#00A9A5"><span class="tech-mark" aria-hidden="true">Es</span><span class="tech-text"><b>Elasticsearch</b><small>Search</small></span></li><li class="tech " style="--brand:#7B61FF"><span class="tech-mark" aria-hidden="true">Mq</span><span class="tech-text"><b>EMQX</b><small>MQTT broker</small></span></li></ul>
+      <div class="showcase-visual" aria-hidden="true">
+        <div class="env-demo">
+          <div class="env-demo-head"><div><b>shop-production</b><small>6 variables · used by 2 apps and 1 service</small></div><span class="env-demo-lock">🔒 encrypted</span></div>
+          <div class="env-demo-row"><code>DATABASE_URL</code><span>••••••••••••</span></div>
+          <div class="env-demo-row"><code>REDIS_URL</code><span>••••••••••</span></div>
+          <div class="env-demo-row"><code>STRIPE_SECRET_KEY</code><span>••••••••••••••</span></div>
+          <div class="env-demo-row"><code>MAIL_FROM</code><span>••••••••</span></div>
+          <div class="env-demo-used"><span>🚀 shop-web</span><span>🚀 shop-api</span><span>📦 mysql-main</span></div>
+        </div>
       </div>
     </div>
   </section>
 
   <section class="landing-section" id="features">
-    <span class="eyebrow">What you get</span>
-    <h2>Everything you need to run <span class="gradient-text">production servers</span></h2>
-    <p class="section-lead">One panel instead of a dozen SSH sessions, dashboards and shell scripts. Everything talks to your own machines over the SSH connection you already have.</p>
-
-    <h3 class="feature-group">🖥️ Servers</h3>
-    <div class="feature-grid">
-      <article class="feature"><h4>Full server inventory</h4>
-        <p>Distribution, kernel, CPU, memory, disks, network interfaces, DNS, every listening port with its process, pending security updates, firewall and SSH posture — read in one pass and kept as a history.</p></article>
-      <article class="feature"><h4>Live monitoring</h4>
-        <p>CPU, memory, disk and network in real time, plus a background health check that marks a server offline within seconds and tells you why.</p></article>
-      <article class="feature"><h4>systemd services</h4>
-        <p>Start, stop, restart and enable any unit, read its journal, or write a new service from a form and have it enabled and running.</p></article>
-      <article class="feature"><h4>File manager</h4>
-        <p>Browse folders with their sizes, upload, download, edit, rename, copy, move, extract archives and change permissions — no SFTP client needed.</p></article>
-      <article class="feature"><h4>Cron jobs</h4>
-        <p>See, add, edit and remove scheduled jobs with a readable schedule, on any server.</p></article>
-      <article class="feature"><h4>Nginx sites &amp; SSL</h4>
-        <p>Create sites and upstreams, edit configs safely with a syntax check, and issue or renew free Let's Encrypt certificates.</p></article>
+    <div class="uc-head">
+      <span class="eyebrow">What you get</span>
+      <h2>Everything you need to run <span class="gradient-text">production servers</span></h2>
+      <p class="section-lead">One panel instead of a dozen SSH sessions, dashboards and shell scripts. Everything talks to your own machines over the SSH connection you already have.</p>
     </div>
 
-    <h3 class="feature-group" id="deploy">🚀 App deployment</h3>
-    <div class="feature-grid">
-      <article class="feature"><h4>Deploy from GitHub or GitLab</h4>
-        <p>Pick a repository, a branch and a server. The framework is detected — Next.js, NestJS, Nuxt, Angular, React, Vue, Vite, plain Node.js or a static site — and built and run in Docker.</p></article>
-      <article class="feature"><h4>Monorepos welcome</h4>
-        <p>One repository, several projects? Choose the folder to deploy, and each app gets its own build, settings and domain.</p></article>
-      <article class="feature"><h4>Progress, timeline &amp; logs</h4>
-        <p>Every deploy shows each step as it happens — clone, install, build, start — with full logs, so a failure explains itself.</p></article>
-      <article class="feature"><h4>Environment &amp; scaling</h4>
-        <p>Edit environment variables, ports and volumes, run several instances, restart, redeploy or roll forward from one page.</p></article>
-      <article class="feature"><h4>Multiple domains per app</h4>
-        <p>Attach as many domains as an app needs. Each one is created in Cloudflare, served through Nginx and secured with SSL — automatically.</p></article>
-      <article class="feature"><h4>Cloudflare Zero Trust tunnels</h4>
-        <p>No open ports? Publish an app through a Cloudflare tunnel instead of DNS, pointed at the right server and port for you.</p></article>
-    </div>
+    <div class="ft-grid">
+      <!-- Servers -->
+      <article class="uc-card ft-card ft-wide" style="--uc:#3b82f6;--uc2:#93c5fd">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M11 7.5h6M11 16.5h6"/></svg></span>
+          <span class="uc-tag">Every machine, one view</span>
+        </div>
+        <div class="ft-split">
+          <div>
+            <h3>Servers</h3>
+            <p>Everything about each Ubuntu server, live — and everything you would do on it by hand, from a form.</p>
+            <ul class="ft-list two">
+              <li><b>Full server inventory</b><span>OS, kernel, CPU, memory, disks, network, every listening port, security updates, firewall and SSH posture — kept as a history.</span></li>
+              <li><b>Live monitoring</b><span>CPU, memory, disk and network in real time, and a health check that marks a server offline within seconds.</span></li>
+              <li><b>systemd services</b><span>Start, stop, restart and enable any unit, read its journal, or write a new service from a form.</span></li>
+              <li><b>File manager</b><span>A Windows-style explorer: sizes, upload, download, edit, rename, copy, extract and permissions.</span></li>
+              <li><b>Cron jobs</b><span>See, add, edit and remove scheduled jobs with a readable schedule.</span></li>
+              <li><b>Nginx sites &amp; SSL</b><span>Sites and upstreams with a syntax check, and free Let's Encrypt certificates.</span></li>
+            </ul>
+          </div>
+          <div class="uc-visual ft-metrics" aria-hidden="true">
+            <div class="ft-mhead"><span class="ft-dot"></span><b>prod-web-01</b><span class="uc-live">online</span></div>
+            <div class="ft-meter"><span>CPU</span><div><i style="width:39%"></i></div><b>39%</b></div>
+            <div class="ft-meter"><span>Memory</span><div><i style="width:62%"></i></div><b>62%</b></div>
+            <div class="ft-meter"><span>Disk</span><div><i style="width:48%"></i></div><b>48%</b></div>
+            <div class="ft-ports"><code>:22 ssh</code><code>:80 nginx</code><code>:443 nginx</code><code>:3306 mysql</code></div>
+          </div>
+        </div>
+      </article>
 
-    <h3 class="feature-group">🐳 Docker &amp; one-click installs</h3>
-    <div class="feature-grid">
-      <article class="feature"><h4>Container management</h4>
-        <p>Every container with its image, ports, health and logs. Start, stop, restart, pause or remove, and clean up images, networks and volumes.</p></article>
-      <article class="feature"><h4>One-click services</h4>
-        <p>Install Docker and Compose, then MySQL, PostgreSQL, MongoDB, Redis, EMQX or Elasticsearch as containers with named volumes on a port you choose.</p></article>
-      <article class="feature"><h4>Docker Hub</h4>
-        <p>Connect Docker Hub to browse your repositories and tags, and pull private images onto your servers.</p></article>
-    </div>
+      <!-- Databases -->
+      <article class="uc-card ft-card" style="--uc:#10b981;--uc2:#6ee7b7">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5"/><path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12"/></svg></span>
+          <span class="uc-tag">Four engines</span>
+        </div>
+        <h3>Databases</h3>
+        <ul class="ft-list">
+          <li><b>MySQL, PostgreSQL, MongoDB &amp; Redis</b><span>Even one bound to localhost, through the server's own SSH.</span></li>
+          <li><b>Users, grants &amp; configuration</b><span>Exactly the privileges each user needs, and server variables from a form.</span></li>
+          <li><b>Statistics &amp; queries</b><span>Sizes, connections, largest tables, and a query runner.</span></li>
+        </ul>
+        <div class="uc-visual ft-engines" aria-hidden="true">
+          <span style="--a:#4479A1">My</span><span style="--a:#4169E1">Pg</span><span style="--a:#47A248">M</span><span style="--a:#DC382D">R</span>
+        </div>
+      </article>
 
-    <h3 class="feature-group">🗄️ Databases</h3>
-    <div class="feature-grid">
-      <article class="feature"><h4>MySQL, PostgreSQL, MongoDB &amp; Redis</h4>
-        <p>Connect to any of them — even one bound to localhost, through the server's own SSH — and browse databases, tables, collections and keys.</p></article>
-      <article class="feature"><h4>Users, grants &amp; configuration</h4>
-        <p>Create databases and users, grant exactly the privileges they need, and read or tune server variables from a form.</p></article>
-      <article class="feature"><h4>Statistics &amp; queries</h4>
-        <p>Sizes, connections and the largest tables at a glance, and a query runner for the questions the dashboard does not answer.</p></article>
-    </div>
+      <!-- Docker -->
+      <article class="uc-card ft-card" style="--uc:#0ea5e9;--uc2:#7dd3fc">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h15.5c1.5 0 2.5-1 2.5-2"/><path d="M3 12c0 4 3 7 8 7 5.5 0 8.5-3.5 9.5-7"/><rect x="5" y="8" width="3" height="3"/><rect x="8.5" y="8" width="3" height="3"/><rect x="12" y="8" width="3" height="3"/><rect x="8.5" y="4.5" width="3" height="3"/></svg></span>
+          <span class="uc-tag">One click each</span>
+        </div>
+        <h3>Docker &amp; one-click installs</h3>
+        <ul class="ft-list">
+          <li><b>Container management</b><span>Image, ports, health and logs; start, stop, restart or remove, and clean up.</span></li>
+          <li><b>One-click services</b><span>Docker, Compose, MySQL, PostgreSQL, MongoDB, Redis, EMQX or Elasticsearch.</span></li>
+          <li><b>Docker Hub</b><span>Browse your repositories and tags, and pull private images.</span></li>
+        </ul>
+        <div class="uc-visual ft-containers" aria-hidden="true">
+          <div><i class="up"></i><code>shop-web</code><span>:8080</span></div>
+          <div><i class="up"></i><code>mysql-main</code><span>:3306</span></div>
+          <div><i></i><code>redis-cache</code><span>:6379</span></div>
+        </div>
+      </article>
 
-    <h3 class="feature-group">👥 Teams, security &amp; CI</h3>
-    <div class="feature-grid">
-      <article class="feature"><h4>Organisations &amp; roles</h4>
-        <p>Admin, editor or view-only for each person. Servers and credentials belong to an organisation, and nothing crosses between them.</p></article>
-      <article class="feature"><h4>Encrypted secrets</h4>
-        <p>SSH keys, passwords and provider tokens are encrypted with AES-256-GCM; sign-in passwords are hashed with scrypt; no API ever returns a secret.</p></article>
-      <article class="feature"><h4>CI runners in minutes</h4>
-        <p>Install a GitHub Actions or GitLab runner on any server, registered and kept alive under systemd, with its live status.</p></article>
-      <article class="feature"><h4>Activity log</h4>
-        <p>Who changed what and when — every deploy, domain, service and permission change is recorded.</p></article>
-      <article class="feature"><h4>Git sign-in without tokens</h4>
-        <p>Connect GitHub or GitLab with a sign-in popup; tokens are stored encrypted and refreshed automatically.</p></article>
-      <article class="feature"><h4>Light &amp; dark themes</h4>
-        <p>A clean, fast interface that follows your system theme — or the one you pick.</p></article>
+      <!-- App deployment -->
+      <article class="uc-card ft-card ft-wide" id="deploy" style="--uc:#8b5cf6;--uc2:#c4b5fd">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span>
+          <span class="uc-tag">From GitHub or GitLab</span>
+        </div>
+        <div class="ft-split">
+          <div>
+            <h3>App deployment</h3>
+            <p>Pick a repository, a branch and a server — the framework is detected, then built and run in Docker.</p>
+            <ul class="ft-list two">
+              <li><b>Deploy from GitHub or GitLab</b><span>Next.js, NestJS, Nuxt, Angular, React, Vue, Vite, Node.js or a static site.</span></li>
+              <li><b>Monorepos welcome</b><span>Choose the folder; each app gets its own build, settings and domain.</span></li>
+              <li><b>Progress, timeline &amp; logs</b><span>Every step as it happens, with full logs — a failure explains itself.</span></li>
+              <li><b>Environment &amp; scaling</b><span>Variables, ports and volumes, several instances, restart or redeploy.</span></li>
+              <li><b>Multiple domains per app</b><span>Each one in Cloudflare, served by Nginx and secured with SSL.</span></li>
+              <li><b>Cloudflare Zero Trust tunnels</b><span>No open ports? Publish through a tunnel instead of DNS.</span></li>
+            </ul>
+          </div>
+          <div class="uc-visual ft-deploy" aria-hidden="true">
+            <div class="ft-frameworks"><span>Next.js</span><span>NestJS</span><span>Nuxt</span><span>Angular</span><span>React</span><span>Vue</span><span>Vite</span><span>Node.js</span></div>
+            <ol class="ft-steps">
+              <li class="done">Clone</li><li class="done">Install</li><li class="done">Build</li><li class="now">Start</li><li>Live</li>
+            </ol>
+            <div class="ft-url">🔒 https://shop.example.com</div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Auto deploy & environments -->
+      <article class="uc-card ft-card ft-wide" style="--uc:#6366f1;--uc2:#a5b4fc">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10"/><path d="M18 11c0 4-6 3-11.5 6.5"/></svg></span>
+          <span class="uc-tag">New</span>
+        </div>
+        <div class="ft-split">
+          <div>
+            <h3>Auto deploy &amp; environments</h3>
+            <p>Merge or push and it deploys itself; keep every variable once, encrypted, and use it anywhere.</p>
+            <ul class="ft-list two">
+              <li><b>Auto deploy on merge or commit</b><span>Per branch — main, master, dev — on every push or only on merged pull / merge requests.</span></li>
+              <li><b>Webhooks or a minute-by-minute check</b><span>Instant on GitHub, GitLab or Bitbucket; checked every minute otherwise.</span></li>
+              <li><b>Deploy history with every log</b><span>Branch, merge or commit, when and by whom — and the full log.</span></li>
+              <li><b>Named environments</b><span>shop-production, shop-staging — import a .env file and see where each is used.</span></li>
+              <li><b>Pick or save while you create</b><span>Fill an app, database or service from one — or save a new one by name.</span></li>
+              <li><b>One change, every app</b><span>Copy an edit to the apps made from it; their own values are kept.</span></li>
+            </ul>
+          </div>
+          <div class="uc-visual ft-auto" aria-hidden="true">
+            <div class="ft-branch"><code>dev</code><span class="ft-arrow">→</span><code>main</code><span class="ft-merged">⇄ #57 merged</span></div>
+            <div class="ft-autodeploy">
+              <div><b>⚡ Auto deploy</b><span>69%</span></div>
+              <div class="ft-autobar"><i style="width:69%"></i></div>
+            </div>
+            <div class="ft-envchip">🔒 shop-production · 6 variables</div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Teams, security & CI -->
+      <article class="uc-card ft-card" style="--uc:#f59e0b;--uc2:#fcd34d">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5.5a3 3 0 0 1 0 5.5M18 14c2 .8 3 2.8 3 6"/></svg></span>
+          <span class="uc-tag">Safe by default</span>
+        </div>
+        <h3>Teams, security &amp; CI</h3>
+        <ul class="ft-list">
+          <li><b>Organisations &amp; roles</b><span>Admin, editor or view-only; nothing crosses between organisations.</span></li>
+          <li><b>Encrypted secrets</b><span>AES-256-GCM for keys and tokens; scrypt for passwords.</span></li>
+          <li><b>CI runners in minutes</b><span>GitHub Actions or GitLab runners kept alive under systemd.</span></li>
+          <li><b>Activity log</b><span>Every deploy, domain, service and permission change.</span></li>
+          <li><b>Git sign-in without tokens</b><span>Connect GitHub or GitLab with a sign-in popup.</span></li>
+          <li><b>Light &amp; dark themes</b><span>Follows your system, or the one you pick.</span></li>
+        </ul>
+        <div class="uc-visual ft-roles" aria-hidden="true"><span class="r1">admin</span><span class="r2">editor</span><span class="r3">viewer</span></div>
+      </article>
     </div>
   </section>
 
   <section class="landing-section alt" id="how">
-    <span class="eyebrow">How it works</span>
-    <h2>Bare server to live app in four steps</h2>
-    <p class="section-lead">From a fresh Ubuntu server to an app running on your own domain, without opening a terminal.</p>
-    <ol class="steps">
-      <li><span class="step-n">1</span><div><h3>Add a server</h3><p>Host, SSH user and a password or key. The connection is tested before it is saved, and the panel says exactly what went wrong if it cannot get in.</p></div></li>
-      <li><span class="step-n">2</span><div><h3>Install what it needs</h3><p>Docker, Nginx and any database or cache, with one click each. Everything runs in containers with its data kept safe in volumes.</p></div></li>
-      <li><span class="step-n">3</span><div><h3>Deploy your app</h3><p>Pick a repository, branch and folder. Watch it build and start step by step, with the full log.</p></div></li>
-      <li><span class="step-n">4</span><div><h3>Put it on your domain</h3><p>Choose a Cloudflare domain and a subdomain. DNS, Nginx and SSL — or a Zero Trust tunnel — are set up for you.</p></div></li>
+    <div class="uc-head">
+      <span class="eyebrow">How it works</span>
+      <h2>Bare server to live app in <span class="gradient-text">five steps</span></h2>
+      <p class="section-lead">From a fresh Ubuntu server to an app running on your own domain — without opening a terminal.</p>
+    </div>
+    <ol class="hw-steps">
+      <li class="uc-card hw-step" style="--uc:#3b82f6">
+        <div class="hw-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span><span class="hw-num">01</span></div>
+        <h3>Add a server</h3>
+        <p>Host, SSH user and a password or key. The connection is tested before it is saved, and the panel says exactly what went wrong if it cannot get in.</p>
+        <span class="uc-tag hw-tag">SSH only</span>
+      </li>
+      <li class="uc-card hw-step" style="--uc:#0ea5e9">
+        <div class="hw-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span><span class="hw-num">02</span></div>
+        <h3>Install what it needs</h3>
+        <p>Docker, Nginx and any database or cache, with one click each. Everything runs in containers with its data kept safe in volumes.</p>
+        <span class="uc-tag hw-tag">One click each</span>
+      </li>
+      <li class="uc-card hw-step" style="--uc:#8b5cf6">
+        <div class="hw-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.5c3-1.3 6-1.5 6-1.5s-.2 3-1.5 6L13 14.5 9.5 11z"/><path d="M9.5 11 6 11.5 3.5 14l4 .8M13 14.5l-.5 3.5L10 20.5l-.8-4"/><circle cx="15.5" cy="8.5" r="1.3"/></svg></span><span class="hw-num">03</span></div>
+        <h3>Deploy your app</h3>
+        <p>Pick a repository, branch and folder. Watch it build and start step by step, with the full log.</p>
+        <span class="uc-tag hw-tag">Live logs</span>
+      </li>
+      <li class="uc-card hw-step" style="--uc:#10b981">
+        <div class="hw-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span><span class="hw-num">04</span></div>
+        <h3>Put it on your domain</h3>
+        <p>Choose a Cloudflare domain and a subdomain. DNS, Nginx and SSL — or a Zero Trust tunnel — are set up for you.</p>
+        <span class="uc-tag hw-tag">Free SSL</span>
+      </li>
+      <li class="uc-card hw-step" style="--uc:#6366f1">
+        <div class="hw-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-11.5 6.5"/></svg></span><span class="hw-num">05</span></div>
+        <h3>Merge — it deploys itself</h3>
+        <p>Turn on auto deploy for the branch. Every push, or every merged pull request, goes live on its own — with the progress and the log to watch.</p>
+        <span class="uc-tag hw-tag">Hands-free</span>
+      </li>
     </ol>
   </section>
 
   <section class="landing-section" id="use-cases">
-    <span class="eyebrow">Who it's for</span>
-    <h2>Built for teams that ship</h2>
-    <p class="section-lead">From one freelancer's VPS to an agency running dozens of client servers.</p>
-    <div class="feature-grid">
-      <article class="feature"><h3>Agencies</h3><p>Host every client's site on your own servers, one organisation per client, with their own people and domains.</p></article>
-      <article class="feature"><h3>Startups</h3><p>Get the convenience of a PaaS on affordable VPS servers — without giving up control of your infrastructure or data.</p></article>
-      <article class="feature"><h3>Freelancers</h3><p>Deploy, update and hand over projects in minutes, and keep all your servers and domains in one place.</p></article>
-      <article class="feature"><h3>IT &amp; DevOps teams</h3><p>Standardise how servers are set up, give developers safe self-service, and keep a record of every change.</p></article>
+    <div class="uc-head">
+      <span class="eyebrow">Who it's for</span>
+      <h2>Built for teams that <span class="gradient-text">ship</span></h2>
+      <p class="section-lead">From one freelancer's VPS to an agency running dozens of client servers — the same panel, shaped around how you work.</p>
+    </div>
+
+    <div class="uc-grid">
+      <!-- Agencies: the big card -->
+      <article class="uc-card uc-agency" style="--uc:#8b5cf6;--uc2:#c4b5fd">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 11h.01M12 11h.01M15 11h.01"/></svg></span>
+          <span class="uc-tag">One organisation per client</span>
+        </div>
+        <h3>Agencies</h3>
+        <p>Host every client's apps on your own servers — each client in their own organisation, with their own people, domains and plan. Nothing crosses between them.</p>
+        <ul class="uc-points">
+          <li>Separate client workspaces</li>
+          <li>Client logins with roles</li>
+          <li>Domains &amp; SSL per client</li>
+        </ul>
+        <div class="uc-visual uc-orgs" aria-hidden="true">
+          <div class="uc-hub">
+            <span class="uc-hub-icon">🏢</span>
+            <div><b>Your agency panel</b><small>3 clients · 6 servers · 14 apps · 9 domains</small></div>
+          </div>
+          <div class="uc-link"></div>
+          <div class="uc-org"><span class="uc-avatar" style="--a:#8b5cf6">B</span><div><b>Bloom Studio</b><small>3 servers · 8 apps · 5 domains</small></div><span class="uc-live">live</span></div>
+          <div class="uc-org"><span class="uc-avatar" style="--a:#3b82f6">N</span><div><b>Nova Retail</b><small>2 servers · 4 apps · 3 domains</small></div><span class="uc-live">live</span></div>
+          <div class="uc-org"><span class="uc-avatar" style="--a:#14b8a6">K</span><div><b>Kite Health</b><small>1 server · 2 apps · 1 domain</small></div><span class="uc-live deploying">deploying</span></div>
+          <div class="uc-team">
+            <span class="uc-faces"><i style="--a:#8b5cf6">R</i><i style="--a:#3b82f6">M</i><i style="--a:#14b8a6">S</i><i style="--a:#f59e0b">+2</i></span>
+            <span>Each client signs in to their own organisation only — as <b>admin</b>, <b>editor</b> or <b>viewer</b>.</span>
+          </div>
+        </div>
+      </article>
+
+      <!-- Startups: wide card -->
+      <article class="uc-card uc-startup" style="--uc:#3b82f6;--uc2:#93c5fd">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.5c3-1.3 6-1.5 6-1.5s-.2 3-1.5 6L13 14.5 9.5 11z"/><path d="M9.5 11 6 11.5 3.5 14l4 .8M13 14.5l-.5 3.5L10 20.5l-.8-4"/><path d="M6.5 17.5C5 19 4.5 20.5 4.5 20.5s1.5-.5 3-2"/><circle cx="15.5" cy="8.5" r="1.3"/></svg></span>
+          <span class="uc-tag">PaaS comfort, VPS prices</span>
+        </div>
+        <div class="uc-split">
+          <div>
+            <h3>Startups</h3>
+            <p>Push to <code>main</code> and it is live — the convenience of a hosting platform on affordable VPS servers, without giving up control of your infrastructure or data.</p>
+            <ul class="uc-points">
+              <li>Auto deploy on merge</li>
+              <li>Staging &amp; production environments</li>
+            </ul>
+          </div>
+          <div class="uc-visual uc-cost" aria-hidden="true">
+            <div class="uc-cost-row"><span>Hosted platform</span><div class="uc-bar"><i style="width:100%"></i></div><b>$$$$</b></div>
+            <div class="uc-cost-row mine"><span>Your VPS + AJ Pilot</span><div class="uc-bar"><i style="width:28%"></i></div><b>$</b></div>
+            <div class="uc-pill">⚡ <code>main</code> → live in about 2 minutes</div>
+          </div>
+        </div>
+      </article>
+
+      <!-- Freelancers -->
+      <article class="uc-card uc-freelance" style="--uc:#14b8a6;--uc2:#5eead4">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/><path d="m9 10 2 2 4-4"/></svg></span>
+          <span class="uc-tag">Ship &amp; hand over</span>
+        </div>
+        <h3>Freelancers</h3>
+        <p>Deploy, update and hand over projects in minutes, with every server and domain in one place.</p>
+        <ul class="uc-visual uc-checks" aria-hidden="true">
+          <li><span>Deployed <b>client-site</b></span></li>
+          <li><span>Domain &amp; SSL live</span></li>
+          <li><span>Client invited as viewer</span></li>
+        </ul>
+      </article>
+
+      <!-- IT & DevOps -->
+      <article class="uc-card uc-devops" style="--uc:#f59e0b;--uc2:#fcd34d">
+        <div class="uc-top">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <span class="uc-tag">Safe self-service</span>
+        </div>
+        <h3>IT &amp; DevOps teams</h3>
+        <p>Standardise how servers are set up, let developers help themselves safely, and keep a record of every change.</p>
+        <div class="uc-visual uc-log" aria-hidden="true">
+          <div><time>10:42</time><b>Priya</b><span>deployed <code>api</code></span></div>
+          <div><time>10:38</time><b>Arjun</b><span>added a domain</span></div>
+          <div><time>10:31</time><b>Auto</b><span>deployed <code>#57</code></span></div>
+        </div>
+      </article>
     </div>
   </section>
 
   <section class="landing-section alt" id="security">
-    <span class="eyebrow">Security</span>
-    <h2>Built to be trusted with root</h2>
-    <p class="section-lead">It holds the keys to your servers, so it is careful with every one of them.</p>
-    <div class="two-col">
-      <ul class="tick-list">
-        <li><b>Your infrastructure only.</b> The panel talks straight to your servers over SSH. No agents, no vendor in the middle, no telemetry.</li>
-        <li><b>Encrypted at rest.</b> Every credential is AES-256-GCM encrypted with a master key that stays on your disk.</li>
-        <li><b>Roles enforced server-side.</b> The API checks permission on every change, whatever the browser sends.</li>
-      </ul>
-      <ul class="tick-list">
-        <li><b>Sessions you can end.</b> HttpOnly cookies with random tokens stored only as hashes; a new role or password signs that person out everywhere.</li>
-        <li><b>Careful with destructive work.</b> Removing an installation keeps its data volume unless you say otherwise.</li>
-        <li><b>Nothing typed into a shell.</b> Names, ports and units are validated against strict patterns before anything runs.</li>
-      </ul>
+    <div class="uc-head">
+      <span class="eyebrow">Security</span>
+      <h2>Built to be <span class="gradient-text">trusted with root</span></h2>
+      <p class="section-lead">It holds the keys to your servers, so it is careful with every one of them.</p>
+    </div>
+    <div class="sv-grid">
+      <article class="uc-card sv-card" style="--uc:#3b82f6">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><path d="M7 12h10"/><path d="M12 7v10"/></svg></span><span class="uc-tag">No middleman</span></div>
+        <h3>Your infrastructure only</h3>
+        <p>The panel talks straight to your servers over SSH. No agents, no vendor in the middle, no telemetry.</p>
+        <div class="uc-visual" aria-hidden="true"><div class="sv-path"><span>Panel</span><i></i><b>SSH</b><i></i><span>Your servers</span></div></div>
+      </article>
+      <article class="uc-card sv-card" style="--uc:#10b981">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span><span class="uc-tag">At rest</span></div>
+        <h3>Encrypted at rest</h3>
+        <p>Every credential is AES-256-GCM encrypted with a master key that stays on your disk.</p>
+        <div class="uc-visual" aria-hidden="true"><div class="sv-cipher"><code>sk_live_4f…</code><span>→</span><code>9x#Qe!7…</code><b>AES-256-GCM</b></div></div>
+      </article>
+      <article class="uc-card sv-card" style="--uc:#f59e0b">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 20 6v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="uc-tag">Every request</span></div>
+        <h3>Roles enforced server-side</h3>
+        <p>The API checks permission on every change, whatever the browser sends.</p>
+        <div class="uc-visual" aria-hidden="true"><div class="sv-roles"><span class="ok">admin · delete ✓</span><span class="ok">editor · deploy ✓</span><span class="no">viewer · delete ✕</span></div></div>
+      </article>
+      <article class="uc-card sv-card" style="--uc:#8b5cf6">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M15 8l2 2"/></svg></span><span class="uc-tag">Your control</span></div>
+        <h3>Sessions you can end</h3>
+        <p>HttpOnly cookies with random tokens stored only as hashes; a new role or password signs that person out everywhere.</p>
+        <div class="uc-visual" aria-hidden="true"><div class="sv-sessions"><div><span>Chrome · Windows</span><em>this device</em></div><div><span>Safari · iPhone</span><em>2h ago</em></div><b>Sign out everywhere</b></div></div>
+      </article>
+      <article class="uc-card sv-card" style="--uc:#ef4444">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></span><span class="uc-tag">Data first</span></div>
+        <h3>Careful with destructive work</h3>
+        <p>Removing an installation keeps its data volume unless you say otherwise.</p>
+        <div class="uc-visual" aria-hidden="true"><div class="sv-keep"><span>Remove <code>mysql-main</code></span><b>✓ keep volume <code>mysql-main-data</code></b></div></div>
+      </article>
+      <article class="uc-card sv-card" style="--uc:#0ea5e9">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span><span class="uc-tag">Validated</span></div>
+        <h3>Nothing typed into a shell</h3>
+        <p>Names, ports and units are validated against strict patterns before anything runs.</p>
+        <div class="uc-visual" aria-hidden="true"><div class="sv-valid"><div class="ok"><code>shop-web</code><b>✓</b></div><div class="no"><code>app; rm -rf /</code><b>✕</b></div></div></div>
+      </article>
     </div>
   </section>
 
@@ -269,23 +622,41 @@
   </section>
 
   <section class="landing-section alt" id="faq">
-    <span class="eyebrow">FAQ</span>
-    <h2>Frequently asked questions</h2>
-    <div class="faq-list"><!--FAQ--></div>
-    <p class="muted" style="margin-top:18px">Looking for step-by-step help? Read the <a href="/docs">AJ Pilot documentation</a>.</p>
+    <div class="fq-layout">
+      <aside class="fq-side">
+        <span class="eyebrow">FAQ</span>
+        <h2>Frequently asked <span class="gradient-text">questions</span></h2>
+        <p class="section-lead">Everything people ask before they put their servers on autopilot.</p>
+        <div class="uc-card fq-help" style="--uc:#3b82f6">
+          <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></svg></span>
+          <h3>Still have a question?</h3>
+          <p>Ask us anything — setup, pricing or a server you are unsure about. We reply within one working day.</p>
+          <div class="fq-actions"><a class="btn primary" href="#contact">Contact us</a><a class="btn" href="/docs">Read the docs</a></div>
+        </div>
+      </aside>
+      <div class="faq-list"><!--FAQ--></div>
+    </div>
   </section>
 
   <section class="landing-section" id="contact">
     <div class="contact-grid">
       <div>
         <span class="eyebrow">Contact</span>
-        <h2>Get started</h2>
+        <h2>Get <span class="gradient-text">started</span></h2>
         <p class="section-lead">Tell us a little about what you run. We will set up your account and help you deploy your first app.</p>
-        <ul class="tick-list">
-          <li><b>Free plan</b> on one server to try everything.</li>
-          <li><b>Setup help</b> for your first server, app and domain.</li>
-          <li><b>A reply within one working day.</b></li>
-        </ul>
+        <div class="ct-perks">
+          <div class="ct-perk" style="--uc:#10b981"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12M12 8S10 3 7.5 4.5 9 8 12 8zM12 8s2-5 4.5-3.5S15 8 12 8z"/></svg></span><div><b>Free plan</b><span>One server to try everything — no card needed.</span></div></div>
+          <div class="ct-perk" style="--uc:#8b5cf6"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17v3h3l5.3-5.3a4 4 0 0 0 5.4-5.4l-2.4 2.4-2.6-.6-.6-2.6z"/></svg></span><div><b>Setup help</b><span>We help with your first server, app and domain.</span></div></div>
+          <div class="ct-perk" style="--uc:#f59e0b"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><div><b>Quick reply</b><span>A real answer within one working day.</span></div></div>
+        </div>
+        <div class="ct-next">
+          <span class="ct-next-title">What happens next</span>
+          <ol>
+            <li><b>You send the form</b><span>Takes a minute.</span></li>
+            <li><b>We reply</b><span>Within one working day, with your account.</span></li>
+            <li><b>Your first app goes live</b><span>With our help, on your own server.</span></li>
+          </ol>
+        </div>
         <p class="muted small">Already have an account? <a href="#top" id="link-contact-signin">Sign in</a>.</p>
       </div>
       <form class="card lead-form" id="form-lead" novalidate>
@@ -313,25 +684,31 @@
   </section>
 
   <section class="landing-section alt" id="about">
-    <span class="eyebrow">About</span>
-    <h2>About AJ Pilot</h2>
-    <div class="about-grid">
-      <div>
-        <p>
-          AJ Pilot started as a way to stop keeping a dozen SSH sessions open just to answer simple questions:
-          what is running on that box, is the disk filling up, which port is that, did the app come back after the reboot.
-        </p>
-        <p>
-          It grew into a complete control panel: servers, apps, domains, databases and teams, all in one place.
+    <div class="uc-head">
+      <span class="eyebrow">About</span>
+      <h2>About <span class="gradient-text">AJ Pilot</span></h2>
+    </div>
+    <div class="ab-grid">
+      <article class="uc-card ab-story" style="--uc:#3b82f6">
+        <div class="uc-top"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/><path d="M8 11h.01M12 11h.01M16 11h.01"/></svg></span><span class="uc-tag">Our story</span></div>
+        <p>AJ Pilot started as a way to stop keeping a dozen SSH sessions open just to answer simple questions:
+          what is running on that box, is the disk filling up, which port is that, did the app come back after the reboot.</p>
+        <p>It grew into a complete control panel: servers, apps, domains, databases and teams, all in one place.
           It is a single Node.js process with a MySQL database and a plain browser UI — and everything it does, it does
-          over the same SSH connection you would have used by hand, telling you exactly what it ran when something fails.
-        </p>
-      </div>
-      <div class="about-stats">
-        <div class="stat"><b>7</b><span>frameworks detected</span></div>
-        <div class="stat"><b>8</b><span>one-click services</span></div>
-        <div class="stat"><b>0</b><span>agents on your servers</span></div>
-        <div class="stat"><b>AES-256</b><span>on every secret</span></div>
+          over the same SSH connection you would have used by hand, telling you exactly what it ran when something fails.</p>
+        <div class="uc-visual ab-diagram" aria-hidden="true">
+          <div class="ab-node"><b>Your browser</b><small>the panel</small></div>
+          <i></i>
+          <div class="ab-node main"><b>AJ Pilot</b><small>Node.js · MySQL</small></div>
+          <i class="ssh"><span>SSH</span></i>
+          <div class="ab-node"><b>Your servers</b><small>Ubuntu · Docker</small></div>
+        </div>
+      </article>
+      <div class="ab-stats">
+        <div class="uc-card ab-stat" style="--uc:#8b5cf6"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg></span><b>7</b><span>frameworks detected</span></div>
+        <div class="uc-card ab-stat" style="--uc:#0ea5e9"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg></span><b>8</b><span>one-click services</span></div>
+        <div class="uc-card ab-stat" style="--uc:#10b981"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></svg></span><b>0</b><span>agents on your servers</span></div>
+        <div class="uc-card ab-stat" style="--uc:#f59e0b"><span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span><b>AES-256</b><span>on every secret</span></div>
       </div>
     </div>
   </section>
@@ -348,23 +725,59 @@
   </main>
 
   <footer class="landing-foot">
-    <div class="foot-inner">
+    <div class="foot-glow" aria-hidden="true"></div>
+    <div class="foot-main">
       <div class="foot-about">
-        <span class="foot-brand"><span class="logo" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span> AJ Pilot</span>
-        <p class="foot-tagline">Autopilot for your servers: deploy apps, run databases and connect domains from one self-hosted panel.</p>
+        <a class="foot-brand" href="#top" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span><span>AJ Pilot<small>autopilot for your servers</small></span></a>
+        <p class="foot-tagline">Deploy apps, run databases and connect domains on your own Ubuntu servers — with auto deploy on every merge, one self-hosted panel, and nothing to install on the servers.</p>
+        <ul class="foot-badges" aria-label="Highlights">
+          <li>🔒 AES-256 encrypted</li>
+          <li>⚡ Auto deploy on merge</li>
+          <li>🖥️ Self-hosted</li>
+          <li>🚫 No agent</li>
+        </ul>
+        <div class="foot-actions">
+          <a class="btn primary" href="#contact">Get started free</a>
+          <a class="btn" href="/docs">Read the docs</a>
+        </div>
       </div>
-      <nav class="foot-links" aria-label="Product">
+      <nav class="foot-col" aria-label="Product">
         <span class="foot-title">Product</span>
-        <a href="#features">Features</a><a href="#deploy">Deploy</a><a href="#how">How it works</a><a href="#pricing">Pricing</a>
+        <a href="#features">Features</a>
+        <a href="#auto-deploy">Auto deploy <span class="foot-new">New</span></a>
+        <a href="#environments">Environments <span class="foot-new">New</span></a>
+        <a href="#how">How it works</a>
+        <a href="#pricing">Pricing</a>
       </nav>
-      <nav class="foot-links" aria-label="Help">
-        <span class="foot-title">Help</span>
-        <a href="/docs">Docs</a><a href="#faq">FAQ</a><a href="#contact">Contact</a><a href="#about">About</a>
+      <nav class="foot-col" aria-label="Platform">
+        <span class="foot-title">Platform</span>
+        <a href="#features">Servers &amp; monitoring</a>
+        <a href="#deploy">App deployment</a>
+        <a href="/docs/databases">Databases</a>
+        <a href="/docs/one-click-installs">One-click installs</a>
+        <a href="/docs/app-domains">Domains &amp; SSL</a>
+      </nav>
+      <nav class="foot-col" aria-label="Resources">
+        <span class="foot-title">Resources</span>
+        <a href="/docs">Documentation</a>
+        <a href="/docs/getting-started">Getting started</a>
+        <a href="/docs/deploy-an-app">Deploy an app</a>
+        <a href="/docs/security">Security</a>
+        <a href="/docs/troubleshooting">Troubleshooting</a>
+      </nav>
+      <nav class="foot-col" aria-label="Company">
+        <span class="foot-title">Company</span>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a href="#faq">FAQ</a>
+        <a href="#top" id="link-foot-signin">Sign in</a>
       </nav>
     </div>
+    <div class="foot-wordmark" aria-hidden="true">AJ Pilot</div>
     <div class="foot-base">
       <span>© <span id="year">2026</span> AJ Pilot. All rights reserved.</span>
-      <span>Runs on your hardware — your keys never leave it.</span>
+      <span class="foot-base-mid">Runs on your hardware — your keys never leave it.</span>
+      <a class="foot-top" href="#top">Back to top <span aria-hidden="true">↑</span></a>
     </div>
   </footer>
 </div>
@@ -415,7 +828,49 @@
       <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
       <div id="login-msg" class="msg hidden"></div>
       <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Sign in</button>
-      <p class="muted small" style="margin-top:14px">No account? An admin of your organisation creates one for you.</p>
+      <p class="muted small auth-switch" style="margin-top:14px" data-signup-only>New to AJ Pilot? <a href="#signup" data-auth-mode="signup">Create a free account</a></p>
+      <p class="muted small" style="margin-top:14px" data-signup-closed hidden>No account? An admin of your organisation creates one for you.</p>
+    </form>
+
+    <!-- anyone: their own organisation, with them as its admin -->
+    <form id="form-signup" class="hidden" novalidate>
+      <h2>Create your account</h2>
+      <p class="muted small" id="signup-sub">Your own organisation, with you as its admin — start on the free plan, no card needed.</p>
+      <div class="row">
+        <label>Your name<input name="name" placeholder="Jane Doe" required maxlength="190" autocomplete="name" /></label>
+        <label>Work email<input name="email" type="email" placeholder="jane@company.com" required maxlength="190" autocomplete="email" /></label>
+      </div>
+      <div class="row">
+        <label>Mobile number <span class="muted small">(with country code)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" required /></label>
+        <label>Company <span class="muted small">(your organisation)</span><input name="company" maxlength="180" autocomplete="organization" placeholder="Acme Studio" /></label>
+      </div>
+      <div class="su-plan-block" id="signup-plan-block" hidden>
+        <div class="su-plan-head">
+          <span class="su-plan-title">Choose your plan</span>
+          <div class="seg" role="group" aria-label="Billing" id="signup-cycle">
+            <button type="button" class="active" data-su-cycle="monthly">Monthly</button>
+            <button type="button" data-su-cycle="yearly">Yearly <span class="su-save" id="signup-save"></span></button>
+          </div>
+        </div>
+        <div class="su-plans" id="signup-plans" role="radiogroup" aria-label="Plan"></div>
+        <p class="muted small su-plan-note" id="signup-plan-note"></p>
+      </div>
+      <div class="row">
+        <label>Password
+          <span class="pw-field"><input name="password" type="password" required autocomplete="new-password" id="signup-password" /><button type="button" class="pw-toggle" data-pw-toggle aria-label="Show password">Show</button></span>
+        </label>
+        <label>Confirm password<input name="confirm" type="password" required autocomplete="new-password" /></label>
+      </div>
+      <div class="pw-meter" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <p class="muted small" id="signup-pw-hint" style="margin:6px 0 0">At least 10 characters, with letters and numbers.</p>
+      <label class="check" style="margin-top:12px"><input type="checkbox" name="terms" required /> <span>I agree to the terms of service and privacy policy</span></label>
+      <div class="hp" aria-hidden="true"><label>Leave this empty<input name="hp_check" type="text" tabindex="-1" autocomplete="off" /></label></div>
+      <div id="signup-msg" class="msg hidden"></div>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Create account</button>
+      <ul class="signup-perks">
+        <li>Free plan on one server</li><li>Auto deploy on merge</li><li>Encrypted secrets</li>
+      </ul>
+      <p class="muted small auth-switch" style="margin-top:12px">Already have an account? <a href="#signin" data-auth-mode="login">Sign in</a></p>
     </form>
   </div>
 </div>
@@ -463,18 +918,9 @@
     </div>
 
     <div class="topbar-right">
-      <div class="theme-menu">
-        <button type="button" class="icon-btn" data-theme-toggle aria-haspopup="true" aria-expanded="false" title="Theme">
-          <span class="theme-current" aria-hidden="true">🌙</span><span class="sr-only">Theme</span>
-        </button>
-        <div class="menu-pop hidden" role="menu">
-          <div class="menu-title">Theme</div>
-          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="light"><span class="dropdown-icon">☀️</span>Light<span class="menu-check">✓</span></button>
-          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="dark"><span class="dropdown-icon">🌙</span>Dark<span class="menu-check">✓</span></button>
-          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="system"><span class="dropdown-icon">🖥️</span>System<span class="menu-check">✓</span></button>
-        </div>
-      </div>
+      <button type="button" class="icon-btn theme-flip" data-theme-flip aria-label="Switch to light theme" title="Switch to light theme"><span class="lt-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="lt-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg></span></button>
 
+      <button type="button" class="trial-pill" id="trial-pill" hidden></button>
       <span class="org-pick hidden" id="org-pick"></span>
 
       <div class="user-menu">
@@ -503,6 +949,7 @@
       </div>
     </div>
   </header>
+  <div class="trial-banner" id="trial-banner" hidden></div>
 
 <main>
   <div class="sa-banner" id="sa-banner">

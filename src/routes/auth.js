@@ -3,8 +3,10 @@
  *
  * The very first run has no accounts at all, so the panel asks whoever gets
  * there first to create the super admin. A super admin runs the platform and
- * belongs to no organisation. After that this router only issues and ends
- * sessions — accounts are created by a super admin or an organisation's admin.
+ * belongs to no organisation. After that this router issues and ends
+ * sessions, and lets a visitor sign up: their own organisation, with them as
+ * its admin (ALLOW_SIGNUP=false turns that off). Everyone else is created by
+ * a super admin or an organisation's admin.
  */
 
 import { Router } from 'express';
@@ -15,6 +17,8 @@ import {
   newSessionToken, hashToken, sessionCookie, clearedCookie, publicRoles,
 } from '../lib/auth.js';
 import { publicUser, orgOf, endSession, endAllSessions, requireAuth } from '../lib/authGuard.js';
+import { createOrganisation, OrgError } from '../lib/organisations.js';
+import { setSubscription } from '../lib/plans.js';
 
 export const authRouter = Router();
 
@@ -45,6 +49,7 @@ authRouter.get('/state', async (req, res, next) => {
     const needsSetup = (await userCount()) === 0;
     res.json({
       needsSetup,
+      signupOpen: !needsSetup && signupOpen(),
       user: publicUser(req.user, req.organisation),
       roles: publicRoles(),
     });
@@ -84,6 +89,110 @@ authRouter.post('/setup', async (req, res, next) => {
 
     res.status(201).json({ ok: true, user: publicUser(user, null) });
   } catch (err) { next(err); }
+});
+
+/* --------------------------------------------------------------- sign up */
+
+/** Sign-up is on unless ALLOW_SIGNUP=false, and only once the panel has its super admin. */
+const signupOpen = () => String(process.env.ALLOW_SIGNUP ?? 'true').toLowerCase() !== 'false';
+
+// A few sign-ups per address an hour is plenty for a person, and slows down anything else.
+const signupHits = new Map();
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
+const SIGNUP_PER_WINDOW = 5;
+
+/** The free plan a new organisation starts on: public, active and costing nothing. */
+const freePlan = () => one(
+  "SELECT * FROM plans WHERE status = 'active' AND is_public = 1 AND price_monthly = 0 AND price_yearly = 0 ORDER BY sort_order, id LIMIT 1"
+);
+
+/** An organisation name nobody has yet: "Acme", then "Acme 2", "Acme 3"… */
+async function freeOrgName(base) {
+  const name = base.slice(0, 180);
+  if (!await one('SELECT id FROM organisations WHERE name = ?', [name])) return name;
+  for (let n = 2; n < 1000; n += 1) {
+    const candidate = `${name} ${n}`;
+    if (!await one('SELECT id FROM organisations WHERE name = ?', [candidate])) return candidate;
+  }
+  return `${name} ${Date.now()}`;
+}
+
+/**
+ * Anyone can create their own organisation: they become its admin, it starts
+ * on the free plan (when there is one) and they are signed straight in.
+ * Without a free plan the organisation waits on the "choose a plan" page.
+ */
+authRouter.post('/signup', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    if (!signupOpen()) return res.status(403).json({ error: 'Sign-up is closed on this panel. Ask an admin for an account.' });
+    if (!(await userCount())) return res.status(409).json({ error: 'This panel has not been set up yet.' });
+
+    // The hidden field is only ever filled in by bots.
+    if (b.hp_check) return res.status(400).json({ error: 'Sign-up could not be completed.' });
+
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const now = Date.now();
+    const hits = (signupHits.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
+    if (hits.length >= SIGNUP_PER_WINDOW) return res.status(429).json({ error: 'Too many sign-ups from this network — please try again in an hour.' });
+
+    const name = String(b.name || '').trim().slice(0, 190);
+    if (!name) return res.status(400).json({ error: 'Your name is required' });
+    const email = checkEmail(b.email);
+    if (email.error) return res.status(400).json({ error: email.error });
+    const phone = checkPhone(b.phone, { required: true });
+    if (phone.error) return res.status(400).json({ error: phone.error });
+    const passwordError = checkPassword(b.password);
+    if (passwordError) return res.status(400).json({ error: passwordError });
+    if (b.confirm !== undefined && b.confirm !== b.password) return res.status(400).json({ error: 'The two passwords do not match' });
+    if (!(b.terms === true || b.terms === 'on' || b.terms === 'true')) return res.status(400).json({ error: 'Please accept the terms to create an account' });
+    if (await one('SELECT id FROM users WHERE email = ?', [email.value])) {
+      return res.status(409).json({ error: `${email.value} already has an account — sign in instead.`, signIn: true });
+    }
+
+    hits.push(now);
+    signupHits.set(ip, hits);
+    if (signupHits.size > 5000) for (const [k, v] of signupHits) if (!v.some((t) => now - t < SIGNUP_WINDOW_MS)) signupHits.delete(k);
+
+    // The plan they picked. A free one starts at once; a paid one starts them on the free
+    // plan and is recorded as a request, which a super admin switches on once it is paid for.
+    const cycle = b.cycle === 'yearly' ? 'yearly' : 'monthly';
+    const chosen = b.plan_id
+      ? await one("SELECT * FROM plans WHERE id = ? AND status = 'active' AND is_public = 1", [Number(b.plan_id)])
+      : null;
+    if (b.plan_id && !chosen) return res.status(400).json({ error: 'That plan is not available — pick another one' });
+    const isFree = (p) => p && Number(p.price_monthly) === 0 && Number(p.price_yearly) === 0;
+    if (chosen && !isFree(chosen) && cycle === 'yearly' && !(Number(chosen.price_yearly) > 0)) {
+      return res.status(400).json({ error: `${chosen.name} is not sold yearly — choose monthly` });
+    }
+    const plan = isFree(chosen) ? chosen : await freePlan();
+    const requested = chosen && !isFree(chosen) ? chosen : null;
+
+    const company = String(b.company || '').trim();
+    const orgId = await createOrganisation({
+      name: await freeOrgName(company || `${name}'s workspace`),
+      notes: `Signed up from the website${requested ? ` — asked for ${requested.name} (${cycle})` : ''}`,
+      admin_email: email.value, admin_password: b.password, admin_name: name, admin_phone: b.phone,
+      plan_id: plan?.id, sub_status: 'active',
+    }, null);
+    if (requested) await setSubscription(orgId, requested, { cycle, status: 'pending', notes: 'Chosen at sign-up' });
+
+    const user = await one('SELECT * FROM users WHERE email = ?', [email.value]);
+    const org = await one('SELECT * FROM organisations WHERE id = ?', [orgId]);
+    await startSession(req, res, user);
+    await logActivity('user', user.id, 'signup', `${name} signed up and created "${org.name}"`
+      + `${plan ? ` on ${plan.name}` : ' (no free plan — waiting for one)'}${requested ? `, asking for ${requested.name} (${cycle})` : ''}`);
+
+    res.status(201).json({
+      ok: true,
+      user: publicUser(user, org),
+      plan: plan ? { id: plan.id, name: plan.name } : null,
+      requested: requested ? { id: requested.id, name: requested.name, cycle } : null,
+    });
+  } catch (err) {
+    if (err instanceof OrgError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
 });
 
 /* ---------------------------------------------------------------- login */

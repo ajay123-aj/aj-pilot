@@ -12,7 +12,7 @@ import { requireOrg } from '../lib/authGuard.js';
 import { can } from '../lib/auth.js';
 import { publicPlan } from './platform.js';
 import {
-  currentSubscription, pendingRequest, usageOf, setSubscription, asJson, money,
+  currentSubscription, pendingRequest, usageOf, setSubscription, asJson, money, trialState, usedFreeTrial, FREE_TRIAL_DAYS,
 } from '../lib/plans.js';
 
 export const billingRouter = Router();
@@ -33,6 +33,10 @@ billingRouter.get('/', async (req, res, next) => {
       organisation: req.organisation ? { id: req.organisation.id, name: req.organisation.name } : null,
       active: Boolean(sub),
       subscription: subView(sub),
+      // A free plan is a trial: which day it is on, how many are left, and whether it has ended.
+      trial: trialState(sub),
+      trialDays: FREE_TRIAL_DAYS,
+      freeTrialUsed: await usedFreeTrial(req.orgId),
       limits: sub ? asJson(sub.plan_limits, {}) : null,
       pending: subView(pending),
       usage: await usageOf(req.orgId),
@@ -52,8 +56,14 @@ billingRouter.post('/choose', async (req, res, next) => {
     const price = Number(cycle === 'yearly' ? plan.price_yearly : plan.price_monthly);
 
     const current = await currentSubscription(req.orgId);
-    if (current && current.plan_id === plan.id && current.cycle === cycle) {
+    // The same plan again is only refused while it is still running — an expired one is being renewed.
+    const currentEnded = trialState(current)?.expired;
+    if (current && current.plan_id === plan.id && current.cycle === cycle && !currentEnded) {
       return res.status(400).json({ error: `You are already on ${plan.name}` });
+    }
+
+    if (price === 0 && await usedFreeTrial(req.orgId)) {
+      return res.status(400).json({ error: `The ${FREE_TRIAL_DAYS}-day free plan can only be used once. Choose a paid plan to continue.` });
     }
 
     if (price === 0) {
@@ -65,7 +75,7 @@ billingRouter.post('/choose', async (req, res, next) => {
     await setSubscription(req.orgId, plan, { cycle, status: 'pending' });
     await logActivity('organisation', req.orgId, 'plan_requested',
       `${req.user.name} asked for ${plan.name} (${cycle}, ${plan.currency} ${price}) for "${req.organisation.name}"`);
-    res.json({ ok: true, activated: false, message: `Requested ${plan.name}. It will be switched on as soon as your payment is confirmed.` });
+    res.json({ ok: true, activated: false, message: `${currentEnded && current.plan_id === plan.id ? 'Renewal of' : 'Requested'} ${plan.name} sent. It will be switched on as soon as your payment is confirmed.` });
   } catch (err) { next(err); }
 });
 

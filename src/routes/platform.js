@@ -12,7 +12,7 @@ import { all, one, run, scalar, logActivity } from '../db/index.js';
 import { hashPassword, checkPassword, checkEmail, checkPhone, phoneRequired, ROLES } from '../lib/auth.js';
 import { endAllSessions } from '../lib/authGuard.js';
 import { config } from '../config.js';
-import { setSubscription, activateRequest, usageOf, LIMIT_KEYS } from '../lib/plans.js';
+import { setSubscription, activateRequest, usageOf, LIMIT_KEYS, trialState } from '../lib/plans.js';
 import { createOrganisation, OrgError, slugify } from '../lib/organisations.js';
 import { leadsRouter, leadSummary } from './leads.js';
 import { docsFor } from '../lib/docs.js';
@@ -206,6 +206,9 @@ async function organisationRows() {
       subscription: s ? {
         id: s.id, planId: s.plan_id, plan: s.plan_name, cycle: s.cycle, amount: money(s.amount), currency: s.currency,
         status: s.status, startedAt: s.started_at, renewsAt: s.renews_at, mrr: monthlyValue(s),
+        expiresAt: s.expires_at || null,
+        // When it stops giving access (a set end date, or the free trial's end) and whether it has.
+        end: trialState(s),
       } : null,
     };
   });
@@ -263,6 +266,56 @@ platformRouter.put('/organisations/:id/subscription', async (req, res, next) => 
     await setSubscription(org.id, plan, { cycle: b.cycle, status: b.status, amount: b.amount, renewsAt: b.renews_at, notes: b.notes });
     await logActivity('organisation', org.id, 'subscription_set', `Put "${org.name}" on ${plan.name} (${b.cycle === 'yearly' ? 'yearly' : 'monthly'}, ${b.status || 'active'})`);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+/**
+ * End any plan — free or paid — on a date, or now: after it the organisation
+ * can still see everything but not add or change anything.
+ *   { action: 'now' }                      expires straight away
+ *   { action: 'date', date: '2026-10-31' } ends at the end of that day
+ *   { action: 'extend', days: 15 }         moves the end (or today) on by that many days
+ *   { action: 'clear' }                    no end date: a paid plan runs on, a free plan
+ *                                          falls back to its trial end
+ */
+platformRouter.put('/organisations/:id/subscription/expiry', async (req, res, next) => {
+  try {
+    const org = await one('SELECT * FROM organisations WHERE id = ?', [req.params.id]);
+    if (!org) return res.status(404).json({ error: 'Organisation not found' });
+    const sub = await one(`SELECT s.*, p.name AS plan_name FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+      WHERE s.org_id = ? AND s.status IN ('active','trial','past_due') ORDER BY s.id DESC LIMIT 1`, [org.id]);
+    if (!sub) return res.status(400).json({ error: `"${org.name}" has no plan to expire` });
+
+    const b = req.body || {};
+    let expires = null;
+    let words;
+    if (b.action === 'now') {
+      expires = new Date();
+      words = 'now';
+    } else if (b.action === 'date') {
+      const d = new Date(`${String(b.date || '').slice(0, 10)}T23:59:59Z`);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'Pick the date the plan ends' });
+      expires = d;
+      words = `on ${d.toISOString().slice(0, 10)}`;
+    } else if (b.action === 'extend') {
+      const days = Math.round(Number(b.days));
+      if (!Number.isFinite(days) || days < 1 || days > 3650) return res.status(400).json({ error: 'Extend by 1 to 3650 days' });
+      const current = trialState(sub);
+      const from = current && !current.expired ? Date.parse(current.endsAt) : Date.now();
+      expires = new Date(from + days * 86400000);
+      words = `on ${expires.toISOString().slice(0, 10)} (extended by ${days} day${days === 1 ? '' : 's'})`;
+    } else if (b.action === 'clear') {
+      words = 'with no end date';
+    } else {
+      return res.status(400).json({ error: 'Choose what to do: now, date, extend or clear' });
+    }
+
+    await run('UPDATE subscriptions SET expires_at = ? WHERE id = ?', [expires, sub.id]);
+    const state = trialState({ ...sub, expires_at: expires });
+    await logActivity('organisation', org.id, 'subscription_expiry',
+      `${b.action === 'now' ? 'Expired' : 'Set'} the ${sub.plan_name} plan of "${org.name}" ${b.action === 'now' ? 'now' : `to end ${words}`}`,
+      b.action === 'now' ? 'warn' : 'info');
+    res.json({ ok: true, end: state });
   } catch (err) { next(err); }
 });
 

@@ -28,6 +28,7 @@ async function api(path, options = {}) {
     // A session that has gone away sends you back to the front door.
     if (res.status === 401 && data.needsAuth) signedOut();
     // No plan: a client is shown the plan page instead of a dead end.
+    // An ended free trial is different: everything stays visible, only changes are refused.
     if (res.status === 402 && data.needsPlan) planRequired();
     const err = new Error(data.error || `Request failed (${res.status})`);
     // Long output — an install log, a journal — travels alongside the message.
@@ -60,6 +61,114 @@ function busy(btn, on, label) {
   }
 }
 
+/* ------------------------------------------------------------ dialogs */
+
+/*
+ * The panel's own confirm / prompt, drawn in the theme instead of the
+ * browser's grey window. Both return a promise: askConfirm → true/false,
+ * askPrompt → the text, or null when cancelled. The first line of the
+ * message is the title; the rest is the explanation.
+ */
+const DIALOG_ICONS = {
+  danger: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>',
+  info: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  input: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+};
+const DANGER_WORDS = /^(delete|remove|revoke|disconnect|drop|expire|cancel|decline|sign this|lock|stop|pause|withdraw|replace)/i;
+
+function dialogEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * The one dialog behind askConfirm / askPrompt / askChoice.
+ * buttons: [{ label, value, kind: 'primary'|'danger'|'' }]; dismissing
+ * (Esc, backdrop, ×) resolves to `dismiss`.
+ */
+function openAsk({ message, title, tone, buttons, dismiss, input }) {
+  return new Promise((resolve) => {
+    const text = String(message || '').trim();
+    let [first, ...rest] = text.split(/\n\s*\n/);
+    // "Remove x? The container is deleted." — the question is the title, the rest explains it.
+    const q = first.search(/\?\s+\S/);
+    if (q > 0) { rest = [first.slice(q + 1).trim(), ...rest]; first = first.slice(0, q + 1); }
+    const head = title || first;
+    const body = title ? text : rest.join('\n\n');
+    const wrap = document.createElement('div');
+    wrap.className = 'ask-backdrop';
+    wrap.innerHTML = `
+      <div class="ask ask-${tone}" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
+        <button type="button" class="ask-x" aria-label="Close" data-dismiss>×</button>
+        <div class="ask-icon">${DIALOG_ICONS[tone] || DIALOG_ICONS.info}</div>
+        <h3 id="ask-title">${dialogEsc(head)}</h3>
+        ${body ? `<div class="ask-body">${body.split(/\n\s*\n/).map((p) => `<p>${dialogEsc(p).replace(/\n/g, '<br>')}</p>`).join('')}</div>` : ''}
+        ${input ? `<input class="ask-input" type="text" autocomplete="off" spellcheck="false" value="${dialogEsc(input.value || '')}" placeholder="${dialogEsc(input.placeholder || '')}">` : ''}
+        <div class="ask-actions">${buttons.map((b, i) => `<button type="button" class="btn ${b.kind || ''}" data-i="${i}">${dialogEsc(b.label)}</button>`).join('')}</div>
+      </div>`;
+    const field = wrap.querySelector('.ask-input');
+    const previous = document.activeElement;
+    const done = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      wrap.classList.add('closing');
+      setTimeout(() => wrap.remove(), 120);
+      previous?.focus?.();
+      resolve(value);
+    };
+    const valueOf = (b) => (input && b.value === true ? field.value : b.value);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(dismiss); }
+      else if (e.key === 'Enter' && field && document.activeElement === field) {
+        const main = buttons.find((b) => b.main);
+        if (main) { e.preventDefault(); e.stopPropagation(); done(valueOf(main)); }
+      } else if (e.key === 'Tab') {
+        // Keep the focus inside the dialog.
+        const f = [...wrap.querySelectorAll('button, input')];
+        const i = f.indexOf(document.activeElement);
+        e.preventDefault();
+        f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+      }
+    };
+    wrap.addEventListener('mousedown', (e) => { if (e.target === wrap) done(dismiss); });
+    wrap.addEventListener('click', (e) => {
+      if (e.target.closest('[data-dismiss]')) return done(dismiss);
+      const b = e.target.closest('[data-i]');
+      if (b) done(valueOf(buttons[Number(b.dataset.i)]));
+    });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(wrap);
+    (field || wrap.querySelector('.ask-actions .btn:last-child')).focus();
+    field?.select();
+  });
+}
+
+/** Yes / no, in the theme. The button is named after the first word of the question unless `ok` says otherwise. */
+function askConfirm(message, { title, ok, cancel = 'Cancel', danger } = {}) {
+  const text = String(message || '').trim();
+  const verb = text.match(/^([A-Z][a-z]+)\b/)?.[1];
+  const isDanger = danger ?? DANGER_WORDS.test(text);
+  const okLabel = ok || (verb && !/^(Also|Keep|Run|The|This|It|Are|Is|Do)$/.test(verb) ? verb : 'Continue');
+  return openAsk({
+    message: text, title, tone: isDanger ? 'danger' : /can cut|cannot be undone|will fail/i.test(text) ? 'warn' : 'info',
+    dismiss: false,
+    buttons: [{ label: cancel, value: false }, { label: okLabel, value: true, kind: isDanger ? 'danger solid' : 'primary', main: true }],
+  });
+}
+
+/** A line of text, in the theme — null when cancelled. */
+function askPrompt(message, value = '', { title, ok = 'OK', danger = false, placeholder = '' } = {}) {
+  return openAsk({
+    message, title, tone: danger ? 'danger' : 'input', dismiss: null,
+    input: { value, placeholder },
+    buttons: [{ label: 'Cancel', value: null }, { label: ok, value: true, kind: danger ? 'danger solid' : 'primary', main: true }],
+  });
+}
+
+/** Two real answers plus "never mind": resolves to the chosen `value`, or `dismiss`. */
+function askChoice(message, choices, { title, tone = 'warn', dismiss = null } = {}) {
+  return openAsk({ message, title, tone, dismiss, buttons: choices });
+}
+
 /* -------------------------------------------------------------- theme */
 
 /**
@@ -70,51 +179,41 @@ function busy(btn, on, label) {
 const THEME_KEY = 'ad-theme';
 const systemLight = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
 
-const THEME_ICON = { light: '☀️', dark: '🌙', system: '🖥️' };
-
 function applyTheme(pref) {
   const choice = ['light', 'dark', 'system'].includes(pref) ? pref : 'system';
   const resolved = choice === 'system' ? (systemLight?.matches ? 'light' : 'dark') : choice;
   document.documentElement.setAttribute('data-theme', resolved);
   document.documentElement.setAttribute('data-theme-pref', choice);
-  // One icon in the header says which is chosen; the menu ticks it.
-  $$('.theme-current').forEach((el) => { el.textContent = THEME_ICON[choice]; });
-  $$('[data-theme-toggle]').forEach((b) => { b.title = `Theme: ${choice === 'system' ? `system (${resolved} now)` : choice}`; });
-  $$('[data-theme-set]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.themeSet === choice)));
 }
 
 function currentThemePref() {
-  try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; }
+  try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
 }
 
-const closeThemeMenus = () => $$('.theme-menu').forEach((m) => {
-  m.querySelector('.menu-pop').classList.add('hidden');
-  m.querySelector('[data-theme-toggle]').setAttribute('aria-expanded', 'false');
-});
+// Kept for the user menu, which closes any open header menu; the theme has none now.
+const closeThemeMenus = () => {};
 
-$$('[data-theme-toggle]').forEach((btn) => btn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  const pop = btn.parentElement.querySelector('.menu-pop');
-  const opening = pop.classList.contains('hidden');
-  closeThemeMenus();
-  if (typeof closeUserMenu === 'function') closeUserMenu();
-  pop.classList.toggle('hidden', !opening);
-  btn.setAttribute('aria-expanded', String(opening));
-}));
-$$('.theme-menu .menu-pop').forEach((pop) => pop.addEventListener('click', (e) => e.stopPropagation()));
-document.addEventListener('click', closeThemeMenus);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeThemeMenus(); });
-
-$$('[data-theme-set]').forEach((btn) => btn.addEventListener('click', () => {
-  try { localStorage.setItem(THEME_KEY, btn.dataset.themeSet); } catch { /* private mode: this page only */ }
-  applyTheme(btn.dataset.themeSet);
-  closeThemeMenus();
+// Every theme button — on the landing page and in the panel — flips light ↔ dark in one click, no menu.
+function syncLandingThemeBtn() {
+  const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const label = `Switch to ${dark ? 'light' : 'dark'} theme`;
+  $$('[data-theme-flip]').forEach((btn) => {
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  });
+}
+$$('[data-theme-flip]').forEach((btn) => btn.addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  try { localStorage.setItem(THEME_KEY, next); } catch { /* private mode: this page only */ }
+  applyTheme(next);
+  syncLandingThemeBtn();
 }));
 
 // "System" follows the OS as it changes — dark at night, light by day.
-systemLight?.addEventListener?.('change', () => { if (currentThemePref() === 'system') applyTheme('system'); });
+systemLight?.addEventListener?.('change', () => { if (currentThemePref() === 'system') { applyTheme('system'); syncLandingThemeBtn(); } });
 
 applyTheme(currentThemePref());
+syncLandingThemeBtn();
 // Colours animate between themes from now on, but not on the first paint.
 requestAnimationFrame(() => document.body.classList.add('theme-ready'));
 
@@ -338,15 +437,28 @@ try { applyNavState(localStorage.getItem(NAV_KEY) === '1'); } catch { applyNavSt
 let needsSetup = false;
 
 /** Show the sign-in card over the landing page. */
+let signupOpen = false;   // from /auth/state: can a visitor create their own account?
+
+/** The sign-in card, in one of its three forms: set up (first run), sign in, or sign up. */
 function openAuth(mode = 'login') {
-  const setup = mode === 'setup';
+  const m = mode === 'signup' && !signupOpen ? 'login' : mode;
   $('#auth-gate').classList.remove('hidden');
-  $('#form-setup').classList.toggle('hidden', !setup);
-  $('#form-login').classList.toggle('hidden', setup);
-  $('#setup-msg').classList.add('hidden');
-  $('#login-msg').classList.add('hidden');
-  $(`${setup ? '#form-setup' : '#form-login'} input`)?.focus();
+  $('#form-setup').classList.toggle('hidden', m !== 'setup');
+  $('#form-login').classList.toggle('hidden', m !== 'login');
+  $('#form-signup').classList.toggle('hidden', m !== 'signup');
+  $('.gate-card').classList.toggle('wide', m === 'signup');
+  ['#setup-msg', '#login-msg', '#signup-msg'].forEach((id) => $(id).classList.add('hidden'));
+  if (m === 'signup') renderSignupPlans();
+  $(`#form-${m} input`)?.focus();
 }
+
+// "Create a free account" / "Sign in" links move between the two forms.
+$('#auth-gate').addEventListener('click', (e) => {
+  const link = e.target.closest('[data-auth-mode]');
+  if (!link) return;
+  e.preventDefault();
+  openAuth(link.dataset.authMode);
+});
 
 const closeAuth = () => $('#auth-gate').classList.add('hidden');
 
@@ -355,12 +467,14 @@ $('#auth-gate').addEventListener('click', (e) => { if (e.target.id === 'auth-gat
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAuth(); });
 
 $('#btn-open-signin').addEventListener('click', () => openAuth('login'));
+$('#btn-open-signup').addEventListener('click', () => openAuth('signup'));
 $('#btn-open-setup').addEventListener('click', () => openAuth('setup'));
 // "Get started" leads to the contact form — or, on a panel nobody has set up yet, to the setup card.
 const getStarted = () => (needsSetup ? openAuth('setup') : goToLeadForm());
 $('#btn-hero-primary').addEventListener('click', getStarted);
 $('#btn-cta').addEventListener('click', getStarted);
 $('#link-contact-signin').addEventListener('click', (e) => { e.preventDefault(); openAuth('login'); });
+$('#link-foot-signin').addEventListener('click', (e) => { e.preventDefault(); openAuth('login'); });
 
 /**
  * Nobody is signed in: the landing page is what a visitor gets, with the
@@ -374,6 +488,9 @@ function showLanding(setupNeeded) {
 
   $('#btn-open-setup').classList.toggle('hidden', !needsSetup);
   $('#btn-open-signin').classList.toggle('hidden', needsSetup);
+  $('#btn-open-signup').classList.toggle('hidden', needsSetup || !signupOpen);
+  $$('[data-signup-only]').forEach((el) => { el.hidden = !signupOpen; });
+  $$('[data-signup-closed]').forEach((el) => { el.hidden = signupOpen; });
   $('#btn-hero-primary').textContent = needsSetup ? 'Set up your panel' : 'Get started free';
   $('#btn-cta').textContent = needsSetup ? 'Set up your panel' : 'Get started free';
   $('#hero-note').textContent = needsSetup
@@ -381,11 +498,13 @@ function showLanding(setupNeeded) {
     : 'Nothing leaves your network. Every secret is encrypted before it touches disk.';
   loadPricing();
   if (location.hash === '#signin') openAuth(needsSetup ? 'setup' : 'login');
+  if (location.hash === '#signup') openAuth(needsSetup ? 'setup' : 'signup');
 }
 
 /* ------------------------------------------- the landing page's prices */
 
 let publicPlans = [];
+let trialDays = 30;   // how long the free plan lasts, from the server
 let pricingCycle = 'monthly';
 
 const LIMIT_WORDS = {
@@ -419,7 +538,9 @@ function fmtMoney(n, currency = 'INR', { compact = false } = {}) {
 async function loadPricing() {
   // The first cards come with the page; this refreshes them and fills the form's plan choices.
   try {
-    publicPlans = (await api('/public/plans')).plans || [];
+    const r = await api('/public/plans');
+    publicPlans = r.plans || [];
+    trialDays = r.trialDays || trialDays;
   } catch {
     publicPlans = [];
   }
@@ -458,6 +579,7 @@ function renderPricing() {
       <h3>${esc(p.name)}</h3>
       <p class="price-tagline">${esc(p.tagline || '')}</p>
       <div class="price-amount">${free ? '<b>Free</b>' : `<b>${esc(fmtMoney(price, p.currency))}</b><span>${per}</span>`}</div>
+      ${free ? `<p class="trial-note"><span aria-hidden="true">⏳</span> Valid for ${trialDays} days only</p>` : ''}
       <p class="price-note">${esc(note) || '&nbsp;'}</p>
       <a class="btn ${p.highlighted ? 'primary' : ''} big price-cta" href="#contact" data-plan="${p.id}">${free ? 'Start free' : 'Get started'}</a>
       <ul class="price-list">${limits}${features}</ul>
@@ -477,6 +599,12 @@ $('#price-grid').addEventListener('click', (e) => {
   if (!cta) return;
   e.preventDefault();
   if (needsSetup) return openAuth('setup');
+  // With sign-up open, a plan's button starts an account on that plan; otherwise it asks us.
+  if (signupOpen) {
+    signupPlan.id = cta.dataset.plan;
+    signupPlan.cycle = pricingCycle;
+    return openAuth('signup');
+  }
   goToLeadForm({ planId: cta.dataset.plan, cycle: pricingCycle, form: 'pricing' });
 });
 
@@ -635,6 +763,150 @@ $('#form-setup').addEventListener('submit', async (e) => {
     toast(`Welcome, ${r.user.name} — you are the super admin of ${r.user.organisation?.name}`);
   } catch (err) {
     formMsg(msg, err.message, 'err');
+  }
+  busy(btn, false);
+});
+
+/* sign up: their own organisation, with them as its admin */
+
+const signupForm = $('#form-signup');
+
+/** 0–4: length, letters and numbers, mixed case, a symbol. */
+function passwordScore(pw) {
+  if (!pw) return 0;
+  let s = 0;
+  if (pw.length >= 10) s += 1;
+  if (/[a-z]/i.test(pw) && /\d/.test(pw)) s += 1;
+  if (/[a-z]/.test(pw) && /[A-Z]/.test(pw)) s += 1;
+  if (/[^a-z0-9]/i.test(pw) || pw.length >= 16) s += 1;
+  return pw.length < 10 ? Math.min(s, 1) : s;
+}
+const PW_WORDS = ['At least 10 characters, with letters and numbers.', 'Too weak — make it longer, with letters and numbers.', 'Fair — mixed case or a symbol makes it stronger.', 'Good password.', 'Strong password.'];
+
+signupForm.password.addEventListener('input', (e) => {
+  const score = passwordScore(e.target.value);
+  const meter = $('.pw-meter', signupForm);
+  meter.dataset.score = e.target.value ? String(score) : '';
+  $('#signup-pw-hint').textContent = e.target.value ? PW_WORDS[Math.max(1, score)] : PW_WORDS[0];
+});
+signupForm.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-pw-toggle]');
+  if (!t) return;
+  const show = signupForm.password.type === 'password';
+  signupForm.password.type = show ? 'text' : 'password';
+  signupForm.confirm.type = show ? 'text' : 'password';
+  t.textContent = show ? 'Hide' : 'Show';
+  t.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+});
+
+/* the plan picker: the same public plans as the pricing section */
+
+const signupPlan = { id: null, cycle: 'monthly' };
+const isFreePlan = (p) => !(p.priceMonthly > 0) && !(p.priceYearly > 0);
+
+function renderSignupPlans() {
+  const block = $('#signup-plan-block');
+  const plans = publicPlans || [];
+  block.hidden = !plans.length;
+  if (!plans.length) return;
+
+  const yearly = plans.some((p) => p.priceYearly > 0);
+  $('#signup-cycle').hidden = !yearly;
+  if (!yearly) signupPlan.cycle = 'monthly';
+  const saving = Math.max(0, ...plans.filter((p) => p.priceMonthly > 0 && p.priceYearly > 0)
+    .map((p) => Math.round((1 - p.priceYearly / (p.priceMonthly * 12)) * 100)));
+  $('#signup-save').textContent = saving ? `−${saving}%` : '';
+  $$('[data-su-cycle]').forEach((b) => b.classList.toggle('active', b.dataset.suCycle === signupPlan.cycle));
+
+  // Free first, unless the visitor already picked one (from the pricing cards).
+  if (!plans.some((p) => String(p.id) === String(signupPlan.id))) signupPlan.id = (plans.find(isFreePlan) || plans[0]).id;
+
+  $('#signup-plans').innerHTML = plans.map((p) => {
+    const free = isFreePlan(p);
+    const perYear = signupPlan.cycle === 'yearly' && p.priceYearly > 0;
+    const price = fmtMoney(free ? 0 : perYear ? p.priceYearly : p.priceMonthly, p.currency);
+    const per = free ? ` for ${trialDays} days` : perYear ? '/year' : '/month';
+    const limits = p.limits || {};
+    const bits = [limits.servers != null ? `${limits.servers} server${limits.servers === 1 ? '' : 's'}` : 'Unlimited servers',
+      limits.apps != null ? `${limits.apps} apps` : null].filter(Boolean).join(' · ');
+    const on = String(p.id) === String(signupPlan.id);
+    return `<label class="su-plan ${on ? 'active' : ''} ${p.highlighted ? 'popular' : ''}">
+      <input type="radio" name="plan_id" value="${p.id}" ${on ? 'checked' : ''} />
+      ${p.highlighted ? '<span class="su-popular">★ Popular</span>' : ''}
+      <b>${esc(p.name)}</b>
+      <span class="su-price">${esc(price)}<small>${per}</small></span>
+      <small class="su-bits">${esc(bits)}</small>
+      ${free ? `<small class="su-trial">⏳ Valid ${trialDays} days only</small>` : ''}
+    </label>`;
+  }).join('');
+  updateSignupPlanNote();
+}
+
+function updateSignupPlanNote() {
+  const p = (publicPlans || []).find((x) => String(x.id) === String(signupPlan.id));
+  const note = $('#signup-plan-note');
+  if (!p) { note.textContent = ''; return; }
+  const hasFree = (publicPlans || []).some(isFreePlan);
+  note.innerHTML = isFreePlan(p)
+    ? `✓ <b>${esc(p.name)}</b> starts right away — no card needed.`
+    : hasFree
+      ? `You start on the free plan straight away. <b>${esc(p.name)}</b> (${signupPlan.cycle}) is sent as a request and switched on once it is paid for.`
+      : `<b>${esc(p.name)}</b> (${signupPlan.cycle}) is sent as a request — you can use the panel once it is switched on after payment.`;
+  $('#form-signup button[type=submit]').textContent = isFreePlan(p) ? 'Create free account' : `Create account & request ${p.name}`;
+}
+
+$('#signup-plans').addEventListener('change', (e) => {
+  if (!e.target.matches('input[name="plan_id"]')) return;
+  signupPlan.id = e.target.value;
+  $$('#signup-plans .su-plan').forEach((l) => l.classList.toggle('active', l.querySelector('input').checked));
+  updateSignupPlanNote();
+});
+$('#signup-cycle').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-su-cycle]');
+  if (!b) return;
+  signupPlan.cycle = b.dataset.suCycle;
+  renderSignupPlans();
+});
+
+signupForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.submitter || $('button[type=submit]', signupForm);
+  const msg = $('#signup-msg');
+  const body = Object.fromEntries(new FormData(signupForm).entries());
+  body.terms = signupForm.terms.checked;
+  body.plan_id = signupPlan.id || undefined;
+  body.cycle = signupPlan.cycle;
+  // Caught here first, so nobody waits on the server to hear about a typo.
+  const problem = !body.name.trim() ? 'Your name is required'
+    : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()) ? 'Enter a valid email address'
+      : !body.phone.trim() ? 'Your mobile number is required'
+        : passwordScore(body.password) < 2 ? 'Choose a password of at least 10 characters, with letters and numbers'
+          : body.password !== body.confirm ? 'The two passwords do not match'
+            : !body.terms ? 'Please accept the terms to create an account' : null;
+  if (problem) return formMsg(msg, problem, 'err');
+
+  busy(btn, true, 'Creating your account…');
+  try {
+    const r = await api('/auth/signup', { method: 'POST', body });
+    session.user = r.user;
+    signupForm.reset();
+    $('.pw-meter', signupForm).dataset.score = '';
+    msg.classList.add('hidden');
+    await enterApp();
+    toast(r.requested && r.plan
+      ? `Welcome, ${r.user.name} — you are on ${r.plan.name}; your ${r.requested.name} request is with our team`
+      : r.requested
+        ? `Welcome, ${r.user.name} — your ${r.requested.name} request is with our team; the panel opens once it is switched on`
+        : r.plan
+          ? `Welcome, ${r.user.name} — ${r.user.organisation?.name} is ready on the ${r.plan.name} plan`
+          : `Welcome, ${r.user.name} — choose a plan to start using ${r.user.organisation?.name}`);
+  } catch (err) {
+    formMsg(msg, err.message, 'err');
+    // Already has an account: offer the sign-in form with the email filled in.
+    if (err.body?.signIn) {
+      msg.innerHTML += ' <a href="#signin" data-auth-mode="login">Sign in</a>';
+      $('#form-login').email.value = body.email;
+    }
   }
   busy(btn, false);
 });
@@ -982,7 +1254,7 @@ $('#server-list').addEventListener('click', async (e) => {
   }
 
   if (action === 'delete') {
-    if (!confirm('Delete this server and its collected system details?')) return;
+    if (!await askConfirm('Delete this server and its collected system details?')) return;
     await api(`/servers/${id}`, { method: 'DELETE' });
     toast('Server deleted');
     return loadServers();
@@ -1803,7 +2075,7 @@ $('#files-upload-input').addEventListener('change', async (e) => {
       try {
         await send(false);
       } catch (err) {
-        if (!/already exists/.test(err.message) || !confirm(`${joinPath(dir, file.name)} already exists. Replace it?`)) throw err;
+        if (!/already exists/.test(err.message) || !await askConfirm(`${joinPath(dir, file.name)} already exists. Replace it?`)) throw err;
         await send(true);
       }
       toast(`Uploaded ${file.name} to ${dir}`);
@@ -1891,7 +2163,7 @@ async function fileAction(act, e) {
   }
 
   if (act === 'extract') {
-    if (!confirm(`Extract ${e.name} into ${dir}? Files with the same names are overwritten.`)) return;
+    if (!await askConfirm(`Extract ${e.name} into ${dir}? Files with the same names are overwritten.`)) return;
     try {
       toast(`Extracting ${e.name}…`);
       await filesApi('/files/extract', { method: 'POST', body: { path: e.path } });
@@ -2215,9 +2487,9 @@ async function serviceAction(btn) {
   if (action === 'logs') return openServiceDetail(unit);
 
   if (action === 'delete') {
-    if (!confirm(`Delete ${unit}? It is stopped, disabled and its unit file removed from the server.`)) return;
+    if (!await askConfirm(`Delete ${unit}? It is stopped, disabled and its unit file removed from the server.`)) return;
   } else if (RISKY_UNIT.test(unit) && ['stop', 'disable', 'restart'].includes(action)) {
-    if (!confirm(`${unit} keeps this server reachable. ${action === 'stop' ? 'Stopping' : action === 'disable' ? 'Disabling' : 'Restarting'} it can cut the panel off from this machine. Continue?`)) return;
+    if (!await askConfirm(`${unit} keeps this server reachable. ${action === 'stop' ? 'Stopping' : action === 'disable' ? 'Disabling' : 'Restarting'} it can cut the panel off from this machine. Continue?`)) return;
   }
 
   busy(btn, true, '…');
@@ -2811,7 +3083,7 @@ $('#git-list').addEventListener('click', async (e) => {
 
   if (gitAction === 'open') return openGit(id);
   if (gitAction === 'delete') {
-    if (!confirm('Disconnect this git account? The token is deleted from the panel.')) return;
+    if (!await askConfirm('Disconnect this git account? The token is deleted from the panel.')) return;
     await api(`/credentials/${id}`, { method: 'DELETE' });
     toast('Git account disconnected');
     return loadGitList();
@@ -2995,7 +3267,7 @@ async function runnerAction(btn, reload) {
   const { runnerAction: action, id, name } = btn.dataset;
 
   if (action === 'delete') {
-    if (!confirm(`Remove runner "${name}"? It is unregistered at the provider and deleted from the server.`)) return;
+    if (!await askConfirm(`Remove runner "${name}"? It is unregistered at the provider and deleted from the server.`)) return;
     busy(btn, true, 'Removing…');
     try {
       const r = await api(`/runners/${id}`, { method: 'DELETE' });
@@ -3336,7 +3608,7 @@ $('#mysql-list').addEventListener('click', async (e) => {
   if (myAction === 'open') return openDbConnection(id, btn.dataset.provider);
   if (myAction === 'edit') return editMysqlConnection(id);
   if (myAction === 'delete') {
-    if (!confirm('Delete this connection? The database itself is not touched.')) return;
+    if (!await askConfirm('Delete this connection? The database itself is not touched.')) return;
     await api(`/credentials/${id}`, { method: 'DELETE' });
     toast('Connection removed');
     return loadMysqlList();
@@ -4073,7 +4345,7 @@ async function userAction(action, { user, host, db }) {
 
   if (action === 'lock' || action === 'unlock') {
     const lock = action === 'lock';
-    if (lock && !confirm(`Lock ${who}? It will not be able to sign in until unlocked. Open sessions stay connected.`)) return;
+    if (lock && !await askConfirm(`Lock ${who}? It will not be able to sign in until unlocked. Open sessions stay connected.`)) return;
     try {
       await myApi('/users', { method: 'PUT', body: { user, host, locked: lock } });
       toast(`${who} ${lock ? 'locked' : 'unlocked'}`);
@@ -4561,7 +4833,7 @@ async function engineUserAction(action, i) {
 
   if (action === 'lock' || action === 'unlock') {
     const lock = action === 'lock';
-    if (lock && !confirm(`${(caps.lockLabel || ['Lock'])[0]} ${u.label}? It will not be able to sign in until you undo it.`)) return;
+    if (lock && !await askConfirm(`${(caps.lockLabel || ['Lock'])[0]} ${u.label}? It will not be able to sign in until you undo it.`)) return;
     try {
       toast((await engApi('/users', { key, locked: lock }, 'PUT')).summary);
       await engineAfterUserChange();
@@ -4908,7 +5180,7 @@ $('#cf-list').addEventListener('click', async (e) => {
   if (cfAction === 'open') return openCloudflare(id);
   if (cfAction === 'zt') return openCloudflare(id).then(() => String(currentCf?.id) === String(id) && openZeroTrust());
   if (cfAction === 'delete') {
-    if (!confirm('Disconnect this Cloudflare account? The token is deleted from the panel (it stays valid on Cloudflare until you revoke it there).')) return;
+    if (!await askConfirm('Disconnect this Cloudflare account? The token is deleted from the panel (it stays valid on Cloudflare until you revoke it there).')) return;
     await api(`/credentials/${id}`, { method: 'DELETE' });
     toast('Cloudflare account disconnected');
     return loadAccounts();
@@ -5102,10 +5374,11 @@ async function openCfZone(zoneId) {
 async function removeCfZone(zoneId, btn) {
   const zone = (currentCf.extra.account?.zones || []).find((z) => z.id === zoneId);
   if (!zone) return toast('That domain is no longer on this account — refresh the details.', 'err');
-  const typed = prompt(
+  const typed = await askPrompt(
     `Remove ${zone.name} from Cloudflare?\n\n`
     + 'This deletes the domain and ALL of its DNS records on Cloudflare. It cannot be undone from here.\n\n'
-    + 'Type the domain name to confirm:'
+    + 'Type the domain name to confirm:',
+    '', { ok: 'Remove domain', danger: true, placeholder: zone.name }
   );
   if (typed === null) return;
   if (typed.trim().toLowerCase() !== zone.name.toLowerCase()) return toast('The name did not match — nothing was removed.', 'err');
@@ -5219,7 +5492,7 @@ dnsForm.addEventListener('submit', async (e) => {
 async function deleteDns(recordId, btn) {
   const d = cfZone.records.find((x) => x.id === recordId);
   if (!d) return;
-  if (!confirm(`Delete this DNS record on Cloudflare?\n\n${d.type}  ${d.name}  →  ${d.content}\n\nIt stops resolving straight away.`)) return;
+  if (!await askConfirm(`Delete this DNS record on Cloudflare?\n\n${d.type}  ${d.name}  →  ${d.content}\n\nIt stops resolving straight away.`)) return;
   busy(btn, true, '…');
   try {
     await api(`/credentials/${currentCfId}/cloudflare/zones/${cfZone.id}/dns/records/${recordId}`, { method: 'DELETE' });
@@ -5498,10 +5771,11 @@ async function installTunnel(id, btn) {
 
 async function deleteTunnel(id, btn) {
   const t = findTunnel(id);
-  const typed = prompt(
+  const typed = await askPrompt(
     `Delete tunnel ${t.name}?\n\n`
     + `Its ${t.hostnames.length} public hostname(s) stop working, their DNS records are removed, and private networks routed through it are removed too. `
-    + 'cloudflared on the machine is disconnected.\n\nType the tunnel name to confirm:'
+    + 'cloudflared on the machine is disconnected.\n\nType the tunnel name to confirm:',
+    '', { ok: 'Delete tunnel', danger: true, placeholder: t.name }
   );
   if (typed === null) return;
   if (typed.trim() !== t.name) return toast('The name did not match — nothing was deleted.', 'err');
@@ -5617,7 +5891,7 @@ hostForm.addEventListener('submit', async (e) => {
 async function deleteHost(tunnelId, index, btn) {
   const t = findTunnel(tunnelId);
   const h = t.hostnames[index];
-  if (!confirm(`Remove ${h.hostname}${h.path ? ` (path ${h.path})` : ''} from tunnel ${t.name}?\n\nIt stops answering straight away, and its DNS record is removed.`)) return;
+  if (!await askConfirm(`Remove ${h.hostname}${h.path ? ` (path ${h.path})` : ''} from tunnel ${t.name}?\n\nIt stops answering straight away, and its DNS record is removed.`)) return;
   busy(btn, true, '…');
   try {
     const r = await api(`${ztBase()}/tunnels/${tunnelId}/hostnames`, { method: 'DELETE', body: { hostname: h.hostname, path: h.path } });
@@ -5673,7 +5947,7 @@ routeForm.addEventListener('submit', async (e) => {
 
 async function deleteRoute(id, btn) {
   const r = zt.routes.find((x) => x.id === id);
-  if (!confirm(`Remove private network ${r.network}?\n\nPCs running WARP can no longer reach it through the tunnel.`)) return;
+  if (!await askConfirm(`Remove private network ${r.network}?\n\nPCs running WARP can no longer reach it through the tunnel.`)) return;
   busy(btn, true, '…');
   try {
     await api(`${ztBase()}/routes/${id}`, { method: 'DELETE', body: { network: r.network } });
@@ -5691,7 +5965,7 @@ async function deleteRoute(id, btn) {
 async function revokeDevice(id, btn) {
   const d = zt.devices.find((x) => x.id === id);
   const label = d.name || d.model || id;
-  if (!confirm(`Revoke ${label}${d.user?.email ? ` (${d.user.email})` : ''}?\n\nThe PC is signed out of Zero Trust and has to enrol again with WARP.`)) return;
+  if (!await askConfirm(`Revoke ${label}${d.user?.email ? ` (${d.user.email})` : ''}?\n\nThe PC is signed out of Zero Trust and has to enrol again with WARP.`)) return;
   busy(btn, true, '…');
   try {
     await api(`${ztBase()}/devices/${id}`, { method: 'DELETE', body: { name: label } });
@@ -5725,10 +5999,10 @@ async function newHostname(btn) {
 /** Set up Zero Trust on the account with a team domain, <team>.cloudflareaccess.com. */
 async function addTeamDomain(btn) {
   const suggestion = String(zt.account.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-  const typed = prompt(
+  const typed = await askPrompt(
     'Team name for Zero Trust on this account.\n\n'
-    + 'It becomes your team domain, <team>.cloudflareaccess.com — people type it in WARP to enrol their PC, and it is where they sign in.\n\n'
-    + 'Team name:', suggestion
+    + 'It becomes your team domain, <team>.cloudflareaccess.com — people type it in WARP to enrol their PC, and it is where they sign in.',
+    suggestion, { ok: 'Set up', placeholder: 'your-team' }
   );
   if (typed === null || !typed.trim()) return;
   busy(btn, true, 'Setting up…');
@@ -6089,7 +6363,7 @@ function renderHubRepo() {
 
 async function deleteHubTag(tag, btn) {
   const r = dhRepo.repository;
-  if (!confirm(`Delete tag ${r.namespace}/${r.name}:${tag} on Docker Hub?\n\nAnything pulling this tag stops getting it. This cannot be undone.`)) return;
+  if (!await askConfirm(`Delete tag ${r.namespace}/${r.name}:${tag} on Docker Hub?\n\nAnything pulling this tag stops getting it. This cannot be undone.`)) return;
   busy(btn, true, '…');
   try {
     await api(`${dhBase()}/${encodeURIComponent(r.namespace)}/${encodeURIComponent(r.name)}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
@@ -6141,7 +6415,7 @@ $('#cred-list').addEventListener('click', async (e) => {
   if (credAction === 'open') return openDockerHub(id);
   if (credAction === 'reconnect') return openDockerHubModal({ username: btn.dataset.user, name: btn.dataset.name });
   if (credAction === 'delete') {
-    if (!confirm('Delete this credential?')) return;
+    if (!await askConfirm('Delete this credential?')) return;
     await api(`/credentials/${id}`, { method: 'DELETE' });
     return loadCredentials();
   }
@@ -7190,17 +7464,19 @@ async function appCardAction(btn, reload) {
 
   if (action === 'delete') {
     const domain = btn.dataset.domain;
-    if (!confirm(`Remove "${name}"? Its container and the clone on the server are deleted.`
+    if (!await askConfirm(`Remove "${name}"? Its container and the clone on the server are deleted.`
       + (domain ? `\n\nIts domain ${domain} is removed too: the Cloudflare record or tunnel hostname, and the nginx site and certificate or the tunnel the panel made for it.` : ''))) return;
 
     // Volumes are the one part that cannot be rebuilt from the repository, so
     // they are kept unless somebody says otherwise.
     const volumes = Number(btn.dataset.volumes || 0);
-    const dropVolumes = volumes > 0 && !confirm(
+    const volumeChoice = volumes > 0 ? await askChoice(
       `Keep its ${volumes} volume${volumes > 1 ? 's' : ''}?\n\n`
-      + 'OK = keep the data, so redeploying this service finds it again.\n'
-      + 'Cancel = delete the volumes and everything in them, for good.'
-    );
+      + 'Keeping the data means redeploying this service finds it again. Deleting removes the volumes and everything in them, for good.',
+      [{ label: 'Delete volumes', value: 'drop', kind: 'danger' }, { label: 'Keep data', value: 'keep', kind: 'primary', main: true }]
+    ) : 'keep';
+    if (volumeChoice === null) return;
+    const dropVolumes = volumeChoice === 'drop';
 
     busy(btn, true, 'Removing…');
     try {
@@ -8421,8 +8697,13 @@ async function installAction(btn, reload) {
   if (action === 'logs') return openContainerLogs(id, name);
 
   if (action === 'delete') {
-    if (!confirm(`Remove "${name}"? The container is deleted from the server.`)) return;
-    const keepData = !confirm(`Also delete its data volume?\n\nOK = delete the data for good.\nCancel = keep the volume, so re-installing finds the data again.`);
+    if (!await askConfirm(`Remove "${name}"? The container is deleted from the server.`)) return;
+    const dataChoice = await askChoice(
+      'Also delete its data volume?\n\nKeeping the volume means re-installing finds the data again. Deleting it removes the data for good.',
+      [{ label: 'Delete data', value: 'drop', kind: 'danger' }, { label: 'Keep data', value: 'keep', kind: 'primary', main: true }]
+    );
+    if (dataChoice === null) return;
+    const keepData = dataChoice !== 'drop';
     busy(btn, true, 'Removing…');
     try {
       const r = await api(`/installs/${id}${keepData ? '' : '?delete_data=1'}`, { method: 'DELETE' });
@@ -8689,7 +8970,7 @@ async function containerRowAction(btn) {
     });
   }
 
-  if ((action === 'stop' || action === 'pause') && !confirm(`${action === 'stop' ? 'Stop' : 'Pause'} ${name}? Anything it serves stops answering until it is ${action === 'stop' ? 'started' : 'resumed'} again.`)) return;
+  if ((action === 'stop' || action === 'pause') && !await askConfirm(`${action === 'stop' ? 'Stop' : 'Pause'} ${name}? Anything it serves stops answering until it is ${action === 'stop' ? 'started' : 'resumed'} again.`)) return;
   busy(btn, true, '…');
   try {
     const r = await api(`/servers/${currentServerId}/containers/${encodeURIComponent(name)}/action`, { method: 'POST', body: { action } });
@@ -8999,7 +9280,7 @@ $('#view-server-detail').addEventListener('click', async (e) => {
   const out = e.target.closest('button[data-docker-logout]');
   if (out) {
     const { dockerLogout: registry, label } = out.dataset;
-    if (!confirm(`Sign this server out of ${label}? Private images from it will stop pulling.`)) return;
+    if (!await askConfirm(`Sign this server out of ${label}? Private images from it will stop pulling.`)) return;
     busy(out, true, 'Signing out…');
     try {
       await api(`/servers/${currentServerId}/docker/logout`, { method: 'POST', body: { registry } });
@@ -9013,7 +9294,7 @@ $('#view-server-detail').addEventListener('click', async (e) => {
   const rmVolume = e.target.closest('button[data-docker-rm-volume]');
   if (rmVolume) {
     const name = rmVolume.dataset.dockerRmVolume;
-    if (!confirm(`Delete the volume "${name}" and everything in it?\n\n`
+    if (!await askConfirm(`Delete the volume "${name}" and everything in it?\n\n`
       + 'No container is using it, but whatever a container once wrote there — a database, uploads — '
       + 'goes with it. This cannot be undone.')) return;
     busy(rmVolume, true, 'Removing…');
@@ -9029,7 +9310,7 @@ $('#view-server-detail').addEventListener('click', async (e) => {
   const rm = e.target.closest('button[data-docker-rm-network]');
   if (rm) {
     const name = rm.dataset.dockerRmNetwork;
-    if (!confirm(`Remove the Docker network "${name}"? Containers still attached to it will stop it being removed.`)) return;
+    if (!await askConfirm(`Remove the Docker network "${name}"? Containers still attached to it will stop it being removed.`)) return;
     try {
       await api(`/servers/${currentServerId}/docker/networks/${encodeURIComponent(name)}`, { method: 'DELETE' });
       toast(`Network ${name} removed`);
@@ -9778,7 +10059,7 @@ async function cronPanelAction(btn) {
   }
 
   if (what === 'delete') {
-    if (!confirm(`Delete this job from ${user}'s crontab?\n\n${line}\n\nIt stops running immediately.`)) return;
+    if (!await askConfirm(`Delete this job from ${user}'s crontab?\n\n${line}\n\nIt stops running immediately.`)) return;
     busy(btn, true, 'Deleting…');
     try {
       await api(`/servers/${currentServerId}/cron/jobs`, { method: 'DELETE', body: { user, old_line: line } });
@@ -10125,7 +10406,7 @@ upstreamForm.addEventListener('submit', async (e) => {
     ...(editingUpstream ? { file: editingUpstream.file } : {}),
   };
   if (editingUpstream && body.name !== editingUpstream.name && editingUpstream.usedBy.length
-    && !confirm(`Renaming ${editingUpstream.name} to ${body.name} does not change the proxy_pass lines of ${editingUpstream.usedBy.join(', ')} — nginx -t will fail until they are updated. Rename anyway?`)) return;
+    && !await askConfirm(`Renaming ${editingUpstream.name} to ${body.name} does not change the proxy_pass lines of ${editingUpstream.usedBy.join(', ')} — nginx -t will fail until they are updated. Rename anyway?`)) return;
 
   busy(btn, true, 'Testing & reloading…');
   try {
@@ -10151,7 +10432,7 @@ async function nginxPanelAction(btn) {
 
   if (what === 'remove-site') {
     const site = siteOf(name);
-    if (!confirm(`Remove ${site?.domains[0] || name} from nginx?\n\nThe file is deleted and nginx reloaded.`
+    if (!await askConfirm(`Remove ${site?.domains[0] || name} from nginx?\n\nThe file is deleted and nginx reloaded.`
       + `${site?.ssl ? '\n\nIts certificate is kept — certbot can reuse it if you add the domain again.' : ''}`)) return;
     busy(btn, true, 'Removing…');
     try {
@@ -10183,7 +10464,7 @@ async function nginxPanelAction(btn) {
   if (what === 'delete-upstream') {
     const u = (nginxCache?.upstreams || []).find((x) => x.name === name);
     if (u?.usedBy.length) return toast(`"${name}" is still used by ${u.usedBy.join(', ')} — point those at something else first.`, 'err');
-    if (!confirm(`Delete upstream ${name}?\n\nIt is removed from ${u?.file || 'its file'}, the configuration is tested, and nginx reloaded.`)) return;
+    if (!await askConfirm(`Delete upstream ${name}?\n\nIt is removed from ${u?.file || 'its file'}, the configuration is tested, and nginx reloaded.`)) return;
     busy(btn, true, 'Deleting…');
     try {
       await api(`/servers/${currentServerId}/nginx/upstreams/${encodeURIComponent(name)}`, { method: 'DELETE' });
@@ -10209,7 +10490,7 @@ async function nginxPanelAction(btn) {
   }
 
   if (what === 'renew' || what === 'renew-all') {
-    if (what === 'renew-all' && !confirm('Run certbot renew for every certificate that is due?')) return;
+    if (what === 'renew-all' && !await askConfirm('Run certbot renew for every certificate that is due?')) return;
     busy(btn, true, 'Renewing…');
     try {
       const r = await api(`/servers/${currentServerId}/nginx/ssl/renew`, {
@@ -10611,7 +10892,7 @@ $('#view-settings').addEventListener('click', async (e) => {
 async function memberAction(btn) {
   const { member: action, id, name } = btn.dataset;
   if (action === 'edit') return openMemberModal(teamState.members.find((m) => String(m.id) === id));
-  if (!confirm(`Remove ${name}? Their account and every session it has are deleted.`)) return;
+  if (!await askConfirm(`Remove ${name}? Their account and every session it has are deleted.`)) return;
   busy(btn, true, 'Removing…');
   try {
     await api(`/team/members/${id}`, { method: 'DELETE' });
@@ -10740,7 +11021,7 @@ async function orgAction(btn) {
     return;
   }
 
-  if (!confirm(`Delete "${name}"? This only works while it is empty.`)) return;
+  if (!await askConfirm(`Delete "${name}"? This only works while it is empty.`)) return;
   try {
     await api(`/team/organisations/${id}`, { method: 'DELETE' });
     toast(`${name} deleted`);
@@ -10793,6 +11074,7 @@ async function health() {
     $('#health-dot').className = 'dot online';
     $('#health-text').textContent = !h.signedIn ? 'signed out'
       : !session.user?.orgId ? 'Platform · connected'
+        : h.planExpired ? 'Plan expired — renew'
         : `${h.servers} servers · ${h.credentials} creds · ${h.runners} runners`;
   } catch {
     $('#health-dot').className = 'dot error';
@@ -10839,7 +11121,11 @@ const SUB_WORD = { active: 'active', trial: 'trial', past_due: 'past due', cance
 const PAY_METHODS = ['Bank transfer', 'UPI', 'Card', 'Cash', 'Cheque', 'Other'];
 
 const fmtDay = (d) => { const at = parseWhen(d); return at ? new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—'; };
-const isoDay = (d) => { const at = d ? parseWhen(d) : Date.now(); return at ? new Date(at).toISOString().slice(0, 10) : ''; };
+// Accepts a Date or a number of ms as well as the API's date strings.
+const isoDay = (d) => {
+  const at = !d ? Date.now() : d instanceof Date ? d.getTime() : typeof d === 'number' ? d : parseWhen(d);
+  return at && !Number.isNaN(at) ? new Date(at).toISOString().slice(0, 10) : '';
+};
 const monthWord = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleString(undefined, { month: 'short' }); };
 
 /** Open one of the platform's pages from the side menu (or from a link inside it). */
@@ -11099,11 +11385,13 @@ async function pfOrganisations() {
             <div class="row-actions pf-org-actions">
             <button class="btn tiny" data-pf="org-view" data-id="${o.id}">View</button>
             <button class="btn tiny" data-pf="org-plan" data-id="${o.id}">Plan</button>
+            ${o.subscription ? `<button class="btn tiny" data-pf="org-expiry" data-id="${o.id}">Plan expiry</button>` : ''}
             <button class="btn tiny" data-pf="org-pay" data-id="${o.id}">+ Payment</button>
             <button class="btn tiny" data-pf="org-enter" data-id="${o.id}" title="Work inside this organisation, as its admin would">Open</button>
           </div>`,
           `${sub ? `<span class="nowrap">${esc(sub.plan)} <span class="badge ${SUB_BADGE[sub.status] || ''}">${esc(SUB_WORD[sub.status] || sub.status)}</span></span>
-            <div class="muted small nowrap">${sub.amount ? `${esc(fmtMoney(sub.amount, sub.currency))} ${sub.cycle === 'yearly' ? 'a year' : 'a month'}` : 'free'}${sub.renewsAt ? ` · renews ${esc(fmtDay(sub.renewsAt))}` : ''}</div>`
+            <div class="muted small nowrap">${sub.amount ? `${esc(fmtMoney(sub.amount, sub.currency))} ${sub.cycle === 'yearly' ? 'a year' : 'a month'}` : 'free'}${sub.renewsAt && sub.amount ? ` · renews ${esc(fmtDay(sub.renewsAt))}` : ''}</div>
+            ${sub.end ? `<div class="small nowrap" style="color:${sub.end.expired ? 'var(--err)' : sub.end.daysLeft <= 5 ? 'var(--warn)' : 'var(--muted)'}">${esc(planEndWords(sub))}</div>` : ''}`
             : '<span class="badge err">no plan</span>'}
             ${o.request ? requestLine(o) : ''}`,
           sub ? `<span class="nowrap">${esc(fmtMoney(sub.mrr, sub.currency))}</span>` : '—',
@@ -11196,6 +11484,61 @@ function pfEditOrganisation(o) {
   });
 }
 
+/** A plan's end, in words: "Expired Sep 26", "Ends Oct 18 · 19 days left", or "No end date". */
+function planEndWords(sub) {
+  const e = sub?.end;
+  if (!e) return 'No end date';
+  const on = new Date(e.endsAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  if (e.expired) return `Expired ${on}`;
+  return `Ends ${on} · ${e.daysLeft} day${e.daysLeft === 1 ? '' : 's'} left`;
+}
+
+/** End any plan: now, on a date, a few days later — or take the end date away. */
+function pfPlanExpiry(o) {
+  const sub = o.subscription;
+  if (!sub) return toast(`${o.name} has no plan to expire`, 'err');
+  const e = sub.end;
+  const suggest = isoDay(new Date(e && !e.expired ? Date.parse(e.endsAt) : Date.now() + 30 * 86400000));
+  openMyDialog({
+    title: `Plan expiry — ${o.name}`,
+    intro: `<b>${esc(sub.plan)}</b> · ${esc(planEndWords(sub))}${e && !e.set && e.free ? ' <span class="muted">(the free trial)</span>' : ''}.
+      <br><span class="muted small">After the end, ${esc(o.name)} can still see everything but cannot add or change anything until you extend it or change the plan.</span>`,
+    fields: `
+      <div class="expiry-choices">
+        <label class="env-mode active"><input type="radio" name="action" value="date" checked /><span><b>End on a date</b><small>Access stops at the end of that day</small></span></label>
+        <label class="env-mode"><input type="radio" name="action" value="extend" /><span><b>Extend</b><small>From ${e && !e.expired ? 'the current end' : 'today'}</small></span></label>
+        <label class="env-mode"><input type="radio" name="action" value="now" /><span><b>Expire now</b><small>View-only from this moment</small></span></label>
+        <label class="env-mode"><input type="radio" name="action" value="clear" ${e?.set ? '' : 'disabled'} /><span><b>Remove end date</b><small>${sub.amount ? 'The plan runs on' : 'Back to the free trial end'}</small></span></label>
+      </div>
+      <label data-expiry="date">Plan ends on<input name="date" type="date" value="${suggest}" min="${isoDay(new Date())}" /></label>
+      <label data-expiry="extend" hidden>Extend by
+        <select name="days"><option value="7">7 days</option><option value="15">15 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">1 year</option></select></label>`,
+    submitLabel: 'Save',
+    onOpen(form) {
+      const sync = () => {
+        const a = form.action.value;
+        $$('.expiry-choices .env-mode', form).forEach((l) => l.classList.toggle('active', $('input', l).checked));
+        $$('[data-expiry]', form).forEach((el) => { el.hidden = el.dataset.expiry !== a; });
+        $('#mysql-action-submit').textContent = a === 'now' ? 'Expire now' : a === 'clear' ? 'Remove end date' : 'Save';
+        $('#mysql-action-submit').classList.toggle('danger', a === 'now');
+      };
+      form.addEventListener('change', sync);
+      sync();
+    },
+    async submit(fd) {
+      const action = fd.get('action');
+      if (action === 'now' && !await askConfirm(`Expire the ${sub.plan} plan of ${o.name} now? They keep view-only access.`)) throw new Error('Nothing was changed');
+      const r = await api(`/platform/organisations/${o.id}/subscription/expiry`, {
+        method: 'PUT', body: { action, date: fd.get('date'), days: fd.get('days') },
+      });
+      return action === 'now' ? `${o.name}'s plan has expired`
+        : action === 'clear' ? `${o.name}'s plan has no end date now`
+          : `${o.name}'s plan ${planEndWords({ end: r.end }).toLowerCase()}`;
+    },
+    after: pfReload,
+  });
+}
+
 async function pfSetPlan(o) {
   const plans = await pfPlanList();
   const sub = o.subscription;
@@ -11236,7 +11579,7 @@ async function pfSetPlan(o) {
     async submit(fd) {
       if (!fd.get('plan_id')) {
         if (!sub) throw new Error('Pick a plan');
-        if (!confirm(`Cancel the ${sub.plan} subscription of ${o.name}?`)) throw new Error('Nothing was changed');
+        if (!await askConfirm(`Cancel the ${sub.plan} subscription of ${o.name}?`)) throw new Error('Nothing was changed');
         await api(`/platform/organisations/${o.id}/subscription`, { method: 'PUT', body: { cancel: true } });
         return `Cancelled the subscription of ${o.name}`;
       }
@@ -11524,7 +11867,7 @@ function pfPlanDialog(p) {
 
 async function pfPlanDelete(p) {
   const archive = p.subscribers > 0;
-  if (!confirm(archive
+  if (!await askConfirm(archive
     ? `Archive "${p.name}"? The ${p.subscribers} organisation(s) on it stay on it, but it is no longer sold or shown.`
     : `Delete "${p.name}"? Nobody has ever been on it.`)) return;
   try {
@@ -11598,7 +11941,7 @@ async function pfPayments() {
 }
 
 async function pfPaymentDelete(p) {
-  if (!confirm(`Delete the payment of ${fmtMoney(p.amount, p.currency)} from ${p.organisation} (${fmtDay(p.paidAt)})?`)) return;
+  if (!await askConfirm(`Delete the payment of ${fmtMoney(p.amount, p.currency)} from ${p.organisation} (${fmtDay(p.paidAt)})?`)) return;
   try {
     await api(`/platform/payments/${p.id}`, { method: 'DELETE' });
     toast('Payment deleted');
@@ -11650,6 +11993,7 @@ async function pfOrgDetail() {
         <div class="chips">
           <span class="badge ${o.status === 'suspended' ? 'err' : 'ok'}">${esc(o.status)}</span>
           ${sub ? `<span class="badge ${SUB_BADGE[sub.status] || ''}">${esc(sub.plan)} · ${esc(SUB_WORD[sub.status] || sub.status)}</span>` : '<span class="badge err">no plan</span>'}
+          ${sub?.end?.expired ? '<span class="badge err">expired — view only</span>' : sub?.end && sub.end.daysLeft <= 5 ? `<span class="badge warn">ends in ${sub.end.daysLeft} day${sub.end.daysLeft === 1 ? '' : 's'}</span>` : ''}
         </div>
         ${o.notes ? `<p class="muted" style="margin:10px 0 0">${esc(o.notes)}</p>` : ''}
         <p class="muted small" style="margin:8px 0 0">Created ${esc(fmtDay(o.createdAt))} · ${o.lastActive ? `last sign-in ${esc(agoWords(o.lastActive))}` : 'nobody has signed in yet'}</p>
@@ -11657,6 +12001,7 @@ async function pfOrgDetail() {
       <div class="row-actions">
         <button class="btn tiny" data-pf="org-edit" data-id="${o.id}">Edit</button>
         <button class="btn tiny" data-pf="org-plan" data-id="${o.id}">Change plan</button>
+        ${sub ? `<button class="btn tiny" data-pf="org-expiry" data-id="${o.id}">Plan expiry</button>` : ''}
         <button class="btn tiny" data-pf="org-pay" data-id="${o.id}">+ Payment</button>
         <button class="btn tiny" data-pf="org-enter" data-id="${o.id}">Open as super admin</button>
         <button class="btn tiny danger" data-pf="org-delete" data-id="${o.id}">Delete</button>
@@ -11670,7 +12015,15 @@ async function pfOrgDetail() {
       ${tile('Monthly value', sub ? esc(fmtMoney(sub.mrr, cur)) : '—', sub ? `since ${esc(fmtDay(sub.startedAt))}` : '')}
       ${tile('Paid in total', esc(fmtMoney(o.paid, cur)), `${d.payments.length} payment${d.payments.length === 1 ? '' : 's'}`)}
       ${tile('Clients', o.counts.users, `${o.counts.activeUsers} active`)}
-    </div>`)}
+    </div>
+    ${sub ? `<div class="trial-card expiry-card ${sub.end?.expired ? 'ended' : sub.end && sub.end.daysLeft <= 5 ? 'soon' : ''}">
+      <div class="trial-card-top">
+        <div><b>${sub.end ? (sub.end.expired ? 'Plan expired — view only' : `Day ${sub.end.day} of ${sub.end.totalDays}`) : 'No end date'}</b>
+          <span>${esc(planEndWords(sub))}${sub.end ? (sub.end.set ? ' · end date set by a super admin' : sub.end.free ? ' · free trial' : '') : ` · ${sub.amount ? 'runs on while it is paid' : ''}`}</span></div>
+        <button class="btn tiny ${sub.end?.expired ? 'primary' : ''}" data-pf="org-expiry" data-id="${o.id}">${sub.end?.expired ? 'Extend' : 'Set expiry'}</button>
+      </div>
+      ${sub.end ? trialBarHtml({ ...sub.end }) : ''}
+    </div>` : ''}`)}
     ${section('Usage against the plan', `<div class="card">${usageMeters(d.usage, d.limits)}</div>`)}
 
     <div class="section">
@@ -11723,7 +12076,7 @@ async function pfAfterOrgChange() {
 
 async function pfRequest(id, activate) {
   const name = pf.orgs?.find((o) => o.id === id)?.name || pf.detail?.organisation?.name || 'this organisation';
-  if (!activate && !confirm(`Decline the plan request of ${name}? Whatever it is on now stays as it is.`)) return;
+  if (!activate && !await askConfirm(`Decline the plan request of ${name}? Whatever it is on now stays as it is.`)) return;
   try {
     if (activate) await api(`/platform/organisations/${id}/subscription/activate`, { method: 'POST' });
     else await api(`/platform/organisations/${id}/subscription/request`, { method: 'DELETE' });
@@ -12331,7 +12684,7 @@ async function pfLeadStatus(id, status) {
       after: pfAfterLeadChange,
     });
   }
-  if (status === 'won' && !l.orgId && confirm(`${l.name} is won. Create their client organisation and account now?`)) return pfConvertLead(l);
+  if (status === 'won' && !l.orgId && await askConfirm(`${l.name} is won. Create their client organisation and account now?`)) return pfConvertLead(l);
   try {
     await api(`/platform/leads/${id}`, { method: 'PUT', body: { status } });
     toast(`${l.name}: ${LEAD_WORD[status]}`);
@@ -12543,7 +12896,7 @@ $('#view-platform').addEventListener('click', async (e) => {
       case 'lead-convert': await pfConvertLead(pf.lead.lead); break;
       case 'lead-status': await pfLeadStatus(id, b.dataset.status); break;
       case 'note-delete':
-        if (confirm('Delete this note?')) {
+        if (await askConfirm('Delete this note?')) {
           await api(`/platform/leads/${pf.leadId}/notes/${id}`, { method: 'DELETE' });
           await pfAfterLeadChange();
         }
@@ -12554,6 +12907,7 @@ $('#view-platform').addEventListener('click', async (e) => {
       case 'req-decline': await pfRequest(id, false); break;
       case 'org-edit': pfEditOrganisation(org()); break;
       case 'org-plan': await pfSetPlan(org()); break;
+      case 'org-expiry': pfPlanExpiry(org()); break;
       case 'org-pay': await pfRecordPayment(org()); break;
       case 'org-enter': await pfEnterOrganisation(org()); break;
       case 'org-delete': pfDeleteOrganisation(org()); break;
@@ -12588,10 +12942,76 @@ async function refreshBilling() {
   } catch {
     session.billing = null;
   }
-  const active = Boolean(session.billing?.active);
+  // A plan that has ended counts as no plan: the renew page is the whole app until it is renewed.
+  const active = Boolean(session.billing?.active) && !session.billing?.trial?.expired;
   document.body.classList.toggle('needs-plan', session.user?.role !== 'super_admin' && !active);
+  renderTrial();
   return active;
 }
+
+/* ------------------------------------------------ the free trial's progress */
+
+const trialDate = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+/** How far into the free plan: its tone, and the words for it. */
+function trialInfo() {
+  const t = session.billing?.trial;
+  if (!t || session.user?.role === 'super_admin' || !session.user?.orgId) return null;
+  const tone = t.expired ? 'ended' : t.daysLeft <= 5 ? 'soon' : 'ok';
+  const left = t.expired ? 'Ended' : t.daysLeft === 1 ? '1 day left' : `${t.daysLeft} days left`;
+  return { ...t, tone, left };
+}
+
+/** The progress bar: one segment per day, used days filled. Capped so long trials stay readable. */
+function trialBarHtml(t) {
+  const n = Math.min(t.totalDays, 30);
+  const filled = t.expired ? n : Math.round(((t.day - 1) / t.totalDays) * n);
+  const today = t.expired ? -1 : Math.min(n - 1, Math.floor(((t.day - 1) / t.totalDays) * n));
+  return `<div class="trial-days" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="${i < filled ? 'used' : ''} ${i === today ? 'today' : ''}"></i>`).join('')}</div>`;
+}
+
+function renderTrial() {
+  const t = trialInfo();
+  const pill = $("#trial-pill");
+  const banner = $("#trial-banner");
+  if (!t) { pill.hidden = true; banner.hidden = true; return; }
+  const canChoose = session.billing?.canChoose;
+  // The free trial, or any plan a super admin gave an end date.
+  const trial = t.free && !t.set;
+  const name = trial ? "Free plan" : `${t.plan || "Your"} plan`;
+  const endedTitle = trial ? `Your ${t.totalDays}-day free plan ended on ${trialDate(t.endsAt)}` : `${name} expired on ${trialDate(t.endsAt)}`;
+  const needs = trial ? "a paid plan" : "renewing or upgrading your plan";
+
+  pill.hidden = false;
+  pill.className = `trial-pill ${t.tone}`;
+  pill.title = t.expired ? `${name} ${trial ? "has ended" : "has expired"} — see plans` : `${name}: day ${t.day} of ${t.totalDays}`;
+  pill.innerHTML = t.expired
+    ? `<b>${esc(name)} ${trial ? "ended" : "expired"}</b>`
+    : `<span class="trial-ring" style="--p:${t.percent}"></span><b>Day ${t.day}/${t.totalDays}</b><span class="trial-pill-left">${t.left}</span>`;
+
+  // Once it has ended the renew page says it all; the banner is for the days before.
+  banner.hidden = t.expired;
+  if (t.expired) return;
+  banner.className = `trial-banner ${t.tone}`;
+  banner.innerHTML = `
+    <div class="trial-text">
+      <b>${esc(t.expired ? endedTitle : `${name} · day ${t.day} of ${t.totalDays}`)}</b>
+      <span>${t.expired
+    ? `You can still see everything, but adding, deploying and changing things now needs ${needs}.`
+    : `${t.left} — ends ${trialDate(t.endsAt)}. After that you can look around, but not add or change anything.`}</span>
+    </div>
+    ${trialBarHtml(t)}
+    <button type="button" class="btn ${t.tone === "ok" ? "" : "primary"}" data-trial-upgrade>${canChoose ? (trial ? "Upgrade plan" : "Renew or upgrade") : "See plans"}</button>`;
+}
+
+/** An action was refused because the trial has ended: say why, and show the plans. */
+function trialEnded(message) {
+  toast(message || 'Your free plan has ended — upgrade to keep adding and changing things.', 'err');
+  refreshBilling();
+}
+
+$('#trial-pill').addEventListener('click', () => openBilling());
+$('#trial-banner').addEventListener('click', (e) => { if (e.target.closest('[data-trial-upgrade]')) openBilling(); });
 
 async function openBilling() {
   stopLiveStats();
@@ -12624,7 +13044,21 @@ function renderBilling() {
   const yearlyOffered = b.plans.some((p) => p.priceYearly > 0);
   if (!yearlyOffered) billingCycle = 'monthly';
 
-  const gate = !b.active ? `
+  // Ended (the free trial, or a plan a super admin expired): nothing but "renew" is shown.
+  const ended = b.trial?.expired;
+  const endedName = b.trial?.free && !b.trial?.set ? `${b.trialDays}-day free plan` : `${sub?.plan || ""} plan`;
+  const endedGate = ended ? `
+    <div class="plan-gate plan-expired">
+      <div class="plan-gate-icon">⏳</div>
+      <div>
+        <h2>Your plan has expired</h2>
+        <p class="muted">Your ${esc(endedName)} for ${esc(b.organisation?.name || "your organisation")} ended on <b>${esc(trialDate(b.trial.endsAt))}</b>.
+          Your servers, apps and data are safe, but they stay hidden until the plan is renewed.
+          ${b.canChoose ? "Renew or choose a plan below to get everything back." : "Ask an admin of your organisation to renew the plan."}</p>
+      </div>
+    </div>` : "";
+
+  const gate = ended ? endedGate : !b.active ? `
     <div class="plan-gate">
       <div class="plan-gate-icon">🔒</div>
       <div>
@@ -12639,17 +13073,26 @@ function renderBilling() {
       It is switched on as soon as the platform confirms your payment.
       ${b.canChoose ? '<button class="btn tiny" id="btn-withdraw-request" style="margin-left:8px">Withdraw request</button>' : ''}</div>` : '';
 
-  const current = sub ? `
+  const current = sub && !ended ? `
     <div class="section">
       <div class="section-head"><h2>Your plan</h2></div>
       <div class="card current-plan">
         <div class="current-plan-top">
           <div>
-            <h3>${esc(sub.plan)} <span class="badge ${SUB_BADGE[sub.status] || ''}">${esc(SUB_WORD[sub.status] || sub.status)}</span></h3>
-            <p class="muted small" style="margin:4px 0 0">${sub.amount ? `${esc(fmtMoney(sub.amount, sub.currency))} ${sub.cycle === 'yearly' ? 'a year' : 'a month'}` : 'Free'}
-              · since ${esc(fmtDay(sub.startedAt))}${sub.renewsAt ? ` · renews ${esc(fmtDay(sub.renewsAt))}` : ''}</p>
+            <h3>${esc(sub.plan)} ${b.trial?.expired ? '<span class="badge err">ended</span>' : `<span class="badge ${SUB_BADGE[sub.status] || ''}">${esc(SUB_WORD[sub.status] || sub.status)}</span>`}</h3>
+            <p class="muted small" style="margin:4px 0 0">${sub.amount ? `${esc(fmtMoney(sub.amount, sub.currency))} ${sub.cycle === 'yearly' ? 'a year' : 'a month'}` : `Free for ${b.trialDays} days`}
+              · since ${esc(fmtDay(sub.startedAt))}${sub.renewsAt ? ` · ${sub.amount ? 'renews' : b.trial?.expired ? 'ended' : 'ends'} ${esc(fmtDay(sub.renewsAt))}` : ''}</p>
           </div>
         </div>
+        ${b.trial ? `<div class="trial-card ${trialInfo()?.tone || ''}">
+          <div class="trial-card-top">
+            <div><b>${b.trial.expired ? (b.trial.free && !b.trial.set ? 'Free plan ended' : 'Plan expired') : `Day ${b.trial.day} of ${b.trial.totalDays}`}</b>
+              <span>${b.trial.expired ? `Ended ${esc(trialDate(b.trial.endsAt))} — view only until you upgrade` : `${b.trial.daysLeft} day${b.trial.daysLeft === 1 ? '' : 's'} left · ends ${esc(trialDate(b.trial.endsAt))}`}</span></div>
+            <b class="trial-pct">${b.trial.percent}%</b>
+          </div>
+          ${trialBarHtml(trialInfo() || b.trial)}
+          <p class="muted small" style="margin:10px 0 0">${b.trial.free && !b.trial.set ? `The free plan runs ${b.trialDays} days, once per organisation. After it ends` : 'This plan has an end date. After it'} everything stays visible, but adding, deploying and changing things needs ${b.trial.free && !b.trial.set ? 'a paid plan' : 'the plan renewed or changed'}${b.canChoose ? ' — choose one below' : ''}.</p>
+        </div>` : ''}
         ${usageMeters(b.usage, b.limits)}
       </div>
     </div>` : '';
@@ -12662,7 +13105,10 @@ function renderBilling() {
     const isCurrent = sub && sub.planId === p.id && (free || sub.cycle === cycle);
     const isPending = pending && pending.planId === p.id && pending.cycle === cycle;
     let action;
-    if (isCurrent) action = '<button class="btn big price-cta" disabled>Your current plan</button>';
+    if (isCurrent && free && b.trial?.expired) action = '<button class="btn big price-cta" disabled>Free plan ended</button>';
+    else if (isCurrent && b.trial?.expired && b.canChoose) action = `<button class="btn primary big price-cta" data-choose="${p.id}" data-cycle="${cycle}">Renew ${esc(p.name)}</button>`;
+    else if (isCurrent) action = '<button class="btn big price-cta" disabled>Your current plan</button>';
+    else if (free && b.freeTrialUsed) action = '<button class="btn big price-cta" disabled>Free plan already used</button>';
     else if (isPending) action = '<button class="btn big price-cta" disabled>Requested — waiting</button>';
     else if (!b.canChoose) action = '<button class="btn big price-cta" disabled>Ask your admin</button>';
     else action = `<button class="btn ${p.highlighted ? 'primary' : ''} big price-cta" data-choose="${p.id}" data-cycle="${cycle}">${free ? 'Start free' : `Choose ${esc(p.name)}`}</button>`;
@@ -12673,6 +13119,7 @@ function renderBilling() {
       <h3>${esc(p.name)}</h3>
       <p class="price-tagline">${esc(p.tagline || '')}</p>
       <div class="price-amount">${free ? '<b>Free</b>' : `<b>${esc(fmtMoney(price, p.currency))}</b><span>${yearly ? '/year' : '/month'}</span>`}</div>
+      ${free ? `<p class="trial-note"><span aria-hidden="true">⏳</span> Valid for ${b.trialDays} days only</p>` : ''}
       <p class="price-note">${esc(note) || '&nbsp;'}</p>
       ${action}
       <ul class="price-list">${Object.keys(LIMIT_WORDS).map((k) => `<li>${esc(limitLine(k, p.limits[k]))}</li>`).join('')}${p.features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
@@ -12682,7 +13129,7 @@ function renderBilling() {
   box.innerHTML = `${gate}${waiting}${current}
     <div class="section">
       <div class="section-head">
-        <h2>${sub ? 'Change plan' : 'Choose a plan'}</h2>
+        <h2>${ended ? 'Renew or choose a plan' : sub ? 'Change plan' : 'Choose a plan'}</h2>
         ${yearlyOffered ? `<div class="cycle-toggle" id="billing-cycle" role="group" aria-label="Billing cycle">
           <button type="button" class="${billingCycle === 'monthly' ? 'active' : ''}" data-cycle="monthly">Monthly</button>
           <button type="button" class="${billingCycle === 'yearly' ? 'active' : ''}" data-cycle="yearly">Yearly</button>
@@ -12700,7 +13147,7 @@ $('#billing-body').addEventListener('click', async (e) => {
   }
 
   if (e.target.closest('#btn-withdraw-request')) {
-    if (!confirm('Withdraw your plan request?')) return;
+    if (!await askConfirm('Withdraw your plan request?')) return;
     try {
       await api('/billing/request', { method: 'DELETE' });
       toast('Request withdrawn');
@@ -12717,7 +13164,7 @@ $('#billing-body').addEventListener('click', async (e) => {
   const ask = price
     ? `Request ${plan.name} at ${fmtMoney(price, plan.currency)} ${cycle === 'yearly' ? 'a year' : 'a month'}?\n\nIt is switched on once the platform confirms your payment.`
     : `Switch to the free ${plan.name} plan now?`;
-  if (!confirm(ask)) return;
+  if (!await askConfirm(ask)) return;
   busy(choose, true, 'Saving…');
   try {
     const r = await api('/billing/choose', { method: 'POST', body: { plan_id: plan.id, cycle } });
@@ -13752,6 +14199,7 @@ async function boot() {
     const state = await api('/auth/state');
     session.roles = state.roles || [];
     session.user = state.user;
+    signupOpen = Boolean(state.signupOpen);
     if (!state.user) return showLanding(state.needsSetup);
     await enterApp();
   } catch (err) {

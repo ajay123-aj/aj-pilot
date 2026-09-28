@@ -11,6 +11,7 @@ import path from 'node:path';
 import { config, ROOT } from '../config.js';
 import { all } from '../db/index.js';
 import { docsFor } from './docs.js';
+import { FREE_TRIAL_DAYS } from './plans.js';
 
 const INDEX = path.join(ROOT, 'public', 'index.html');
 let cached = { mtime: 0, html: '' };
@@ -39,6 +40,10 @@ export const FAQ = [
     'No. Everything happens over the SSH connection you already use. There is nothing to install or keep updated on your servers.'],
   ['Which frameworks can I deploy?',
     'Next.js, NestJS, Nuxt, Angular, React, Vue and Vite apps, plain Node.js services and static sites. The framework is detected from your repository, built and run in Docker, and monorepos with several projects are supported.'],
+  ['Can an app deploy automatically when I merge or push?',
+    'Yes. Turn on auto deploy for the branch the app runs — main, master, dev or any other — and choose "every push or commit" or "only merged pull / merge requests". A webhook on GitHub, GitLab or Bitbucket starts the deploy within seconds; where the panel cannot be reached from the internet, the branch is checked every minute instead. Every deploy is kept with its branch, whether it was a merge or a commit, when it was made and its full log.'],
+  ['What are environments?',
+    'Named sets of environment variables — database URLs, API keys, secrets — kept once, encrypted, and used for any app, one-click database or systemd service. Import a .env file when you add or edit one, pick one when you create something, or save a new one by name as you create it. Viewers see which variables exist, never their values.'],
   ['How do domains and SSL work?',
     'Connect your Cloudflare account, choose a domain and type a subdomain. The DNS record, the Nginx site and a free Let\'s Encrypt certificate are created for you. For servers without open ports, apps can be published through a Cloudflare Zero Trust tunnel instead. An app can have several domains.'],
   ['Which databases are supported?',
@@ -50,7 +55,7 @@ export const FAQ = [
   ['Can my team use it?',
     'Yes. Add people to your organisation as admin, editor or view-only. Every change is recorded in the activity log, and nothing is shared between organisations.'],
   ['Is there a free plan?',
-    'Yes — the free plan covers one server so you can try everything. Paid plans add more servers, apps, team members, databases and domains.'],
+    `Yes — the free plan covers one server so you can try everything, and is valid for ${FREE_TRIAL_DAYS} days. After that the panel is locked until you renew or choose a paid plan — nothing is deleted. Paid plans add more servers, apps, team members, databases and domains.`],
 ];
 
 async function publicPlans() {
@@ -96,6 +101,7 @@ function pricingCards(plans) {
       <h3>${esc(p.name)}</h3>
       <p class="price-tagline">${esc(p.tagline || '')}</p>
       <div class="price-amount">${free ? '<b>Free</b>' : `<b>${esc(price(monthly, p.currency))}</b><span>/month</span>`}</div>
+      ${free ? `<p class="trial-note"><span aria-hidden="true">⏳</span> Valid for ${FREE_TRIAL_DAYS} days only</p>` : ''}
       <p class="price-note">${!free && yearly > 0 ? `or ${esc(price(yearly, p.currency))} a year` : '&nbsp;'}</p>
       <a class="btn ${p.highlighted ? 'primary' : ''} big price-cta" href="#contact" data-plan="${p.id}">${free ? 'Start free' : 'Get started'}</a>
       <ul class="price-list">${Object.keys(LIMIT_WORDS).map((k) => `<li>${esc(limitLine(k, limits[k]))}</li>`).join('')}${features.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>
@@ -124,6 +130,8 @@ function jsonLd(url, plans) {
       featureList: [
         'Server inventory and live monitoring over SSH', 'systemd service, cron and file management',
         'Git-based app deployment for Next.js, NestJS, Nuxt, Angular, React, Vue and Node.js', 'Monorepo folder deploys',
+        'Auto deploy on every push or on merged pull / merge requests, per branch', 'GitHub, GitLab and Bitbucket webhooks',
+        'Deploy history with branch, merge or commit, time and full logs', 'Encrypted named environments with .env import',
         'Nginx sites with free Let\'s Encrypt SSL', 'Cloudflare DNS and Zero Trust tunnels', 'Docker container management',
         'One-click MySQL, PostgreSQL, MongoDB, Redis, EMQX and Elasticsearch', 'Database users, grants and queries',
         'GitHub Actions and GitLab runners', 'Teams, organisations and roles', 'Encrypted credentials and activity log',

@@ -250,6 +250,65 @@ body.nav-collapsed .shell { margin-left: var(--rail-collapsed); }
 .topbar-title h2 { margin: 0; font-size: 15.5px; font-weight: 700; }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 
+/* ---------------------------------------------------- the free trial's days */
+.trial-pill {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 8px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: var(--text); background: var(--accent-soft); border: 1px solid var(--accent-ring);
+}
+.trial-pill[hidden] { display: none; }
+.trial-pill b { font-weight: 700; }
+.trial-pill-left { color: var(--muted); }
+.trial-pill.soon { background: var(--warn-soft); border-color: var(--warn-line); }
+.trial-pill.ended { background: var(--err-soft); border-color: var(--err-line); color: var(--err); padding-left: 12px; }
+/* a small ring filling up as the days go by */
+.trial-ring { --c: var(--accent); width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px;
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--surface-3) 0); -webkit-mask: radial-gradient(circle, transparent 5px, #000 6px); mask: radial-gradient(circle, transparent 5px, #000 6px); }
+.trial-pill.soon .trial-ring { --c: var(--warn); }
+
+.trial-banner {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 320px) auto; align-items: center; gap: 12px 20px;
+  margin: 16px 32px 0; padding: 12px 16px; border-radius: 12px;
+  background: var(--accent-soft); border: 1px solid var(--accent-ring);
+}
+.trial-banner[hidden] { display: none; }
+.trial-banner.soon { background: var(--warn-soft); border-color: var(--warn-line); }
+.trial-banner.ended { background: var(--err-soft); border-color: var(--err-line); }
+.trial-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.trial-text span { color: var(--muted); font-size: 12.5px; }
+.trial-banner.ended .trial-text b { color: var(--err); }
+.trial-banner .btn { white-space: nowrap; }
+
+/* one little bar per day: used days filled, today pulsing */
+.trial-days { display: flex; gap: 3px; }
+.trial-days i { flex: 1; height: 8px; border-radius: 2px; background: var(--surface-3); }
+.trial-days i.used { background: var(--accent); }
+.soon .trial-days i.used { background: var(--warn); }
+.ended .trial-days i.used { background: var(--err); }
+.trial-days i.today { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); animation: trial-today 1.4s ease-in-out infinite; }
+.soon .trial-days i.today { background: var(--warn); }
+@keyframes trial-today { 50% { opacity: .45; } }
+
+.trial-card { margin: 14px 0 4px; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-ring); }
+.trial-card.soon { background: var(--warn-soft); border-color: var(--warn-line); }
+.trial-card.ended { background: var(--err-soft); border-color: var(--err-line); }
+.trial-card-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 10px; }
+.trial-card-top > div { display: flex; flex-direction: column; gap: 2px; }
+.trial-card-top span { font-size: 12.5px; color: var(--muted); }
+.trial-pct { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.trial-card .trial-days i { height: 10px; }
+.expiry-card { margin-top: 14px; }
+.expiry-card .trial-card-top { align-items: center; }
+/* the four choices in the super admin's "Plan expiry" window */
+.expiry-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.expiry-choices .env-mode:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+@media (max-width: 560px) { .expiry-choices { grid-template-columns: 1fr; } }
+
+@media (max-width: 900px) {
+  .trial-banner { grid-template-columns: 1fr; margin: 12px 16px 0; }
+  .trial-banner .btn { justify-self: start; }
+  .trial-pill-left { display: none; }
+}
+
 .org-pick { display: flex; align-items: center; gap: 8px; margin: 0; }
 .org-pick select {
   padding: 7px 30px 7px 11px; font: inherit; font-size: 12.5px;
@@ -260,7 +319,20 @@ body.nav-collapsed .shell { margin-left: var(--rail-collapsed); }
 .org-pick select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 
 /* Light / dark / system: one icon, a small menu, remembered per browser. */
-.theme-menu { position: relative; }
+/* The one-click light ↔ dark button in the panel header — the same sun / moon as the landing page. */
+.theme-flip { position: relative; overflow: hidden; flex: none; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.theme-flip:hover { transform: translateY(-1px); }
+.theme-flip span {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  transition: transform .35s cubic-bezier(.22, 1, .36, 1), opacity .25s ease;
+}
+.theme-flip svg { width: 18px; height: 18px; }
+.theme-flip .lt-moon { color: var(--accent); }
+.theme-flip .lt-sun { color: #fbbf24; }
+.theme-flip:hover .lt-moon svg { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+.theme-flip:hover .lt-sun svg { transform: rotate(45deg); transition: transform .4s ease; }
+html[data-theme="light"] .theme-flip .lt-sun,
+html:not([data-theme="light"]) .theme-flip .lt-moon { opacity: 0; transform: rotate(-90deg) scale(.4); }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 36px; height: 36px; border-radius: 10px;
@@ -603,6 +675,58 @@ td .badge { vertical-align: middle; }
   margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line-soft);
 }
 
+/* ------------------------------------------- confirm / prompt dialogs */
+.ask-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: var(--backdrop); backdrop-filter: blur(4px);
+  animation: ask-fade .14s ease-out;
+}
+.ask-backdrop.closing { animation: ask-fade .12s ease-in reverse forwards; }
+@keyframes ask-fade { from { opacity: 0; } to { opacity: 1; } }
+.ask {
+  --tone: var(--accent); --tone-soft: var(--accent-soft);
+  position: relative; width: 100%; max-width: 440px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 18px;
+  padding: 26px 24px 20px; box-shadow: var(--shadow-lg); text-align: center;
+  animation: ask-pop .18s cubic-bezier(.2, .9, .3, 1.2);
+  overflow: hidden;
+}
+.ask::before {
+  content: ''; position: absolute; inset: 0 0 auto; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--tone), transparent);
+}
+.ask-danger { --tone: var(--err); --tone-soft: var(--err-soft); }
+.ask-warn { --tone: var(--warn); --tone-soft: var(--warn-soft); }
+@keyframes ask-pop { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+.ask-icon {
+  width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 16px;
+  display: grid; place-items: center; color: var(--tone); background: var(--tone-soft);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--tone-soft) 50%, transparent);
+}
+.ask h3 { margin: 0 0 8px; font-size: 17px; font-weight: 700; color: var(--text); line-height: 1.35; overflow-wrap: anywhere; }
+.ask-body { color: var(--muted); font-size: 13.5px; line-height: 1.55; max-height: 40vh; overflow-y: auto; overflow-wrap: anywhere; }
+.ask-body p { margin: 0 0 8px; }
+.ask-body p:last-child { margin-bottom: 0; }
+.ask-input {
+  width: 100%; margin-top: 14px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 14px;
+}
+.ask-input:focus { outline: none; border-color: var(--tone); box-shadow: 0 0 0 3px var(--tone-soft); }
+.ask-actions { display: flex; gap: 10px; margin-top: 22px; }
+.ask-actions .btn { flex: 1; justify-content: center; padding: 10px 14px; }
+.ask-actions .btn.danger.solid { background: var(--err); border-color: var(--err); color: #fff; }
+.ask-actions .btn.danger.solid:hover { filter: brightness(1.08); }
+.ask-x {
+  position: absolute; top: 10px; right: 12px; width: 28px; height: 28px; border-radius: 8px;
+  border: 0; background: transparent; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer;
+}
+.ask-x:hover { background: var(--line-soft); color: var(--text); }
+@media (max-width: 480px) {
+  .ask { padding: 22px 18px 16px; border-radius: 16px; }
+  .ask-actions { flex-direction: column-reverse; }
+}
+
 /* --------------------------------------------------------------- forms */
 
 form label { display: block; margin-top: 14px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
@@ -779,14 +903,7 @@ label.check input { width: 16px; margin: 0; }
 .cta h2 { font-size: 28px; margin: 0 0 8px; }
 .cta p { margin: 0 0 22px; }
 
-.landing-foot {
-  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  padding: 24px 32px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px;
-}
-
-.landing-foot > div { display: flex; flex-direction: column; gap: 8px; }
-.foot-links { display: flex; gap: 16px; flex-wrap: wrap; }
-.foot-links a:hover { color: var(--text); }
+/* The footer of the landing and docs pages lives in landing.css. */
 
 /* "Works with": a wall of the technologies it handles, drifting past in two rows */
 .stack-wall { position: relative; padding: 36px 0 44px; overflow: hidden; }
@@ -898,6 +1015,61 @@ html[data-theme="dark"] .tech-mono .tech-mark { background: linear-gradient(135d
   padding: 30px; box-shadow: var(--shadow-lg);
 }
 .gate-card h2 { margin: 0 0 6px; font-size: 20px; font-weight: 700; }
+/* the sign-up form needs room for two fields a row */
+.gate-card.wide { max-width: 600px; }
+.gate-card { margin: auto; }
+.auth-switch a { color: var(--accent); font-weight: 600; }
+
+.pw-field { position: relative; display: block; }
+.pw-field input { padding-right: 58px; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); margin-top: 3px;
+  padding: 4px 8px; border: 0; border-radius: 6px; background: var(--surface-2); color: var(--muted);
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.pw-toggle:hover { color: var(--text); }
+.pw-meter { display: flex; gap: 4px; margin-top: 10px; }
+.pw-meter i { flex: 1; height: 4px; border-radius: 3px; background: var(--surface-3); transition: background .2s ease; }
+.pw-meter[data-score="1"] i:nth-child(-n+1) { background: var(--err); }
+.pw-meter[data-score="2"] i:nth-child(-n+2) { background: var(--warn); }
+.pw-meter[data-score="3"] i:nth-child(-n+3) { background: var(--accent); }
+.pw-meter[data-score="4"] i { background: var(--ok); }
+
+/* the plan picker in the sign-up form */
+.su-plan-block { margin-top: 14px; padding: 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+.su-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.su-plan-title { font-size: 13px; font-weight: 700; }
+.su-plan-head .seg[hidden] { display: none; }
+.su-plan-head .seg button { white-space: nowrap; }
+.su-save { color: var(--ok); font-weight: 700; margin-left: 2px; }
+.su-save:empty { display: none; }
+.su-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+.su-plan {
+  position: relative; display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 12px 12px 10px; cursor: pointer;
+  border-radius: 12px; background: var(--card); border: 1.5px solid var(--line);
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.su-plan:hover { border-color: var(--accent-ring); transform: translateY(-1px); }
+.su-plan input { position: absolute; opacity: 0; pointer-events: none; }
+.su-plan.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.su-plan.active::after {
+  content: '✓'; position: absolute; top: 9px; right: 9px; width: 18px; height: 18px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; background: var(--accent-ramp);
+}
+.su-plan b { font-size: 13.5px; }
+.su-price { font-size: 18px; font-weight: 800; letter-spacing: -.02em; }
+.su-price small { font-size: 11px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.su-bits { font-size: 11px; color: var(--muted); }
+.su-popular { align-self: flex-start; max-width: calc(100% - 22px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; padding: 1px 7px; border-radius: 999px; font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: var(--accent-ramp); }
+.su-plan-note { margin: 10px 0 0; }
+.su-plan-note:empty { display: none; }
+
+.signup-perks { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; margin: 14px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.signup-perks li::before { content: '✓ '; color: var(--ok); font-weight: 700; }
+@media (max-width: 560px) {
+  .gate-card { padding: 22px 18px; }
+  .gate-card .row { flex-direction: column; gap: 0; }
+}
 
 /* Three states: still asking the server, signed out (the landing page) and
    signed in (the panel). Nothing is drawn until the answer arrives, so the
@@ -1247,7 +1419,8 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 
 /* ---------------------------------------------------------------- docs */
 .docs-public { background: var(--bg); display: block; }
-.docs-public a.landing-brand, .docs-public .landing-nav a, .docs-public .foot-links a { color: inherit; text-decoration: none; }
+.docs-public a.landing-brand, .docs-public .landing-nav a, .docs-public .foot-col a, .docs-public .foot-base a { text-decoration: none; }
+.docs-public a.landing-brand, .docs-public .landing-nav a { color: inherit; }
 .docs-public .landing-nav a.active { color: var(--accent); font-weight: 600; }
 .docs-public .landing-actions .btn { text-decoration: none; }
 .docs-shell { max-width: 1240px; margin: 0 auto; padding: 32px 32px 64px; display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 40px; }
@@ -1667,3 +1840,16 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 .switch input:checked + span::after { transform: translateX(18px); }
 .switch input:focus-visible + span { box-shadow: 0 0 0 3px var(--accent-ring); }
 .switch b { font-size: 13px; min-width: 24px; }
+
+/* "Valid for 30 days only" on the free plan, wherever it is shown */
+.trial-note {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  margin: 8px 0 4px; padding: 4px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; color: var(--warn);
+  background: var(--warn-soft); border: 1px solid var(--warn-line);
+}
+.su-trial { align-self: flex-start; margin-top: 4px; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn-line); }
+
+/* the only thing an organisation sees once its plan has ended */
+.plan-gate.plan-expired { background: var(--err-soft); border-color: var(--err-line); }
+.plan-gate.plan-expired h2 { color: var(--err); }

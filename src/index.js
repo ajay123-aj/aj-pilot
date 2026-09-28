@@ -16,7 +16,7 @@ import { authRouter } from './routes/auth.js';
 import { teamRouter } from './routes/team.js';
 import { platformRouter, publicPlan } from './routes/platform.js';
 import { billingRouter } from './routes/billing.js';
-import { requirePlan, enforceLimits, DB_PROVIDERS } from './lib/plans.js';
+import { requirePlan, enforceLimits, DB_PROVIDERS, FREE_TRIAL_DAYS, blockIfExpired, trialState, currentSubscription } from './lib/plans.js';
 import { submitLead } from './routes/leads.js';
 import { renderLanding, robotsTxt, sitemapXml } from './lib/landing.js';
 import { renderDocsHome, renderDoc } from './lib/docsPage.js';
@@ -66,7 +66,7 @@ app.use('/api/auth', authRouter);
 app.get('/api/public/plans', async (req, res, next) => {
   try {
     const rows = await all("SELECT * FROM plans WHERE status = 'active' AND is_public = 1 ORDER BY sort_order, price_monthly");
-    res.json({ plans: rows.map(publicPlan) });
+    res.json({ plans: rows.map(publicPlan), trialDays: FREE_TRIAL_DAYS });
   } catch (err) { next(err); }
 });
 
@@ -79,6 +79,10 @@ app.get('/api/public/docs', (req, res) => res.json({ docs: docsFor() }));
 app.get('/api/health', async (req, res, next) => {
   try {
     if (!req.user) return res.json({ ok: true, signedIn: false });
+    // An organisation whose plan has ended sees no counts either — only that it must renew.
+    if (req.user.role !== 'super_admin' && req.orgId && trialState(await currentSubscription(req.orgId))?.expired) {
+      return res.json({ ok: true, signedIn: true, planExpired: true, organisation: req.organisation?.name || null });
+    }
     res.json({
       ok: true,
       signedIn: true,
@@ -95,7 +99,7 @@ app.get('/api/health', async (req, res, next) => {
 // From here on a session is required, and a role decides what may be changed.
 app.use('/api', requireAuth, guardMutations);
 
-app.get('/api/activity', async (req, res, next) => {
+app.get('/api/activity', blockIfExpired, async (req, res, next) => {
   try {
     // On the platform a super admin sees what happened everywhere.
     if (!req.orgId && req.user.role === 'super_admin') {
@@ -124,7 +128,7 @@ app.use('/api', enforceLimits([
   ['POST', /^\/credentials$/, 'databases', (req) => DB_PROVIDERS.includes(String(req.body?.provider || '').trim())],
   ['POST', /^\/team\/members$/, 'users'],
 ]));
-app.use('/api/team', teamRouter);
+app.use('/api/team', blockIfExpired, teamRouter);
 app.use('/api/platform', platformRouter);
 app.use('/api/billing', billingRouter);
 
