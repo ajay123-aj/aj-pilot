@@ -1,6 +1,6 @@
 # AJ Pilot
 
-**Autopilot for your servers.** Deploy apps, manage servers and connect domains from one self-hosted panel.
+**Autopilot for your servers.** Deploy apps, manage servers and connect domains from one self-hosted panel .
 
 > Formerly "Auto Deploy". Technical names on your servers keep the old spelling so existing apps stay managed:
 > the `auto_deploy` database, `/opt/auto-deploy/…` folders and `auto-deploy.*` Docker labels.
@@ -83,12 +83,12 @@ button opens a menu with **Edit profile**, **Change password**, **Settings** and
 
 **Settings** gathers everything that is not a server:
 
-| Tab | What is there |
-| --- | --- |
-| Your account | your name, email, role and what that role may do, with edit-profile and change-password |
-| Team | the people in this organisation and their roles — only for those who may manage people |
-| Organisations | every organisation with its member, server and credential counts; a super admin creates, renames, switches and deletes them here |
-| About this panel | what this organisation holds, the database in use and how long the panel has been up |
+| Tab              | What is there                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Your account     | your name, email, role and what that role may do, with edit-profile and change-password                                          |
+| Team             | the people in this organisation and their roles — only for those who may manage people                                           |
+| Organisations    | every organisation with its member, server and credential counts; a super admin creates, renames, switches and deletes them here |
+| About this panel | what this organisation holds, the database in use and how long the panel has been up                                             |
 
 ### Organisations
 
@@ -101,15 +101,15 @@ ever sees their own.
 
 ### Roles
 
-| | View | Add | Edit | Delete | Manage people | Organisations |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Super admin** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Admin** | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| **Editor** | ✓ | ✓ | ✓ | — | — | — |
-| **View only** | ✓ | — | — | — | — | — |
+|                 | View | Add | Edit | Delete | Manage people | Organisations |
+| --------------- | :--: | :-: | :--: | :----: | :-----------: | :-----------: |
+| **Super admin** |  ✓   |  ✓  |  ✓   |   ✓    |       ✓       |       ✓       |
+| **Admin**       |  ✓   |  ✓  |  ✓   |   ✓    |       ✓       |       —       |
+| **Editor**      |  ✓   |  ✓  |  ✓   |   —    |       —       |       —       |
+| **View only**   |  ✓   |  —  |  —   |   —    |       —       |       —       |
 
-Roles are enforced by the API, not by the buttons: every `POST` needs *add*, every `PUT` needs *edit* and
-every `DELETE` needs *delete*, whatever the browser sends. The read-only actions — testing a connection,
+Roles are enforced by the API, not by the buttons: every `POST` needs _add_, every `PUT` needs _edit_ and
+every `DELETE` needs _delete_, whatever the browser sends. The read-only actions — testing a connection,
 collecting a system profile, verifying a credential, reading a database or refreshing a runner's status —
 stay open to **view only**, so someone can look without being able to change anything. The UI then hides
 what a role cannot use, so nobody is offered a button that will only refuse them.
@@ -150,7 +150,7 @@ Use **Fetch system details** any time to re-read a server. Each collection is st
 
 **Edit** on a server's card — or **Edit server** on its own page — reopens that form with everything filled
 in: name, host, port, SSH user, authentication, tags and notes. The secret boxes come up empty and say
-*unchanged*; typing in one replaces what is stored, leaving it empty keeps it. **Test connection** works
+_unchanged_; typing in one replaces what is stored, leaving it empty keeps it. **Test connection** works
 here too, so a moved host or a rotated password can be checked before it is saved. Renaming to a name
 another server already has is refused by name rather than as a database error, and switching the
 authentication kind without supplying the password or key it needs is refused as well. Editing needs the
@@ -165,20 +165,20 @@ across the top instead.
 Everything about one server sits behind a vertical tab rail on the left rather than one long scroll. The
 rail stays put as you scroll a long panel, and folds into a scrolling row of tabs under 900px wide:
 
-| Tab | Shows |
-| --- | --- |
-| Live | what the machine is doing right now, refreshed every few seconds — [The live view](#the-live-view) |
-| Overview | what is on this server, counted, then the headline tiles, host identity and CPU, memory and swap |
-| Storage | filesystems, block devices, inode usage |
-| Network | public IP, gateway and DNS, interfaces, every listening port |
-| Processes | top processes by CPU and by memory, who is logged in |
-| System | host MySQL, pending updates, security posture, installed tooling, nginx sites and cron |
-| Apps | the custom services deployed onto this server, as full cards — [Custom services](#custom-services) |
-| Docker | engine state, registry sign-in, networks, and the services installed here — [Installations](#installations) |
-| Nginx | nginx and certbot, every domain it serves and whether each one is on SSL — [Nginx and SSL](#nginx-and-ssl) |
-| Cron | everything scheduled on the machine, with add, edit and delete — [Scheduled jobs](#scheduled-jobs) |
-| Services | every systemd unit, live — [Services](#services) |
-| Runners | the CI runners installed on this server — [CI runners](#ci-runners) |
+| Tab       | Shows                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------- |
+| Live      | what the machine is doing right now, refreshed every few seconds — [The live view](#the-live-view)          |
+| Overview  | what is on this server, counted, then the headline tiles, host identity and CPU, memory and swap            |
+| Storage   | filesystems, block devices, inode usage                                                                     |
+| Network   | public IP, gateway and DNS, interfaces, every listening port                                                |
+| Processes | top processes by CPU and by memory, who is logged in                                                        |
+| System    | host MySQL, pending updates, security posture, installed tooling, nginx sites and cron                      |
+| Apps      | the custom services deployed onto this server, as full cards — [Custom services](#custom-services)          |
+| Docker    | engine state, registry sign-in, networks, and the services installed here — [Installations](#installations) |
+| Nginx     | nginx and certbot, every domain it serves and whether each one is on SSL — [Nginx and SSL](#nginx-and-ssl)  |
+| Cron      | everything scheduled on the machine, with add, edit and delete — [Scheduled jobs](#scheduled-jobs)          |
+| Services  | every systemd unit, live — [Services](#services)                                                            |
+| Runners   | the CI runners installed on this server — [CI runners](#ci-runners)                                         |
 
 Overview, Storage, Network, Processes and System come from the stored profile and are instant. The rest talk
 to the server, so they are only fetched when you first open them — opening a server no longer starts several
@@ -190,17 +190,17 @@ or adding a runner drops you on the tab that now shows it.
 
 The **Overview** tab opens with a row of counts — everything on that machine, in one line each:
 
-| Tile | Says |
-| --- | --- |
-| IPv4 | the address the machine answers on, and its public address |
-| Containers | how many are **running**, and of how many, with stopped, restarting, paused and dead broken out beside it |
-| Custom services | how many of the repositories you deployed here are running, and how many are deploying or broken |
-| Installed services | the databases and the like from the catalog, running against total |
-| Domains | how many nginx serves, how many are on SSL, whether nginx is up, and how long the nearest certificate has |
-| Scheduled jobs | jobs in user crontabs, jobs from the system tables, and whether cron is actually running |
-| System services | systemd units running, of how many exist, and how many have **failed** |
-| CI runners | runner services up, of how many are on the machine, and how many are registered here |
-| Docker storage | volumes, images and networks, with the compose version |
+| Tile               | Says                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| IPv4               | the address the machine answers on, and its public address                                                |
+| Containers         | how many are **running**, and of how many, with stopped, restarting, paused and dead broken out beside it |
+| Custom services    | how many of the repositories you deployed here are running, and how many are deploying or broken          |
+| Installed services | the databases and the like from the catalog, running against total                                        |
+| Domains            | how many nginx serves, how many are on SSL, whether nginx is up, and how long the nearest certificate has |
+| Scheduled jobs     | jobs in user crontabs, jobs from the system tables, and whether cron is actually running                  |
+| System services    | systemd units running, of how many exist, and how many have **failed**                                    |
+| CI runners         | runner services up, of how many are on the machine, and how many are registered here                      |
+| Docker storage     | volumes, images and networks, with the compose version                                                    |
 
 **Every tile opens the tab that owns it**, so a number that looks wrong is one click from its detail.
 
@@ -229,15 +229,15 @@ or leave the page, and picked up again when you come back.
 Each sample is taken on the server itself: `/proc` is read twice a second apart, so CPU busy, network
 throughput and disk I/O are real rates rather than guesses from single readings.
 
-| | |
-| --- | --- |
-| CPU | busy percentage with a five-minute sparkline, time waiting on disk, steal time on a VM, and a bar per core |
-| Memory | used against total (from `MemAvailable`, not "free"), cache and buffers, swap use, with its own sparkline |
-| Load | 1, 5 and 15 minutes, per core, with how many processes are runnable |
-| Throughput | network in and out per second, and disk read and write per second |
-| Filesystems | every real mount with used, free and a bar |
-| Containers | how many are running, restarting, paused, stopped or dead |
-| Processes | the top five by CPU and the top five by memory |
+|             |                                                                                                            |
+| ----------- | ---------------------------------------------------------------------------------------------------------- |
+| CPU         | busy percentage with a five-minute sparkline, time waiting on disk, steal time on a VM, and a bar per core |
+| Memory      | used against total (from `MemAvailable`, not "free"), cache and buffers, swap use, with its own sparkline  |
+| Load        | 1, 5 and 15 minutes, per core, with how many processes are runnable                                        |
+| Throughput  | network in and out per second, and disk read and write per second                                          |
+| Filesystems | every real mount with used, free and a bar                                                                 |
+| Containers  | how many are running, restarting, paused, stopped or dead                                                  |
+| Processes   | the top five by CPU and the top five by memory                                                             |
 
 **Containers are listed with their own live numbers** — CPU, memory against limit, network in and out, from
 `docker stats` — beside their state, health, image and published ports. **Start**, **Stop**, **Restart** and
@@ -249,39 +249,39 @@ while an action on it is in flight, so a button is never redrawn under your clic
 Every sample is checked against thresholds and what fails comes back as an alert, worst first, above
 everything else on the tab:
 
-| Alert | Warning | Critical |
-| --- | --- | --- |
-| CPU | 75% | 90% |
-| Memory | 80% | 92% |
-| Any filesystem | 80% full | 90% full |
-| Load per core | 2 | 4 |
-| Swap in use | 50% | — |
-| CPU waiting on disk | 25% | — |
-| CPU stolen by the host | 10% | — |
-| Docker | a paused container | the daemon down, a container restarting in a loop, dead, or failing its health check |
+| Alert                  | Warning            | Critical                                                                             |
+| ---------------------- | ------------------ | ------------------------------------------------------------------------------------ |
+| CPU                    | 75%                | 90%                                                                                  |
+| Memory                 | 80%                | 92%                                                                                  |
+| Any filesystem         | 80% full           | 90% full                                                                             |
+| Load per core          | 2                  | 4                                                                                    |
+| Swap in use            | 50%                | —                                                                                    |
+| CPU waiting on disk    | 25%                | —                                                                                    |
+| CPU stolen by the host | 10%                | —                                                                                    |
+| Docker                 | a paused container | the daemon down, a container restarting in a loop, dead, or failing its health check |
 
-Each alert says what it means rather than just quoting a number — *"Only 3 GB left. A full disk stops
-databases and deployments dead."* The tab's counter turns red, and a **critical** alert also raises a toast
+Each alert says what it means rather than just quoting a number — _"Only 3 GB left. A full disk stops
+databases and deployments dead."_ The tab's counter turns red, and a **critical** alert also raises a toast
 the first time it appears, so a problem that starts while you are reading another part of the page still
 says so. An alert that clears can announce itself again if it comes back.
 
 ### What gets collected
 
-| Group | Details |
-| --- | --- |
-| System | distribution, version, codename, kernel, architecture, machine ID, timezone, boot time, virtualization, init |
-| CPU | model, vendor, vCPUs, sockets, cores/threads, clock, L3 cache, hypervisor |
-| Memory | total / used / available / free, buffers, cached, swap |
-| Storage | every filesystem with size, used, free and use%, inode usage, block devices with model |
-| Network | interfaces (IPv4 + IPv6), default gateway, DNS servers, public IP, every listening port with its process and PID |
-| Processes | total count, top 10 by CPU and by memory |
-| Services | running systemd units and any failed units (the full list is read live — see [Services](#services)) |
-| Updates | dpkg/snap counts, pending updates, security updates, reboot-required flag |
-| Security | ufw status, fail2ban, SSH port, PermitRootLogin, PasswordAuthentication, sudo users, active sessions |
-| Tooling | docker, compose, git, node, npm, python3, nginx, certbot, psql, and more with versions |
-| Docker | engine version, running/stopped counts, images, storage driver, full container list with ports |
-| MySQL | installed version, service state, bind address, port, data directory and its size, whether it is localhost-only |
-| Web / jobs | nginx sites-enabled, root crontab |
+| Group      | Details                                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| System     | distribution, version, codename, kernel, architecture, machine ID, timezone, boot time, virtualization, init     |
+| CPU        | model, vendor, vCPUs, sockets, cores/threads, clock, L3 cache, hypervisor                                        |
+| Memory     | total / used / available / free, buffers, cached, swap                                                           |
+| Storage    | every filesystem with size, used, free and use%, inode usage, block devices with model                           |
+| Network    | interfaces (IPv4 + IPv6), default gateway, DNS servers, public IP, every listening port with its process and PID |
+| Processes  | total count, top 10 by CPU and by memory                                                                         |
+| Services   | running systemd units and any failed units (the full list is read live — see [Services](#services))              |
+| Updates    | dpkg/snap counts, pending updates, security updates, reboot-required flag                                        |
+| Security   | ufw status, fail2ban, SSH port, PermitRootLogin, PasswordAuthentication, sudo users, active sessions             |
+| Tooling    | docker, compose, git, node, npm, python3, nginx, certbot, psql, and more with versions                           |
+| Docker     | engine version, running/stopped counts, images, storage driver, full container list with ports                   |
+| MySQL      | installed version, service state, bind address, port, data directory and its size, whether it is localhost-only  |
+| Web / jobs | nginx sites-enabled, root crontab                                                                                |
 
 The probe runs as a single remote script ([src/lib/probe.sh](src/lib/probe.sh)) in one SSH round trip. Every
 section is best-effort — a missing tool yields an empty section rather than a failed run.
@@ -297,12 +297,12 @@ Every server page lists **every** systemd service on the host, read live over SS
 profile: running, stopped, failed and the ones that are only installed. Filter by name or by state, and for
 each unit:
 
-| Action | What happens |
-| --- | --- |
-| Click the unit name | Status, PID, memory, the unit file and the last 200 journal lines |
-| Start / Stop / Restart | `systemctl <action>`, then the new state and journal tail come back |
-| Enable / Disable | Whether it starts on boot |
-| Delete | Only for units this panel created — stops, disables and removes the unit file |
+| Action                 | What happens                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| Click the unit name    | Status, PID, memory, the unit file and the last 200 journal lines             |
+| Start / Stop / Restart | `systemctl <action>`, then the new state and journal tail come back           |
+| Enable / Disable       | Whether it starts on boot                                                     |
+| Delete                 | Only for units this panel created — stops, disables and removes the unit file |
 
 Stopping something that keeps the server reachable (`ssh`, `systemd-networkd`, `dbus`…) asks for confirmation
 first.
@@ -328,22 +328,22 @@ there it arrives with that server already chosen, and its **Service** picker ins
 catalog without leaving the page. Changing the picker redraws the form for that service: its versions, its
 default port and its own settings.
 
-| | Installed as | Default port |
-| --- | --- | --- |
-| Docker Engine | on the host, from `get.docker.com` | — |
-| Docker Compose | on the host, the compose v2 plugin | — |
-| MySQL | container — `mysql`, named volume at `/var/lib/mysql` | 3306 |
-| MongoDB | container — `mongo`, named volume at `/data/db` | 27017 |
-| Redis | container — `redis`, append-only persistence at `/data` | 6379 |
-| EMQX | container — `emqx`, named volume at `/opt/emqx/data` | 1883 + dashboard 18083 |
-| Elasticsearch | container — `elasticsearch`, named volume at `/usr/share/elasticsearch/data` | 9200 |
+|                | Installed as                                                                 | Default port           |
+| -------------- | ---------------------------------------------------------------------------- | ---------------------- |
+| Docker Engine  | on the host, from `get.docker.com`                                           | —                      |
+| Docker Compose | on the host, the compose v2 plugin                                           | —                      |
+| MySQL          | container — `mysql`, named volume at `/var/lib/mysql`                        | 3306                   |
+| MongoDB        | container — `mongo`, named volume at `/data/db`                              | 27017                  |
+| Redis          | container — `redis`, append-only persistence at `/data`                      | 6379                   |
+| EMQX           | container — `emqx`, named volume at `/opt/emqx/data`                         | 1883 + dashboard 18083 |
+| Elasticsearch  | container — `elasticsearch`, named volume at `/usr/share/elasticsearch/data` | 9200                   |
 
 **Nothing but Docker is installed onto the machine.** Databases are never apt-installed; they run as
 containers with a named volume, so the data survives a rebuild and nothing is left behind on the host when
 you remove them.
 
 **A server without Docker says so.** Picking a server checks it straight away, and if Docker is missing you
-get *"Docker is not installed on this server"* with a button to install it there first — before anything is
+get _"Docker is not installed on this server"_ with a button to install it there first — before anything is
 attempted, not after it fails. The same check guards the API, so it cannot be worked around.
 
 Each service's form covers the version, the container name, the **port**, which Docker network to join, and
@@ -354,7 +354,7 @@ encrypted with the same master key as every other secret and are never returned 
 ### Services that answer on more than one port
 
 A broker or a search engine does not live on a single port, so those get a box each. Every port box is
-checked against what the server already publishes, and *"in use by …"* appears beside any that clashes
+checked against what the server already publishes, and _"in use by …"_ appears beside any that clashes
 before you install rather than after it fails.
 
 **EMQX** publishes MQTT on the first port and its **dashboard** on its own (18083 by default), with optional
@@ -403,8 +403,8 @@ rather than failing obscurely.
 
 The same panel lists every **named volume** on the machine — where a container's data actually lives — with
 its size, its mount point on the host, and **what is holding it**: each container using it, with a green dot
-when that container is running. A volume the panel created for something it installed says so (*"data for
-mysql"*). Sizes come from `docker system df`; an older daemon that will not report them leaves the column
+when that container is running. A volume the panel created for something it installed says so (_"data for
+mysql"_). Sizes come from `docker system df`; an older daemon that will not report them leaves the column
 empty rather than dropping the volume.
 
 The fact worth having is the one neither `docker volume ls` nor `docker ps` gives on its own: a volume with
@@ -432,30 +432,30 @@ the same way, with a hint about what to add.
 
 What it finds becomes the suggested settings, all of which you can overrule:
 
-| Read from the repository | Becomes |
-| --- | --- |
-| dependencies | the **project type** (below) and its usual port |
-| `engines.node` | the Node version (22 by default) |
+| Read from the repository                             | Becomes                                                        |
+| ---------------------------------------------------- | -------------------------------------------------------------- |
+| dependencies                                         | the **project type** (below) and its usual port                |
+| `engines.node`                                       | the Node version (22 by default)                               |
 | `package-lock.json` / `yarn.lock` / `pnpm-lock.yaml` | `npm ci`, `yarn --frozen-lockfile` or `pnpm --frozen-lockfile` |
-| `scripts.build` | the build command |
-| `scripts.start`, or `main` | the start command |
-| `angular.json` | where Angular builds to, including v17+'s `browser/` folder |
-| a `Dockerfile` at the root | the option to use the repository's own build instead |
+| `scripts.build`                                      | the build command                                              |
+| `scripts.start`, or `main`                           | the start command                                              |
+| `angular.json`                                       | where Angular builds to, including v17+'s `browser/` folder    |
+| a `Dockerfile` at the root                           | the option to use the repository's own build instead           |
 
 ### Project types
 
 The type it picks is a suggestion — the dropdown lets you override it, which matters when a repository
 could reasonably be either.
 
-| Type | Runs as | Default port |
-| --- | --- | --- |
-| **Next.js** | its own server, `npm run start` | 3000 |
-| **NestJS** | `node dist/main.js` after a build | 3000 |
-| **Nuxt** | `node .output/server/index.mjs` | 3000 |
-| **Node.js service** | Express, Fastify, Koa, or any start script | 3000 |
-| **Angular** | built, then served by **nginx** | 80 |
-| **React · Vite · Vue** | built, then served by **nginx** | 80 |
-| **Static site** | whatever lands in the output folder, served by nginx | 80 |
+| Type                   | Runs as                                              | Default port |
+| ---------------------- | ---------------------------------------------------- | ------------ |
+| **Next.js**            | its own server, `npm run start`                      | 3000         |
+| **NestJS**             | `node dist/main.js` after a build                    | 3000         |
+| **Nuxt**               | `node .output/server/index.mjs`                      | 3000         |
+| **Node.js service**    | Express, Fastify, Koa, or any start script           | 3000         |
+| **Angular**            | built, then served by **nginx**                      | 80           |
+| **React · Vite · Vue** | built, then served by **nginx**                      | 80           |
+| **Static site**        | whatever lands in the output folder, served by nginx | 80           |
 
 The split matters: a front-end has no server to run, so `npm start` would give you a development server. The
 static types build the project with Node and then copy only the result into an nginx image — smaller, and
@@ -626,25 +626,25 @@ certificate names are validated against strict patterns before they are ever put
 ## Scheduled jobs
 
 A server's **Cron** tab is everything that machine runs on a schedule. **If cron is not installed** it says so
-— *"Nothing here runs on a schedule until it is — no backups, no cleanups, no certificate renewals"* — with a
+— _"Nothing here runs on a schedule until it is — no backups, no cleanups, no certificate renewals"_ — with a
 button to install it and start its service. If the service is installed but **stopped**, that comes first in
 red, because jobs sitting in a table nobody reads are worse than no jobs at all.
 
 Cron keeps its work in four places, and the tab reads all of them:
 
-| Where | What it is | Editable here |
-| --- | --- | --- |
-| a user's crontab | what `crontab -e` edits, one table per user | **yes** |
-| `/etc/crontab` | the system table, with a user column | no |
-| `/etc/cron.d/*` | files dropped in by packages | no |
-| `/etc/cron.{hourly,daily,weekly,monthly}` | scripts run by `run-parts` | no |
+| Where                                     | What it is                                  | Editable here |
+| ----------------------------------------- | ------------------------------------------- | ------------- |
+| a user's crontab                          | what `crontab -e` edits, one table per user | **yes**       |
+| `/etc/crontab`                            | the system table, with a user column        | no            |
+| `/etc/cron.d/*`                           | files dropped in by packages                | no            |
+| `/etc/cron.{hourly,daily,weekly,monthly}` | scripts run by `run-parts`                  | no            |
 
 **Add**, **Edit** and **Delete** work on user crontabs. The rest is shown in full but left alone: those files
 belong to the distribution and its packages, and quietly rewriting them from a web panel is how a server
 stops doing what its owner expects.
 
-Every job is read back in plain English next to its schedule — `*/15 * * * *` becomes *"every 15 minutes"*,
-`0 4 * * 0` becomes *"every Sunday at 04:00"* — and the add form does the same as you type, so a wrong
+Every job is read back in plain English next to its schedule — `*/15 * * * *` becomes _"every 15 minutes"_,
+`0 4 * * 0` becomes _"every Sunday at 04:00"_ — and the add form does the same as you type, so a wrong
 schedule is obvious there rather than at three in the morning. There are presets for the usual cadences.
 
 **Nothing is written carelessly.** An edit is applied by reading the whole table, changing the one line, and
@@ -672,11 +672,11 @@ The panel then mints a registration token from GitHub or GitLab, installs the ru
 existing SSH connection, and keeps it running under systemd. A first install downloads the runner on the
 server, so it takes a minute or two; the install log comes back either way.
 
-| Provider | What is installed |
-| --- | --- |
-| GitHub | `actions/runner` (latest release) into `/opt/auto-deploy/runners/<name>`, registered with a repository or organisation token, then `svc.sh install` writes its own systemd unit |
-| GitLab | the `gitlab-runner` package (once per server), registered against the project or group with the `shell` or `docker` executor |
-| Bitbucket | not supported — Bitbucket Pipelines runners work differently, so Bitbucket accounts are left out of the runner form. They can still deploy apps. |
+| Provider  | What is installed                                                                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitHub    | `actions/runner` (latest release) into `/opt/auto-deploy/runners/<name>`, registered with a repository or organisation token, then `svc.sh install` writes its own systemd unit |
+| GitLab    | the `gitlab-runner` package (once per server), registered against the project or group with the `shell` or `docker` executor                                                    |
+| Bitbucket | not supported — Bitbucket Pipelines runners work differently, so Bitbucket accounts are left out of the runner form. They can still deploy apps.                                |
 
 Once installed, a runner can be checked (live status from the provider), restarted, stopped and removed.
 Removing it unregisters it at the provider, deletes it from the server and forgets it here.
@@ -686,10 +686,10 @@ most recently updated repositories — and each repository page lists that repos
 
 ### Is a runner actually running?
 
-A server's **Runners** tab asks *that machine*, not the provider, and the two answer different questions. A
+A server's **Runners** tab asks _that machine_, not the provider, and the two answer different questions. A
 runner whose service has died still sits in GitHub's list; a runner somebody installed by hand is not in the
-panel's list at all. So the tab opens with the sentence you want — *"This runner is running on this server"*,
-or *"2 of 3 runners are running"*, or *"No runner is running on this server"* in red — and says whether one
+panel's list at all. So the tab opens with the sentence you want — _"This runner is running on this server"_,
+or _"2 of 3 runners are running"_, or _"No runner is running on this server"_ in red — and says whether one
 is **working on a job right now**, which it knows because GitHub's runner forks a `Runner.Worker` process for
 each job it picks up.
 
@@ -714,20 +714,20 @@ tunnelled through its server with the superuser it was created with.
 
 PostgreSQL, MongoDB and Redis get the same four tabs as MySQL:
 
-| | PostgreSQL | MongoDB | Redis |
-|---|---|---|---|
-| **Overview** | version, uptime, databases, users, connections, cache hit rate, transactions, rows written, deadlocks, sessions | version, uptime, databases, users, connections, opcounters, memory, WiredTiger cache, traffic, replica role, current operations | version, uptime, keys, ACL users, clients, memory vs `maxmemory`, ops/sec, hit rate, evictions, persistence, role, client list |
-| **Databases** | create (owner, encoding), drop (optionally forcing sessions off); per database: size, tables, live/dead rows, indexes, schemas, extensions, who can connect; per table: columns, indexes, first rows | create (with a first collection), drop; per database: collections, documents, sizes, users with roles on it; per collection: indexes, first documents | db0–db15 with key counts, **Flush**; per database: a SCAN sample of keys with type, TTL and memory; per key: its value |
-| **Users** | roles with login, superuser, connection limit, expiry, sessions and grants. Create, grant read-only / read-write / full / owner on a database, revoke, password, lock (NOLOGIN), drop. Dropping hands anything the role owned to the panel's role first, so no table is deleted | users with auth database and roles. Create, grant a role (per database or `…AnyDatabase` / `root`), revoke every role on a database, password, drop. MongoDB has no account lock | ACL users. Create with full / read-write / read-only access on a key pattern, change access, revoke all commands, password, enable / disable, delete. Saved with `ACL SAVE` or `CONFIG REWRITE` when the server has a file for it |
-| **Configuration** | 20 settings via `ALTER SYSTEM` + reload (persistent; "restart" marks the ones that need one), plus all of `pg_settings` | runtime `setParameter` values and the profiler's `slowms` (lost on restart), plus every parameter | 13 settings via `CONFIG SET`, optionally saved with `CONFIG REWRITE`, plus every setting |
-| **Run query** | runs inside a `READ ONLY` transaction that is rolled back, as a single prepared statement | JSON find or aggregate; `$out` / `$merge` refused | one command from a read-only allow-list |
+|                   | PostgreSQL                                                                                                                                                                                                                                                                      | MongoDB                                                                                                                                                                          | Redis                                                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview**      | version, uptime, databases, users, connections, cache hit rate, transactions, rows written, deadlocks, sessions                                                                                                                                                                 | version, uptime, databases, users, connections, opcounters, memory, WiredTiger cache, traffic, replica role, current operations                                                  | version, uptime, keys, ACL users, clients, memory vs `maxmemory`, ops/sec, hit rate, evictions, persistence, role, client list                                                                                                    |
+| **Databases**     | create (owner, encoding), drop (optionally forcing sessions off); per database: size, tables, live/dead rows, indexes, schemas, extensions, who can connect; per table: columns, indexes, first rows                                                                            | create (with a first collection), drop; per database: collections, documents, sizes, users with roles on it; per collection: indexes, first documents                            | db0–db15 with key counts, **Flush**; per database: a SCAN sample of keys with type, TTL and memory; per key: its value                                                                                                            |
+| **Users**         | roles with login, superuser, connection limit, expiry, sessions and grants. Create, grant read-only / read-write / full / owner on a database, revoke, password, lock (NOLOGIN), drop. Dropping hands anything the role owned to the panel's role first, so no table is deleted | users with auth database and roles. Create, grant a role (per database or `…AnyDatabase` / `root`), revoke every role on a database, password, drop. MongoDB has no account lock | ACL users. Create with full / read-write / read-only access on a key pattern, change access, revoke all commands, password, enable / disable, delete. Saved with `ACL SAVE` or `CONFIG REWRITE` when the server has a file for it |
+| **Configuration** | 20 settings via `ALTER SYSTEM` + reload (persistent; "restart" marks the ones that need one), plus all of `pg_settings`                                                                                                                                                         | runtime `setParameter` values and the profiler's `slowms` (lost on restart), plus every parameter                                                                                | 13 settings via `CONFIG SET`, optionally saved with `CONFIG REWRITE`, plus every setting                                                                                                                                          |
+| **Run query**     | runs inside a `READ ONLY` transaction that is rolled back, as a single prepared statement                                                                                                                                                                                       | JSON find or aggregate; `$out` / `$merge` refused                                                                                                                                | one command from a read-only allow-list                                                                                                                                                                                           |
 
 The rest of this section describes the MySQL page.
 
 Most MySQL installs bind to `127.0.0.1`, so nothing outside the box can reach them. Rather than asking you to
 open port 3306 to the world, a MySQL connection can be **tied to a server** — the panel then opens the
-database connection *through that server's existing SSH connection*. No firewall change, no extra exposure.
-Pick the server in the "Connect through server" dropdown; leave it on *Direct connection* for a database that
+database connection _through that server's existing SSH connection_. No firewall change, no extra exposure.
+Pick the server in the "Connect through server" dropdown; leave it on _Direct connection_ for a database that
 is already reachable.
 
 A connection can be changed later with **Edit** (on its card, or **Edit connection** on its page); leave the
@@ -750,8 +750,8 @@ password empty to keep the saved one. Once connected, the page has four tabs:
   it survives a restart — plus every server variable, searchable. Only that curated list can be changed
 - **Run query** — a read-only console
 
-Viewers can see all of it. Creating databases, users and grants needs the *create* permission, changing a
-charset, password, lock or setting needs *edit*, and dropping or revoking needs *delete*. Every change goes to
+Viewers can see all of it. Creating databases, users and grants needs the _create_ permission, changing a
+charset, password, lock or setting needs _edit_, and dropping or revoking needs _delete_. Every change goes to
 the activity log. The MySQL account in the connection needs the matching MySQL privileges too (`CREATE`,
 `DROP`, `CREATE USER`, `GRANT OPTION`, `SYSTEM_VARIABLES_ADMIN`); when it lacks one, MySQL's own error is shown.
 
@@ -775,15 +775,15 @@ self-hosted) and **Bitbucket** (bitbucket.org). All three can be connected by si
 or by pasting a token, and a connected account of any of them can deploy apps. Runners are GitHub and GitLab
 only — see [CI runners](#ci-runners).
 
-| | GitHub | GitLab | Bitbucket |
-| --- | --- | --- | --- |
-| Browser sign-in | OAuth app | OAuth application (with PKCE) | OAuth consumer |
-| Paste a token | ✓ | ✓ | ✓ |
-| Repositories, branches, commits | ✓ | ✓ | ✓ |
-| Deploy apps (clone with the token) | ✓ | ✓ | ✓ |
-| Organisations / groups / workspaces | organisations | groups | workspaces |
-| CI runners | GitHub Actions runner | `gitlab-runner` | — |
-| Self-hosted server | GitHub Enterprise | self-hosted GitLab | — (Bitbucket Cloud only) |
+|                                     | GitHub                | GitLab                        | Bitbucket                |
+| ----------------------------------- | --------------------- | ----------------------------- | ------------------------ |
+| Browser sign-in                     | OAuth app             | OAuth application (with PKCE) | OAuth consumer           |
+| Paste a token                       | ✓                     | ✓                             | ✓                        |
+| Repositories, branches, commits     | ✓                     | ✓                             | ✓                        |
+| Deploy apps (clone with the token)  | ✓                     | ✓                             | ✓                        |
+| Organisations / groups / workspaces | organisations         | groups                        | workspaces               |
+| CI runners                          | GitHub Actions runner | `gitlab-runner`               | —                        |
+| Self-hosted server                  | GitHub Enterprise     | self-hosted GitLab            | — (Bitbucket Cloud only) |
 
 ### Connecting through the browser
 
@@ -805,19 +805,19 @@ provider the panel walks you through it in two steps:
 
 What to do on each provider:
 
-| | GitHub | GitLab | Bitbucket |
-| --- | --- | --- | --- |
-| Where | Settings → Developer settings → OAuth Apps → *New OAuth App* | Preferences → Applications → *Add new application* | your workspace → Settings → OAuth consumers → *Add consumer* |
-| What to do | the form opens with the name and callback already filled in — press *Register application*, then *Generate a new client secret* | paste the callback URL and tick the scopes below | paste the callback URL, tick *This is a private consumer*, and tick the permissions below |
-| Access it gets | scopes `repo`, `read:org`, `read:user` (requested at sign-in) | scopes `read_api`, `read_repository`, `read_user` | permissions **Account: Read**, **Workspace membership: Read**, **Repositories: Read** (set on the consumer) |
-| Client ID is called | Client ID (`Ov23li…` or `Iv1.…`) | Application ID (long hex string) | Key |
-| Client secret is called | Client secret | Secret | Secret |
-| Access token lifetime | does not expire | 2 hours, renewed automatically | 2 hours, renewed automatically |
+|                         | GitHub                                                                                                                          | GitLab                                             | Bitbucket                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Where                   | Settings → Developer settings → OAuth Apps → _New OAuth App_                                                                    | Preferences → Applications → _Add new application_ | your workspace → Settings → OAuth consumers → _Add consumer_                                                |
+| What to do              | the form opens with the name and callback already filled in — press _Register application_, then _Generate a new client secret_ | paste the callback URL and tick the scopes below   | paste the callback URL, tick _This is a private consumer_, and tick the permissions below                   |
+| Access it gets          | scopes `repo`, `read:org`, `read:user` (requested at sign-in)                                                                   | scopes `read_api`, `read_repository`, `read_user`  | permissions **Account: Read**, **Workspace membership: Read**, **Repositories: Read** (set on the consumer) |
+| Client ID is called     | Client ID (`Ov23li…` or `Iv1.…`)                                                                                                | Application ID (long hex string)                   | Key                                                                                                         |
+| Client secret is called | Client secret                                                                                                                   | Secret                                             | Secret                                                                                                      |
+| Access token lifetime   | does not expire                                                                                                                 | 2 hours, renewed automatically                     | 2 hours, renewed automatically                                                                              |
 
 Before saving, the panel checks the pair against the provider's token endpoint. A Client ID the provider has
 never heard of, or a secret that does not match it, is rejected there and then with the reason — rather than
 sending you to a sign-in page that answers **404**, which is what GitHub does for an unknown app. Your
-username, email or password are *not* the Client ID; it comes from the app you register.
+username, email or password are _not_ the Client ID; it comes from the app you register.
 
 After that, adding an account is just: pick provider → sign in → done.
 
@@ -858,34 +858,34 @@ BITBUCKET_CLIENT_SECRET=
 # GITLAB_API_URL=https://gitlab.example.com/api/v4
 ```
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OAUTH_CALLBACK_BASE` | `http://localhost:<PORT>` | base URL the provider redirects back to |
-| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | — | OAuth app for GitHub browser sign-in |
-| `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET` | — | OAuth application for GitLab browser sign-in |
-| `BITBUCKET_CLIENT_ID` / `BITBUCKET_CLIENT_SECRET` | — | OAuth consumer (Key / Secret) for Bitbucket browser sign-in |
-| `GITHUB_WEB_URL` / `GITHUB_API_URL` | `https://github.com` / `https://api.github.com` | self-hosted GitHub Enterprise |
-| `GITLAB_WEB_URL` / `GITLAB_API_URL` | `https://gitlab.com` / `https://gitlab.com/api/v4` | self-hosted GitLab |
+| Variable                                          | Default                                            | Purpose                                                     |
+| ------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------- |
+| `OAUTH_CALLBACK_BASE`                             | `http://localhost:<PORT>`                          | base URL the provider redirects back to                     |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`       | —                                                  | OAuth app for GitHub browser sign-in                        |
+| `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET`       | —                                                  | OAuth application for GitLab browser sign-in                |
+| `BITBUCKET_CLIENT_ID` / `BITBUCKET_CLIENT_SECRET` | —                                                  | OAuth consumer (Key / Secret) for Bitbucket browser sign-in |
+| `GITHUB_WEB_URL` / `GITHUB_API_URL`               | `https://github.com` / `https://api.github.com`    | self-hosted GitHub Enterprise                               |
+| `GITLAB_WEB_URL` / `GITLAB_API_URL`               | `https://gitlab.com` / `https://gitlab.com/api/v4` | self-hosted GitLab                                          |
 
 If you reach the panel on a different port or host, set `OAUTH_CALLBACK_BASE` to match before registering —
 the callback URL the wizard shows is the one that must be registered with the provider.
 
 ### Pasting a token instead
 
-There is a small *Paste an access token instead* link on the picker, for a CI token or a machine account
+There is a small _Paste an access token instead_ link on the picker, for a CI token or a machine account
 where browser sign-in makes no sense. Pick the **Hosting** (GitHub, GitLab or Bitbucket), paste the token and
 press **Authenticate** to check it before saving.
 
-| | GitHub | GitLab | Bitbucket |
-| --- | --- | --- | --- |
-| Token | personal access token, classic or fine-grained | personal access token | Atlassian API token, or a workspace / repository access token |
-| Scope needed | `repo` | `read_api` (plus `read_repository`) | read access to account, workspaces and repositories |
-| Create it at | Settings → Developer settings → Personal access tokens | Preferences → Access tokens | Atlassian account → Security → API tokens; or workspace / repository settings → Access tokens |
-| Extra field | API URL (Enterprise only) | API URL (self-hosted only) | **Atlassian email** — fill it in for an API token, leave it empty for an access token |
+|              | GitHub                                                 | GitLab                              | Bitbucket                                                                                     |
+| ------------ | ------------------------------------------------------ | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| Token        | personal access token, classic or fine-grained         | personal access token               | Atlassian API token, or a workspace / repository access token                                 |
+| Scope needed | `repo`                                                 | `read_api` (plus `read_repository`) | read access to account, workspaces and repositories                                           |
+| Create it at | Settings → Developer settings → Personal access tokens | Preferences → Access tokens         | Atlassian account → Security → API tokens; or workspace / repository settings → Access tokens |
+| Extra field  | API URL (Enterprise only)                              | API URL (self-hosted only)          | **Atlassian email** — fill it in for an API token, leave it empty for an access token         |
 
 How the token is used for Bitbucket: with an email it is sent as `email:token` (basic auth) and git clones as
 `x-bitbucket-api-token-auth`; without one it is a bearer token and git clones as `x-token-auth`. An older
-Bitbucket *app password* also works: put your Bitbucket username in the email field.
+Bitbucket _app password_ also works: put your Bitbucket username in the email field.
 
 (Those tables are for **Paste a token**; browser sign-in gets its access from the app you registered.)
 
@@ -907,18 +907,18 @@ changing its scopes.
 The **Credentials** tab stores access for the deployment phase. Each secret is encrypted before it is
 written to disk and never leaves the API — the UI only ever sees a masked hint.
 
-| Provider | What to supply | Verified against |
-| --- | --- | --- |
-| Git | GitHub / GitLab / Bitbucket access token (see **Git accounts** above) | `GET /user` |
-| Docker Hub | username + access token | `POST /v2/users/login` |
+| Provider   | What to supply                                                                                      | Verified against                                               |
+| ---------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Git        | GitHub / GitLab / Bitbucket access token (see **Git accounts** above)                               | `GET /user`                                                    |
+| Docker Hub | username + access token                                                                             | `POST /v2/users/login`                                         |
 | Cloudflare | browser sign-in (**Account management → Cloudflare**) or an API token with `Zone:Read` + `DNS:Edit` | `GET /user/tokens/verify`, then `/user`, `/accounts`, `/zones` |
-| MySQL | user + password, host/port, optional server to tunnel through | `SELECT VERSION()` over the real connection |
+| MySQL      | user + password, host/port, optional server to tunnel through                                       | `SELECT VERSION()` over the real connection                    |
 
 **Verify** calls the provider's own API, so nothing is assumed valid until it is checked.
 
 Git, Cloudflare and Docker Hub accounts all live under **Account management** in the sidebar, one tab each. MySQL connections stay under **Databases**.
 
-**Cloudflare browser sign-in.** Cloudflare does not offer OAuth to self-hosted panels, so **+ Connect Cloudflare** opens your Cloudflare dashboard with a *Create API token* form already filled in (name, Zone:Edit, Zone Settings:Read, DNS:Edit, Account Settings:Read, User Details:Read, all zones). Sign in there, press *Continue to summary* → *Create Token* → *Copy*, and come back: the panel reads the token from the clipboard (or from the paste box), verifies it, then fetches and stores your email, accounts and zones. Open the account to browse zones and each zone's DNS records.
+**Cloudflare browser sign-in.** Cloudflare does not offer OAuth to self-hosted panels, so **+ Connect Cloudflare** opens your Cloudflare dashboard with a _Create API token_ form already filled in (name, Zone:Edit, Zone Settings:Read, DNS:Edit, Account Settings:Read, User Details:Read, all zones). Sign in there, press _Continue to summary_ → _Create Token_ → _Copy_, and come back: the panel reads the token from the clipboard (or from the paste box), verifies it, then fetches and stores your email, accounts and zones. Open the account to browse zones and each zone's DNS records.
 
 ## Security notes
 
@@ -948,31 +948,31 @@ Git, Cloudflare and Docker Hub accounts all live under **Account management** in
 
 Copy `.env.example` to `.env` to override any of:
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PORT` | `4000` | HTTP port |
-| `HOST` | `0.0.0.0` | bind address |
-| `DB_HOST` | `127.0.0.1` | MySQL host for the panel's own data |
-| `DB_PORT` | `3306` | MySQL port |
-| `DB_USER` | `root` | MySQL user |
-| `DB_PASSWORD` | *(empty)* | MySQL password |
-| `DB_NAME` | `auto_deploy` | database name, created if missing |
-| `DB_POOL_SIZE` | `10` | connection pool size |
-| `APP_ENCRYPTION_KEY` | generated | master key for secret encryption |
-| `SSH_CONNECT_TIMEOUT` | `15000` | SSH handshake timeout (ms) |
-| `SSH_EXEC_TIMEOUT` | `45000` | remote command timeout (ms) |
-| `HEALTH_CHECK_ENABLED` | `true` | background online/offline sweep |
-| `HEALTH_CHECK_INTERVAL_SECONDS` | `5` | how often every server's SSH port is probed |
-| `HEALTH_CHECK_TIMEOUT` | `4000` | a probe slower than this counts as offline (ms) |
-| `HEALTH_CHECK_CONCURRENCY` | `10` | servers probed at the same time |
-| `HEALTH_CHECK_SIGNIN_MINUTES` | `10` | minutes between actual sign-in checks |
-| `HEALTH_CHECK_SIGNIN_TIMEOUT` | `12000` | how long a sign-in check may take (ms) |
-| `STATS_MAX_STREAMS` | `8` | live views that may be open at once |
-| `STATS_STREAM_MINUTES` | `15` | how long one live view runs before the browser reconnects |
+| Variable                        | Default       | Purpose                                                   |
+| ------------------------------- | ------------- | --------------------------------------------------------- |
+| `PORT`                          | `4000`        | HTTP port                                                 |
+| `HOST`                          | `0.0.0.0`     | bind address                                              |
+| `DB_HOST`                       | `127.0.0.1`   | MySQL host for the panel's own data                       |
+| `DB_PORT`                       | `3306`        | MySQL port                                                |
+| `DB_USER`                       | `root`        | MySQL user                                                |
+| `DB_PASSWORD`                   | _(empty)_     | MySQL password                                            |
+| `DB_NAME`                       | `auto_deploy` | database name, created if missing                         |
+| `DB_POOL_SIZE`                  | `10`          | connection pool size                                      |
+| `APP_ENCRYPTION_KEY`            | generated     | master key for secret encryption                          |
+| `SSH_CONNECT_TIMEOUT`           | `15000`       | SSH handshake timeout (ms)                                |
+| `SSH_EXEC_TIMEOUT`              | `45000`       | remote command timeout (ms)                               |
+| `HEALTH_CHECK_ENABLED`          | `true`        | background online/offline sweep                           |
+| `HEALTH_CHECK_INTERVAL_SECONDS` | `5`           | how often every server's SSH port is probed               |
+| `HEALTH_CHECK_TIMEOUT`          | `4000`        | a probe slower than this counts as offline (ms)           |
+| `HEALTH_CHECK_CONCURRENCY`      | `10`          | servers probed at the same time                           |
+| `HEALTH_CHECK_SIGNIN_MINUTES`   | `10`          | minutes between actual sign-in checks                     |
+| `HEALTH_CHECK_SIGNIN_TIMEOUT`   | `12000`       | how long a sign-in check may take (ms)                    |
+| `STATS_MAX_STREAMS`             | `8`           | live views that may be open at once                       |
+| `STATS_STREAM_MINUTES`          | `15`          | how long one live view runs before the browser reconnects |
 
 ### Connection monitor
 
-The panel watches every server in two tiers, because *reachable* and *usable* are different
+The panel watches every server in two tiers, because _reachable_ and _usable_ are different
 questions that cost very different amounts to answer.
 
 **Every 5 seconds** it opens a TCP connection to each server's SSH port and closes it again —
@@ -993,150 +993,149 @@ endpoint is deliberately tiny — statuses, latency and when each was checked, w
 profiles and no joins — and the cards are patched in place, so a card you are using is never
 redrawn under your cursor.
 
-**When it last updated** is said in three places. Above the list, *"Last updated 14:22:07 · checking
-every 5s"* — an absolute time, so a page that has quietly stopped refreshing is obvious rather than
+**When it last updated** is said in three places. Above the list, _"Last updated 14:22:07 · checking
+every 5s"_ — an absolute time, so a page that has quietly stopped refreshing is obvious rather than
 frozen at a plausible-looking "3s ago". On each card, how long the port took to answer and how long
 ago that was, with the exact time on hover, plus when the panel last signed in. And on a server's own
 page, the same line under its name, kept up to date while you are on it.
 
-
 ## API
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/health` | counts for your organisation, database in use, uptime |
-| `GET` | `/api/auth/state` | needs setup, who is signed in, the role table |
-| `POST` | `/api/auth/setup` | first run only: create the super admin and the first organisation |
-| `POST` | `/api/auth/login` | sign in |
-| `POST` | `/api/auth/logout` | sign out |
-| `PUT` | `/api/auth/profile` | change your own name or sign-in email |
-| `POST` | `/api/auth/password` | change your own password (ends your other sessions) |
-| `POST` | `/api/auth/organisation` | super admin: work in another organisation |
-| `GET` | `/api/team/members` | the people in your organisation, and the roles you may hand out |
-| `POST` | `/api/team/members` | add somebody with a role |
-| `PUT` | `/api/team/members/:id` | change a name, role, status or password |
-| `DELETE` | `/api/team/members/:id` | remove an account |
-| `GET` | `/api/team/organisations` | organisations with their member/server/credential counts |
-| `POST` | `/api/team/organisations` | super admin: create one |
-| `PUT` | `/api/team/organisations/:id` | rename one |
-| `DELETE` | `/api/team/organisations/:id` | delete an empty one |
-| `POST` | `/api/credentials/test-git` | authenticate a git token *before* saving |
-| `POST` | `/api/credentials/:id/git/account` | re-authenticate and refresh stored account |
-| `POST` | `/api/credentials/:id/git/repositories` | repositories the token can reach |
-| `POST` | `/api/credentials/:id/git/branches` | branches of one repository |
-| `POST` | `/api/credentials/:id/git/commits` | recent commits on a branch |
-| `GET` | `/api/servers/status` | just the statuses, for the list to poll — live state laid over the stored rows |
-| `GET` | `/api/servers/:id/history` | every profile collected for a server |
-| `GET` | `/api/git/oauth/providers` | which providers are configured, the callback URL, and the pre-filled registration link |
-| `POST` | `/api/git/oauth/config` | save an OAuth app's client ID/secret to `.env` and use it without restarting |
-| `GET` | `/api/git/oauth/start?kind=` | begin browser sign-in (`github`, `gitlab` or `bitbucket`; redirects to the provider) |
-| `GET` | `/api/git/oauth/callback` | the provider returns here; token exchanged and account stored |
-| `GET` | `/api/servers` | list servers with a profile summary |
-| `POST` | `/api/servers/test` | test credentials *before* saving |
-| `POST` | `/api/servers` | add a server |
-| `GET` | `/api/servers/:id` | server plus its latest system profile |
-| `PUT` | `/api/servers/:id` | update (blank secret fields keep the stored value) |
-| `DELETE` | `/api/servers/:id` | remove a server and its snapshots |
-| `POST` | `/api/servers/:id/test` | connect and report user, hostname, OS, latency |
-| `POST` | `/api/servers/:id/facts` | collect a fresh system profile |
-| `GET` | `/api/servers/:id/facts` | latest stored profile |
-| `POST` | `/api/servers/:id/exec` | run one command on the server |
-| `GET` | `/api/servers/:id/services` | every systemd service on the host, live |
-| `GET` | `/api/servers/:id/services/:unit` | one unit: properties, unit file, last 200 journal lines |
-| `POST` | `/api/servers/:id/services` | create a systemd unit, then enable and start it |
-| `POST` | `/api/servers/:id/services/:unit/action` | `start` / `stop` / `restart` / `reload` / `enable` / `disable` |
-| `DELETE` | `/api/servers/:id/services/:unit` | remove a unit this panel created |
-| `GET` | `/api/servers/:id/docker` | Docker state, registry sign-ins, networks, volumes and every container |
-| `POST` | `/api/servers/:id/docker/login` | `docker login` on the server, by credential or by hand |
-| `POST` | `/api/servers/:id/docker/logout` | `docker logout` for one registry |
-| `POST` | `/api/servers/:id/docker/networks` | create a user-defined network |
-| `DELETE` | `/api/servers/:id/docker/networks/:name` | remove a network |
-| `DELETE` | `/api/servers/:id/docker/volumes/:name` | remove a named volume and the data in it |
-| `GET` | `/api/servers/:id/summary` | what is on this server, counted: containers, domains, jobs, services, runners |
-| `GET` | `/api/servers/:id/cron` | every scheduled job on the machine, from all four places cron keeps them |
-| `POST` | `/api/servers/:id/cron/install` | install cron and start its service |
-| `POST` | `/api/servers/:id/cron/jobs` | add a job to a user's crontab |
-| `PUT` | `/api/servers/:id/cron/jobs` | change one job, matched on its exact line |
-| `DELETE` | `/api/servers/:id/cron/jobs` | remove one job |
-| `GET` | `/api/servers/:id/runners` | the runners on this server as the machine reports them, and any it did not install |
-| `GET` | `/api/servers/:id/stats` | one live sample: CPU, memory, load, disks, network, containers, alerts |
-| `GET` | `/api/servers/:id/stats/stream` | the same, pushed every few seconds over server-sent events |
-| `POST` | `/api/servers/:id/containers/:name/action` | `start` / `stop` / `restart` any container on the host |
-| `GET` | `/api/servers/:id/containers/:name/logs` | that container's recent output |
-| `GET` | `/api/servers/:id/nginx` | nginx, its sites with their SSL state, and certbot with every certificate |
-| `POST` | `/api/servers/:id/nginx/install` | install `nginx`, or `certbot` with its nginx plugin |
-| `POST` | `/api/servers/:id/nginx/action` | `reload` / `restart` / `start` / `stop` / `test` |
-| `POST` | `/api/servers/:id/nginx/sites` | add a domain — generated from the form, or the file as typed |
-| `GET` | `/api/servers/:id/nginx/sites/:name` | that site's file as it is on the server |
-| `PUT` | `/api/servers/:id/nginx/sites/:name` | edit it, or just enable/disable it |
-| `DELETE` | `/api/servers/:id/nginx/sites/:name` | remove the site; its certificate is kept |
-| `POST` | `/api/servers/:id/nginx/ssl` | get a Let's Encrypt certificate and install it into the vhost |
-| `POST` | `/api/servers/:id/nginx/ssl/renew` | renew one certificate, or everything that is due |
-| `GET` | `/api/installs/catalog` | what can be installed, and the form each one needs |
-| `GET` | `/api/installs` | list installations; `?server_id=` to filter |
-| `POST` | `/api/installs` | install onto the host (Docker, compose) or as a container |
-| `POST` | `/api/installs/:id/refresh` | live container state |
-| `POST` | `/api/installs/:id/action` | `start` / `stop` / `restart` |
-| `GET` | `/api/installs/:id/logs` | the container's last lines |
-| `PUT` | `/api/installs/:id/port` | rebuild on a new port / network, keeping the volume |
-| `DELETE` | `/api/installs/:id` | remove the container; `?delete_data=1` drops the volume too |
-| `POST` | `/api/apps/inspect` | is this repository a deployable Node project, and with what settings |
-| `GET` | `/api/apps` | list custom services; `?server_id=` to filter |
-| `POST` | `/api/apps` | start a deployment; answers `202` at once and builds in the background |
-| `POST` | `/api/apps/:id/deploy` | start a rebuild; `409` if one is already running |
-| `POST` | `/api/apps/:id/action` | `start` / `stop` / `restart` |
-| `GET` | `/api/apps/:id/env` | the environment variables as stored (needs the `edit` permission) |
-| `PUT` | `/api/apps/:id/env` | replace them; `apply: true` recreates the containers so they take effect now |
-| `PUT` | `/api/apps/:id/containers` | add, remove or move containers — `ports: [8080, 8081]`, one per container |
-| `GET` | `/api/apps/:id/logs` | one container's recent output; `?container=` picks the instance |
-| `DELETE` | `/api/apps/:id` | remove the container and the clone; `?delete_volumes=1` also deletes its volumes |
-| `GET` | `/api/runners` | list runners; `?credential_id=` or `?server_id=` to filter |
-| `GET` | `/api/runners/:id` | one runner, with its install log |
-| `POST` | `/api/runners` | register with the provider and install on a server |
-| `POST` | `/api/runners/:id/refresh` | live status from GitHub / GitLab |
-| `POST` | `/api/runners/:id/action` | `start` / `stop` / `restart` its systemd service |
-| `DELETE` | `/api/runners/:id` | unregister, remove from the server, forget here |
-| `POST` | `/api/credentials/:id/git/organizations` | organisations (GitHub), groups (GitLab) or workspaces (Bitbucket) |
-| `POST` | `/api/credentials/:id/git/runners` | runners registered for one repository / organisation |
-| `GET` | `/api/credentials` | list (secrets masked); `?provider=mysql` to filter |
-| `POST` | `/api/credentials` | add a git / dockerhub / cloudflare / mysql credential |
-| `PUT` | `/api/credentials/:id` | update (blank secret keeps the stored one) |
-| `POST` | `/api/credentials/:id/verify` | verify against the provider |
-| `DELETE` | `/api/credentials/:id` | remove |
-| `POST` | `/api/credentials/test-mysql` | test MySQL details *before* saving |
-| `GET` | `/api/credentials/cloudflare/token-link` | dashboard link with a pre-filled Create API token form |
-| `POST` | `/api/credentials/test-cloudflare` | verify a Cloudflare token and show what it can see, without saving |
-| `POST` | `/api/credentials/cloudflare/connect` | verify a token, read user / accounts / zones, store (re-connecting updates in place) |
-| `POST` | `/api/credentials/:id/cloudflare/account` | re-read and store the account, accounts and zones |
-| `POST` | `/api/credentials/:id/cloudflare/zones/:zoneId` | one domain in full: details, name servers, settings, DNS records |
-| `DELETE` | `/api/credentials/:id/cloudflare/zones/:zoneId` | remove the domain from Cloudflare; body `{ "confirm": "<domain name>" }` |
-| `POST` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns` | DNS records of one zone |
-| `POST` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records` | add a DNS record (A, AAAA, CNAME, TXT, MX, NS, PTR); name may be `@`, `www` or fully qualified |
-| `PUT` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records/:recordId` | change a DNS record |
-| `DELETE` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records/:recordId` | delete a DNS record |
-| `POST` | `/api/credentials/:id/mysql/overview` | engine state, databases, users, biggest tables |
-| `POST` | `/api/credentials/:id/mysql/databases/:db` | tables, views and routines in one database |
-| `POST` | `/api/credentials/:id/mysql/databases/:db/tables/:table` | columns, indexes, foreign keys |
-| `POST` | `/api/credentials/:id/mysql/query` | read-only query |
-| `POST` | `/api/credentials/:id/mysql/charsets` | character sets and collations |
-| `POST` | `/api/credentials/:id/mysql/schemas` | create a database `{ name, charset, collation }` |
-| `PUT` | `/api/credentials/:id/mysql/databases/:db` | change a database's charset / collation |
-| `DELETE` | `/api/credentials/:id/mysql/databases/:db` | drop a database `{ confirm: "<db name>" }` |
-| `POST` | `/api/credentials/:id/mysql/users/list` | accounts, state, sessions and grants |
-| `POST` | `/api/credentials/:id/mysql/users` | create a user `{ user, host, password, database?, privileges? }` |
-| `PUT` | `/api/credentials/:id/mysql/users` | password, lock / unlock, max connections `{ user, host, … }` |
-| `DELETE` | `/api/credentials/:id/mysql/users` | drop a user `{ user, host }` |
-| `POST` | `/api/credentials/:id/mysql/users/grants` | grant `{ user, host, database, privileges, grantOption }` |
-| `DELETE` | `/api/credentials/:id/mysql/users/grants` | revoke everything on one database `{ user, host, database }` |
-| `POST` | `/api/credentials/:id/mysql/variables` | editable settings and every global variable |
-| `PUT` | `/api/credentials/:id/mysql/variables` | `SET GLOBAL` / `SET PERSIST` `{ name, value, persist }` |
-| `POST` | `/api/credentials/test-db` | try PostgreSQL / MongoDB / Redis details before saving |
-| `POST` | `/api/credentials/:id/db/overview` · `/db/databases` · `/db/database` · `/db/item` · `/db/users/list` · `/db/config` · `/db/query` | PostgreSQL / MongoDB / Redis reads (viewers allowed) |
-| `POST` / `DELETE` | `/api/credentials/:id/db/schemas` · `/db/databases` | create / drop (flush) a database |
-| `POST` / `PUT` / `DELETE` | `/api/credentials/:id/db/users` | create / change / drop a user, identified by `key` |
-| `POST` / `DELETE` | `/api/credentials/:id/db/users/grants` | grant / revoke |
-| `PUT` | `/api/credentials/:id/db/config` | change a setting `{ name, value, persist }` |
-| `GET` | `/api/activity` | last 50 actions |
+| Method                    | Path                                                                                                                               | Purpose                                                                                        |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET`                     | `/api/health`                                                                                                                      | counts for your organisation, database in use, uptime                                          |
+| `GET`                     | `/api/auth/state`                                                                                                                  | needs setup, who is signed in, the role table                                                  |
+| `POST`                    | `/api/auth/setup`                                                                                                                  | first run only: create the super admin and the first organisation                              |
+| `POST`                    | `/api/auth/login`                                                                                                                  | sign in                                                                                        |
+| `POST`                    | `/api/auth/logout`                                                                                                                 | sign out                                                                                       |
+| `PUT`                     | `/api/auth/profile`                                                                                                                | change your own name or sign-in email                                                          |
+| `POST`                    | `/api/auth/password`                                                                                                               | change your own password (ends your other sessions)                                            |
+| `POST`                    | `/api/auth/organisation`                                                                                                           | super admin: work in another organisation                                                      |
+| `GET`                     | `/api/team/members`                                                                                                                | the people in your organisation, and the roles you may hand out                                |
+| `POST`                    | `/api/team/members`                                                                                                                | add somebody with a role                                                                       |
+| `PUT`                     | `/api/team/members/:id`                                                                                                            | change a name, role, status or password                                                        |
+| `DELETE`                  | `/api/team/members/:id`                                                                                                            | remove an account                                                                              |
+| `GET`                     | `/api/team/organisations`                                                                                                          | organisations with their member/server/credential counts                                       |
+| `POST`                    | `/api/team/organisations`                                                                                                          | super admin: create one                                                                        |
+| `PUT`                     | `/api/team/organisations/:id`                                                                                                      | rename one                                                                                     |
+| `DELETE`                  | `/api/team/organisations/:id`                                                                                                      | delete an empty one                                                                            |
+| `POST`                    | `/api/credentials/test-git`                                                                                                        | authenticate a git token _before_ saving                                                       |
+| `POST`                    | `/api/credentials/:id/git/account`                                                                                                 | re-authenticate and refresh stored account                                                     |
+| `POST`                    | `/api/credentials/:id/git/repositories`                                                                                            | repositories the token can reach                                                               |
+| `POST`                    | `/api/credentials/:id/git/branches`                                                                                                | branches of one repository                                                                     |
+| `POST`                    | `/api/credentials/:id/git/commits`                                                                                                 | recent commits on a branch                                                                     |
+| `GET`                     | `/api/servers/status`                                                                                                              | just the statuses, for the list to poll — live state laid over the stored rows                 |
+| `GET`                     | `/api/servers/:id/history`                                                                                                         | every profile collected for a server                                                           |
+| `GET`                     | `/api/git/oauth/providers`                                                                                                         | which providers are configured, the callback URL, and the pre-filled registration link         |
+| `POST`                    | `/api/git/oauth/config`                                                                                                            | save an OAuth app's client ID/secret to `.env` and use it without restarting                   |
+| `GET`                     | `/api/git/oauth/start?kind=`                                                                                                       | begin browser sign-in (`github`, `gitlab` or `bitbucket`; redirects to the provider)           |
+| `GET`                     | `/api/git/oauth/callback`                                                                                                          | the provider returns here; token exchanged and account stored                                  |
+| `GET`                     | `/api/servers`                                                                                                                     | list servers with a profile summary                                                            |
+| `POST`                    | `/api/servers/test`                                                                                                                | test credentials _before_ saving                                                               |
+| `POST`                    | `/api/servers`                                                                                                                     | add a server                                                                                   |
+| `GET`                     | `/api/servers/:id`                                                                                                                 | server plus its latest system profile                                                          |
+| `PUT`                     | `/api/servers/:id`                                                                                                                 | update (blank secret fields keep the stored value)                                             |
+| `DELETE`                  | `/api/servers/:id`                                                                                                                 | remove a server and its snapshots                                                              |
+| `POST`                    | `/api/servers/:id/test`                                                                                                            | connect and report user, hostname, OS, latency                                                 |
+| `POST`                    | `/api/servers/:id/facts`                                                                                                           | collect a fresh system profile                                                                 |
+| `GET`                     | `/api/servers/:id/facts`                                                                                                           | latest stored profile                                                                          |
+| `POST`                    | `/api/servers/:id/exec`                                                                                                            | run one command on the server                                                                  |
+| `GET`                     | `/api/servers/:id/services`                                                                                                        | every systemd service on the host, live                                                        |
+| `GET`                     | `/api/servers/:id/services/:unit`                                                                                                  | one unit: properties, unit file, last 200 journal lines                                        |
+| `POST`                    | `/api/servers/:id/services`                                                                                                        | create a systemd unit, then enable and start it                                                |
+| `POST`                    | `/api/servers/:id/services/:unit/action`                                                                                           | `start` / `stop` / `restart` / `reload` / `enable` / `disable`                                 |
+| `DELETE`                  | `/api/servers/:id/services/:unit`                                                                                                  | remove a unit this panel created                                                               |
+| `GET`                     | `/api/servers/:id/docker`                                                                                                          | Docker state, registry sign-ins, networks, volumes and every container                         |
+| `POST`                    | `/api/servers/:id/docker/login`                                                                                                    | `docker login` on the server, by credential or by hand                                         |
+| `POST`                    | `/api/servers/:id/docker/logout`                                                                                                   | `docker logout` for one registry                                                               |
+| `POST`                    | `/api/servers/:id/docker/networks`                                                                                                 | create a user-defined network                                                                  |
+| `DELETE`                  | `/api/servers/:id/docker/networks/:name`                                                                                           | remove a network                                                                               |
+| `DELETE`                  | `/api/servers/:id/docker/volumes/:name`                                                                                            | remove a named volume and the data in it                                                       |
+| `GET`                     | `/api/servers/:id/summary`                                                                                                         | what is on this server, counted: containers, domains, jobs, services, runners                  |
+| `GET`                     | `/api/servers/:id/cron`                                                                                                            | every scheduled job on the machine, from all four places cron keeps them                       |
+| `POST`                    | `/api/servers/:id/cron/install`                                                                                                    | install cron and start its service                                                             |
+| `POST`                    | `/api/servers/:id/cron/jobs`                                                                                                       | add a job to a user's crontab                                                                  |
+| `PUT`                     | `/api/servers/:id/cron/jobs`                                                                                                       | change one job, matched on its exact line                                                      |
+| `DELETE`                  | `/api/servers/:id/cron/jobs`                                                                                                       | remove one job                                                                                 |
+| `GET`                     | `/api/servers/:id/runners`                                                                                                         | the runners on this server as the machine reports them, and any it did not install             |
+| `GET`                     | `/api/servers/:id/stats`                                                                                                           | one live sample: CPU, memory, load, disks, network, containers, alerts                         |
+| `GET`                     | `/api/servers/:id/stats/stream`                                                                                                    | the same, pushed every few seconds over server-sent events                                     |
+| `POST`                    | `/api/servers/:id/containers/:name/action`                                                                                         | `start` / `stop` / `restart` any container on the host                                         |
+| `GET`                     | `/api/servers/:id/containers/:name/logs`                                                                                           | that container's recent output                                                                 |
+| `GET`                     | `/api/servers/:id/nginx`                                                                                                           | nginx, its sites with their SSL state, and certbot with every certificate                      |
+| `POST`                    | `/api/servers/:id/nginx/install`                                                                                                   | install `nginx`, or `certbot` with its nginx plugin                                            |
+| `POST`                    | `/api/servers/:id/nginx/action`                                                                                                    | `reload` / `restart` / `start` / `stop` / `test`                                               |
+| `POST`                    | `/api/servers/:id/nginx/sites`                                                                                                     | add a domain — generated from the form, or the file as typed                                   |
+| `GET`                     | `/api/servers/:id/nginx/sites/:name`                                                                                               | that site's file as it is on the server                                                        |
+| `PUT`                     | `/api/servers/:id/nginx/sites/:name`                                                                                               | edit it, or just enable/disable it                                                             |
+| `DELETE`                  | `/api/servers/:id/nginx/sites/:name`                                                                                               | remove the site; its certificate is kept                                                       |
+| `POST`                    | `/api/servers/:id/nginx/ssl`                                                                                                       | get a Let's Encrypt certificate and install it into the vhost                                  |
+| `POST`                    | `/api/servers/:id/nginx/ssl/renew`                                                                                                 | renew one certificate, or everything that is due                                               |
+| `GET`                     | `/api/installs/catalog`                                                                                                            | what can be installed, and the form each one needs                                             |
+| `GET`                     | `/api/installs`                                                                                                                    | list installations; `?server_id=` to filter                                                    |
+| `POST`                    | `/api/installs`                                                                                                                    | install onto the host (Docker, compose) or as a container                                      |
+| `POST`                    | `/api/installs/:id/refresh`                                                                                                        | live container state                                                                           |
+| `POST`                    | `/api/installs/:id/action`                                                                                                         | `start` / `stop` / `restart`                                                                   |
+| `GET`                     | `/api/installs/:id/logs`                                                                                                           | the container's last lines                                                                     |
+| `PUT`                     | `/api/installs/:id/port`                                                                                                           | rebuild on a new port / network, keeping the volume                                            |
+| `DELETE`                  | `/api/installs/:id`                                                                                                                | remove the container; `?delete_data=1` drops the volume too                                    |
+| `POST`                    | `/api/apps/inspect`                                                                                                                | is this repository a deployable Node project, and with what settings                           |
+| `GET`                     | `/api/apps`                                                                                                                        | list custom services; `?server_id=` to filter                                                  |
+| `POST`                    | `/api/apps`                                                                                                                        | start a deployment; answers `202` at once and builds in the background                         |
+| `POST`                    | `/api/apps/:id/deploy`                                                                                                             | start a rebuild; `409` if one is already running                                               |
+| `POST`                    | `/api/apps/:id/action`                                                                                                             | `start` / `stop` / `restart`                                                                   |
+| `GET`                     | `/api/apps/:id/env`                                                                                                                | the environment variables as stored (needs the `edit` permission)                              |
+| `PUT`                     | `/api/apps/:id/env`                                                                                                                | replace them; `apply: true` recreates the containers so they take effect now                   |
+| `PUT`                     | `/api/apps/:id/containers`                                                                                                         | add, remove or move containers — `ports: [8080, 8081]`, one per container                      |
+| `GET`                     | `/api/apps/:id/logs`                                                                                                               | one container's recent output; `?container=` picks the instance                                |
+| `DELETE`                  | `/api/apps/:id`                                                                                                                    | remove the container and the clone; `?delete_volumes=1` also deletes its volumes               |
+| `GET`                     | `/api/runners`                                                                                                                     | list runners; `?credential_id=` or `?server_id=` to filter                                     |
+| `GET`                     | `/api/runners/:id`                                                                                                                 | one runner, with its install log                                                               |
+| `POST`                    | `/api/runners`                                                                                                                     | register with the provider and install on a server                                             |
+| `POST`                    | `/api/runners/:id/refresh`                                                                                                         | live status from GitHub / GitLab                                                               |
+| `POST`                    | `/api/runners/:id/action`                                                                                                          | `start` / `stop` / `restart` its systemd service                                               |
+| `DELETE`                  | `/api/runners/:id`                                                                                                                 | unregister, remove from the server, forget here                                                |
+| `POST`                    | `/api/credentials/:id/git/organizations`                                                                                           | organisations (GitHub), groups (GitLab) or workspaces (Bitbucket)                              |
+| `POST`                    | `/api/credentials/:id/git/runners`                                                                                                 | runners registered for one repository / organisation                                           |
+| `GET`                     | `/api/credentials`                                                                                                                 | list (secrets masked); `?provider=mysql` to filter                                             |
+| `POST`                    | `/api/credentials`                                                                                                                 | add a git / dockerhub / cloudflare / mysql credential                                          |
+| `PUT`                     | `/api/credentials/:id`                                                                                                             | update (blank secret keeps the stored one)                                                     |
+| `POST`                    | `/api/credentials/:id/verify`                                                                                                      | verify against the provider                                                                    |
+| `DELETE`                  | `/api/credentials/:id`                                                                                                             | remove                                                                                         |
+| `POST`                    | `/api/credentials/test-mysql`                                                                                                      | test MySQL details _before_ saving                                                             |
+| `GET`                     | `/api/credentials/cloudflare/token-link`                                                                                           | dashboard link with a pre-filled Create API token form                                         |
+| `POST`                    | `/api/credentials/test-cloudflare`                                                                                                 | verify a Cloudflare token and show what it can see, without saving                             |
+| `POST`                    | `/api/credentials/cloudflare/connect`                                                                                              | verify a token, read user / accounts / zones, store (re-connecting updates in place)           |
+| `POST`                    | `/api/credentials/:id/cloudflare/account`                                                                                          | re-read and store the account, accounts and zones                                              |
+| `POST`                    | `/api/credentials/:id/cloudflare/zones/:zoneId`                                                                                    | one domain in full: details, name servers, settings, DNS records                               |
+| `DELETE`                  | `/api/credentials/:id/cloudflare/zones/:zoneId`                                                                                    | remove the domain from Cloudflare; body `{ "confirm": "<domain name>" }`                       |
+| `POST`                    | `/api/credentials/:id/cloudflare/zones/:zoneId/dns`                                                                                | DNS records of one zone                                                                        |
+| `POST`                    | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records`                                                                        | add a DNS record (A, AAAA, CNAME, TXT, MX, NS, PTR); name may be `@`, `www` or fully qualified |
+| `PUT`                     | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records/:recordId`                                                              | change a DNS record                                                                            |
+| `DELETE`                  | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records/:recordId`                                                              | delete a DNS record                                                                            |
+| `POST`                    | `/api/credentials/:id/mysql/overview`                                                                                              | engine state, databases, users, biggest tables                                                 |
+| `POST`                    | `/api/credentials/:id/mysql/databases/:db`                                                                                         | tables, views and routines in one database                                                     |
+| `POST`                    | `/api/credentials/:id/mysql/databases/:db/tables/:table`                                                                           | columns, indexes, foreign keys                                                                 |
+| `POST`                    | `/api/credentials/:id/mysql/query`                                                                                                 | read-only query                                                                                |
+| `POST`                    | `/api/credentials/:id/mysql/charsets`                                                                                              | character sets and collations                                                                  |
+| `POST`                    | `/api/credentials/:id/mysql/schemas`                                                                                               | create a database `{ name, charset, collation }`                                               |
+| `PUT`                     | `/api/credentials/:id/mysql/databases/:db`                                                                                         | change a database's charset / collation                                                        |
+| `DELETE`                  | `/api/credentials/:id/mysql/databases/:db`                                                                                         | drop a database `{ confirm: "<db name>" }`                                                     |
+| `POST`                    | `/api/credentials/:id/mysql/users/list`                                                                                            | accounts, state, sessions and grants                                                           |
+| `POST`                    | `/api/credentials/:id/mysql/users`                                                                                                 | create a user `{ user, host, password, database?, privileges? }`                               |
+| `PUT`                     | `/api/credentials/:id/mysql/users`                                                                                                 | password, lock / unlock, max connections `{ user, host, … }`                                   |
+| `DELETE`                  | `/api/credentials/:id/mysql/users`                                                                                                 | drop a user `{ user, host }`                                                                   |
+| `POST`                    | `/api/credentials/:id/mysql/users/grants`                                                                                          | grant `{ user, host, database, privileges, grantOption }`                                      |
+| `DELETE`                  | `/api/credentials/:id/mysql/users/grants`                                                                                          | revoke everything on one database `{ user, host, database }`                                   |
+| `POST`                    | `/api/credentials/:id/mysql/variables`                                                                                             | editable settings and every global variable                                                    |
+| `PUT`                     | `/api/credentials/:id/mysql/variables`                                                                                             | `SET GLOBAL` / `SET PERSIST` `{ name, value, persist }`                                        |
+| `POST`                    | `/api/credentials/test-db`                                                                                                         | try PostgreSQL / MongoDB / Redis details before saving                                         |
+| `POST`                    | `/api/credentials/:id/db/overview` · `/db/databases` · `/db/database` · `/db/item` · `/db/users/list` · `/db/config` · `/db/query` | PostgreSQL / MongoDB / Redis reads (viewers allowed)                                           |
+| `POST` / `DELETE`         | `/api/credentials/:id/db/schemas` · `/db/databases`                                                                                | create / drop (flush) a database                                                               |
+| `POST` / `PUT` / `DELETE` | `/api/credentials/:id/db/users`                                                                                                    | create / change / drop a user, identified by `key`                                             |
+| `POST` / `DELETE`         | `/api/credentials/:id/db/users/grants`                                                                                             | grant / revoke                                                                                 |
+| `PUT`                     | `/api/credentials/:id/db/config`                                                                                                   | change a setting `{ name, value, persist }`                                                    |
+| `GET`                     | `/api/activity`                                                                                                                    | last 50 actions                                                                                |
 
 ## Layout
 
@@ -1183,5 +1182,5 @@ activity log — lives in your MySQL database. Only the encryption key stays on 
 
 The `projects` table is already in place, linking a server to a git, Docker Hub and Cloudflare credential
 plus a repo, branch and domain. The deployment pipeline and Cloudflare DNS management build on top of it.
-"# aj-pilot" 
-"# aj-pilot" 
+"# aj-pilot"
+"# aj-pilot"
