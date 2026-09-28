@@ -49,16 +49,28 @@ function page({ req, title, description, path, body, current, ld }) {
 <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 ${THEME}
+<meta name="theme-color" content="#f6f8fc" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#07080c" media="(prefers-color-scheme: dark)" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
 <link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/landing.css" />
 <script type="application/ld+json">${json(ld)}</script>
 </head>
-<body class="docs-public">
-<header class="landing-head">
-  <a class="landing-brand" href="/" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true">${LOGO}</span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
-  <nav class="landing-nav" aria-label="Main">
-    <a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/docs" class="active">Docs</a><a href="/#contact">Contact</a>
-  </nav>
-  <div class="landing-actions"><a class="btn" href="/#signin">Sign in</a><a class="btn primary" href="/#contact">Get started</a></div>
+<body class="docs-public signed-out">
+<div class="landing">
+<header class="landing-head" id="landing-head">
+  <div class="landing-head-inner">
+    <a class="landing-brand" href="/" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true">${LOGO}</span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
+    <nav class="landing-nav" id="landing-nav" aria-label="Main">
+      <a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/docs" class="active">Docs</a><a href="/#contact">Contact</a>
+    </nav>
+    <div class="landing-actions">
+      <a class="btn" href="/#signin">Sign in</a>
+      <button type="button" class="landing-burger" aria-controls="landing-nav" aria-expanded="false" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </div>
 </header>
 <div class="docs-shell">
   <aside class="docs-side" aria-label="Documentation">
@@ -67,9 +79,38 @@ ${THEME}
   </aside>
   <main class="docs-main">${body}</main>
 </div>
-<footer class="landing-foot"><div><span class="foot-brand"><span class="logo small" aria-hidden="true">${LOGO}</span> AJ Pilot — autopilot for your servers</span>
-  <nav class="foot-links"><a href="/">Home</a><a href="/docs">Docs</a><a href="/#pricing">Pricing</a><a href="/#contact">Contact</a></nav></div>
-  <span class="muted small">© ${new Date().getFullYear()} AJ Pilot.</span></footer>
+<footer class="landing-foot">
+  <div class="foot-inner">
+    <div class="foot-about">
+      <span class="foot-brand"><span class="logo" aria-hidden="true">${LOGO}</span> AJ Pilot</span>
+      <p class="foot-tagline">Autopilot for your servers: deploy apps, run databases and connect domains from one self-hosted panel.</p>
+    </div>
+    <nav class="foot-links" aria-label="Product">
+      <span class="foot-title">Product</span>
+      <a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#pricing">Pricing</a>
+    </nav>
+    <nav class="foot-links" aria-label="Help">
+      <span class="foot-title">Help</span>
+      <a href="/docs">Docs</a><a href="/#faq">FAQ</a><a href="/#contact">Contact</a>
+    </nav>
+  </div>
+  <div class="foot-base">
+    <span>© ${new Date().getFullYear()} AJ Pilot. All rights reserved.</span>
+    <span>Runs on your hardware — your keys never leave it.</span>
+  </div>
+</footer>
+</div>
+<script>
+// The header: a menu button on narrow screens, and a firmer bar once the page scrolls.
+(function () {
+  var head = document.getElementById('landing-head');
+  var burger = head.querySelector('.landing-burger');
+  function setOpen(open) { head.classList.toggle('nav-open', open); burger.setAttribute('aria-expanded', String(open)); }
+  burger.addEventListener('click', function () { setOpen(!head.classList.contains('nav-open')); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+  window.addEventListener('scroll', function () { head.classList.toggle('scrolled', window.scrollY > 12); }, { passive: true });
+})();
+</script>
 <script>
 // Filter the guides as you type: the menu here, and the cards on the docs home.
 (function () {

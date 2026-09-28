@@ -9,7 +9,8 @@
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta name="author" content="AJ Pilot" />
 <meta name="application-name" content="AJ Pilot" />
-<meta name="theme-color" content="#2f64ea" />
+<meta name="theme-color" content="#f6f8fc" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#07080c" media="(prefers-color-scheme: dark)" />
 <link rel="canonical" href="%%SITE_URL%%/" />
 
 <meta property="og:type" content="website" />
@@ -40,44 +41,40 @@
     document.documentElement.setAttribute('data-theme-pref', pref);
   })();
 </script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
 <link rel="stylesheet" href="/styles.css" />
+<link rel="stylesheet" href="/landing.css" />
 </head>
 <body class="booting">
 
 <!-- ------------------------------------------------------- landing page -->
 <div class="landing" id="landing">
-  <header class="landing-head">
-    <a class="landing-brand" href="#top" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
-    <nav class="landing-nav" aria-label="Main">
-      <a href="#features">Features</a>
-      <a href="#deploy">Deploy</a>
-      <a href="#pricing" class="%%PRICING_HIDDEN%%" id="nav-pricing">Pricing</a>
-      <a href="#faq">FAQ</a>
-      <a href="/docs">Docs</a>
-      <a href="#contact">Contact</a>
-    </nav>
-    <div class="landing-actions">
-      <div class="theme-menu">
-        <button type="button" class="icon-btn" data-theme-toggle aria-haspopup="true" aria-expanded="false" title="Theme">
-          <span class="theme-current" aria-hidden="true">🌙</span><span class="sr-only">Theme</span>
-        </button>
-        <div class="menu-pop hidden" role="menu">
-          <div class="menu-title">Theme</div>
-          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="light"><span class="dropdown-icon">☀️</span>Light<span class="menu-check">✓</span></button>
-          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="dark"><span class="dropdown-icon">🌙</span>Dark<span class="menu-check">✓</span></button>
-          <button type="button" class="dropdown-item" role="menuitemradio" data-theme-set="system"><span class="dropdown-icon">🖥️</span>System<span class="menu-check">✓</span></button>
-        </div>
+  <header class="landing-head" id="landing-head">
+    <div class="landing-head-inner">
+      <a class="landing-brand" href="#top" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
+      <nav class="landing-nav" id="landing-nav" aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#pricing" class="%%PRICING_HIDDEN%%" id="nav-pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+        <a href="/docs">Docs</a>
+        <a href="#contact">Contact</a>
+      </nav>
+      <div class="landing-actions">
+        <button class="btn" id="btn-open-signin">Sign in</button>
+        <button class="btn primary hidden" id="btn-open-setup">Get started</button>
+        <button type="button" class="landing-burger" aria-controls="landing-nav" aria-expanded="false" aria-label="Menu"><span></span><span></span><span></span></button>
       </div>
-      <button class="btn" id="btn-open-signin">Sign in</button>
-      <button class="btn primary hidden" id="btn-open-setup">Get started</button>
     </div>
   </header>
 
   <main id="top">
   <section class="hero">
     <div class="hero-text">
-      <span class="pill">AJ Pilot · autopilot for your servers</span>
-      <h1>Deploy apps, manage servers and connect domains — from one panel.</h1>
+      <span class="pill"><span class="pulse" aria-hidden="true"></span>Autopilot for your Ubuntu servers</span>
+      <h1>Deploy apps, manage servers and connect domains — <span class="gradient-text">from one panel.</span></h1>
       <p>
         AJ Pilot connects to your Ubuntu servers over SSH and does the work you would otherwise do by hand:
         deploy <b>Next.js, NestJS, Node.js, React, Angular, Nuxt</b> and static sites straight from GitHub or GitLab,
@@ -88,11 +85,17 @@
         <button class="btn primary big" id="btn-hero-primary">Get started free</button>
         <a class="btn big" href="#features">See every feature</a>
       </div>
+      <ul class="hero-points">
+        <li>No agent to install</li>
+        <li>Free SSL on every domain</li>
+        <li>Free plan for one server</li>
+      </ul>
       <p class="muted small" id="hero-note">No agent on your servers. Every password, key and token is encrypted before it touches disk.</p>
     </div>
 
     <div class="hero-visual" aria-hidden="true">
       <div class="mock">
+        <div class="mock-bar"><i></i><i></i><i></i><span>aj-pilot / servers</span></div>
         <div class="mock-head"><span class="dot online"></span> prod-web-01 <span class="badge ok">online</span></div>
         <div class="mock-row"><span>Ubuntu 24.04 LTS</span><span class="muted">4 vCPU · 8 GB</span></div>
         <div class="mock-meter"><span style="width:39%"></span></div>
@@ -104,18 +107,23 @@
     </div>
   </section>
 
+  <section class="stat-band" aria-label="AJ Pilot in numbers">
+    <dl>
+      <div><dt>0</dt><dd>agents on your servers</dd></div>
+      <div><dt>7</dt><dd>frameworks detected</dd></div>
+      <div><dt>8</dt><dd>one-click services</dd></div>
+      <div><dt>4</dt><dd>databases managed</dd></div>
+      <div><dt>AES-256</dt><dd>on every secret</dd></div>
+    </dl>
+  </section>
+
   <section class="stack-wall" aria-labelledby="stack-title">
     <div class="stack-head">
       <div>
         <span class="eyebrow">Works with</span>
-        <h2 id="stack-title">Your whole stack, in one panel</h2>
+        <h2 id="stack-title">Your whole stack, <span class="gradient-text">in one panel</span></h2>
         <p>Frameworks are detected from your repository, services install in one click, and domains get DNS and SSL on their own.</p>
       </div>
-      <dl class="stack-stats">
-        <div><dt>7</dt><dd>frameworks detected</dd></div>
-        <div><dt>8</dt><dd>one-click services</dd></div>
-        <div><dt>4</dt><dd>databases managed</dd></div>
-      </dl>
     </div>
     <div class="stack-rows">
       <div class="stack-row">
@@ -130,7 +138,8 @@
   </section>
 
   <section class="landing-section" id="features">
-    <h2>Everything you need to run production servers</h2>
+    <span class="eyebrow">What you get</span>
+    <h2>Everything you need to run <span class="gradient-text">production servers</span></h2>
     <p class="section-lead">One panel instead of a dozen SSH sessions, dashboards and shell scripts. Everything talks to your own machines over the SSH connection you already have.</p>
 
     <h3 class="feature-group">🖥️ Servers</h3>
@@ -203,8 +212,9 @@
   </section>
 
   <section class="landing-section alt" id="how">
-    <h2>How it works</h2>
-    <p class="section-lead">From a bare Ubuntu server to a live app on your domain in four steps.</p>
+    <span class="eyebrow">How it works</span>
+    <h2>Bare server to live app in four steps</h2>
+    <p class="section-lead">From a fresh Ubuntu server to an app running on your own domain, without opening a terminal.</p>
     <ol class="steps">
       <li><span class="step-n">1</span><div><h3>Add a server</h3><p>Host, SSH user and a password or key. The connection is tested before it is saved, and the panel says exactly what went wrong if it cannot get in.</p></div></li>
       <li><span class="step-n">2</span><div><h3>Install what it needs</h3><p>Docker, Nginx and any database or cache, with one click each. Everything runs in containers with its data kept safe in volumes.</p></div></li>
@@ -214,7 +224,9 @@
   </section>
 
   <section class="landing-section" id="use-cases">
+    <span class="eyebrow">Who it's for</span>
     <h2>Built for teams that ship</h2>
+    <p class="section-lead">From one freelancer's VPS to an agency running dozens of client servers.</p>
     <div class="feature-grid">
       <article class="feature"><h3>Agencies</h3><p>Host every client's site on your own servers, one organisation per client, with their own people and domains.</p></article>
       <article class="feature"><h3>Startups</h3><p>Get the convenience of a PaaS on affordable VPS servers — without giving up control of your infrastructure or data.</p></article>
@@ -224,7 +236,9 @@
   </section>
 
   <section class="landing-section alt" id="security">
+    <span class="eyebrow">Security</span>
     <h2>Built to be trusted with root</h2>
+    <p class="section-lead">It holds the keys to your servers, so it is careful with every one of them.</p>
     <div class="two-col">
       <ul class="tick-list">
         <li><b>Your infrastructure only.</b> The panel talks straight to your servers over SSH. No agents, no vendor in the middle, no telemetry.</li>
@@ -242,6 +256,7 @@
   <section class="landing-section pricing-section %%PRICING_HIDDEN%%" id="pricing">
     <div class="pricing-head">
       <div>
+        <span class="eyebrow">Plans</span>
         <h2>Simple pricing</h2>
         <p class="section-lead">Start free on one server. Upgrade when you need more servers, apps and people.</p>
       </div>
@@ -254,6 +269,7 @@
   </section>
 
   <section class="landing-section alt" id="faq">
+    <span class="eyebrow">FAQ</span>
     <h2>Frequently asked questions</h2>
     <div class="faq-list"><!--FAQ--></div>
     <p class="muted" style="margin-top:18px">Looking for step-by-step help? Read the <a href="/docs">AJ Pilot documentation</a>.</p>
@@ -262,6 +278,7 @@
   <section class="landing-section" id="contact">
     <div class="contact-grid">
       <div>
+        <span class="eyebrow">Contact</span>
         <h2>Get started</h2>
         <p class="section-lead">Tell us a little about what you run. We will set up your account and help you deploy your first app.</p>
         <ul class="tick-list">
@@ -296,6 +313,7 @@
   </section>
 
   <section class="landing-section alt" id="about">
+    <span class="eyebrow">About</span>
     <h2>About AJ Pilot</h2>
     <div class="about-grid">
       <div>
@@ -319,22 +337,49 @@
   </section>
 
   <section class="cta">
-    <h2>Ready to deploy?</h2>
-    <p class="muted">Start on the free plan, or sign in if you already have an account.</p>
-    <button class="btn primary big" id="btn-cta">Get started free</button>
+    <span class="eyebrow">Ready when you are</span>
+    <h2>Put your servers on <span class="gradient-text">autopilot</span></h2>
+    <p>Start on the free plan with one server, or sign in if you already have an account.</p>
+    <div class="cta-buttons">
+      <button class="btn primary big" id="btn-cta">Get started free</button>
+      <a class="btn big" href="#contact">Talk to us</a>
+    </div>
   </section>
   </main>
 
   <footer class="landing-foot">
-    <div>
-      <span class="foot-brand"><span class="logo small" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span> AJ Pilot — autopilot for your servers</span>
-      <nav class="foot-links" aria-label="Footer">
-        <a href="#features">Features</a><a href="#deploy">Deploy</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a><a href="/docs">Docs</a><a href="#contact">Contact</a>
+    <div class="foot-inner">
+      <div class="foot-about">
+        <span class="foot-brand"><span class="logo" aria-hidden="true"><svg class="logo-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span> AJ Pilot</span>
+        <p class="foot-tagline">Autopilot for your servers: deploy apps, run databases and connect domains from one self-hosted panel.</p>
+      </div>
+      <nav class="foot-links" aria-label="Product">
+        <span class="foot-title">Product</span>
+        <a href="#features">Features</a><a href="#deploy">Deploy</a><a href="#how">How it works</a><a href="#pricing">Pricing</a>
+      </nav>
+      <nav class="foot-links" aria-label="Help">
+        <span class="foot-title">Help</span>
+        <a href="/docs">Docs</a><a href="#faq">FAQ</a><a href="#contact">Contact</a><a href="#about">About</a>
       </nav>
     </div>
-    <span class="muted small">© <span id="year">2026</span> AJ Pilot. Runs on your hardware — your keys never leave it.</span>
+    <div class="foot-base">
+      <span>© <span id="year">2026</span> AJ Pilot. All rights reserved.</span>
+      <span>Runs on your hardware — your keys never leave it.</span>
+    </div>
   </footer>
 </div>
+<script>
+  // The landing header: a menu button on narrow screens, and a firmer glass once the page scrolls.
+  (function () {
+    var head = document.getElementById('landing-head');
+    var burger = head.querySelector('.landing-burger');
+    function setOpen(open) { head.classList.toggle('nav-open', open); burger.setAttribute('aria-expanded', String(open)); }
+    burger.addEventListener('click', function () { setOpen(!head.classList.contains('nav-open')); });
+    head.querySelectorAll('.landing-nav a').forEach(function (a) { a.addEventListener('click', function () { setOpen(false); }); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') setOpen(false); });
+    window.addEventListener('scroll', function () { head.classList.toggle('scrolled', window.scrollY > 12); }, { passive: true });
+  })();
+</script>
 
 <!-- ------------------------------------------------------- sign-in gate -->
 <div class="gate hidden" id="auth-gate">
@@ -398,6 +443,7 @@
     <button class="nav-item client-nav active" data-view="servers" title="Servers"><span class="nav-icon">🖥️</span><span class="nav-label">Servers</span></button>
     <button class="nav-item client-nav" data-view="apps" title="Apps"><span class="nav-icon">🚀</span><span class="nav-label">Apps</span></button>
     <button class="nav-item client-nav" data-view="installs" title="Installations"><span class="nav-icon">📦</span><span class="nav-label">Installations</span></button>
+    <button class="nav-item client-nav" data-view="environments" title="Environments"><span class="nav-icon">🧩</span><span class="nav-label">Environments</span></button>
     <button class="nav-item client-nav" data-view="databases" title="Databases"><span class="nav-icon">🗄️</span><span class="nav-label">Databases</span></button>
     <button class="nav-item client-nav" data-view="accounts" title="Account management"><span class="nav-icon">🔑</span><span class="nav-label">Account management</span></button>
     <button class="nav-item client-nav" data-view="billing" title="Plan &amp; billing"><span class="nav-icon">💎</span><span class="nav-label">Plan &amp; billing</span></button>
@@ -546,6 +592,29 @@
     </header>
     <div id="install-catalog" class="cards"></div>
     <div class="section" id="install-list-panel" style="margin-top:26px"></div>
+  </section>
+
+  <section id="view-environments" class="view hidden">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Environments</h2>
+        <p class="muted">Named sets of variables — keep them here once, then pick one when you create an app or install a service. Values are encrypted, and only people who can edit see them.</p>
+      </div>
+      <div class="actions">
+        <button class="btn" id="btn-envs-refresh">Refresh</button>
+        <button class="btn" id="btn-envs-import" data-needs="create">Import .env file</button>
+        <input type="file" id="envs-import-file" accept=".env,.txt,text/plain" hidden />
+        <button class="btn primary" id="btn-envs-new" data-needs="create">+ New environment</button>
+      </div>
+    </header>
+    <div class="tiles" id="envs-stats"></div>
+    <div class="section" style="margin-top:22px">
+      <div class="section-head">
+        <h2>All environments</h2>
+        <div class="section-tools"><input type="search" id="envs-search" placeholder="Search a name or a variable" /></div>
+      </div>
+      <div id="envs-list"></div>
+    </div>
   </section>
 
   <!-- --------------------------------------------- account management -->
@@ -1253,6 +1322,7 @@
         </div>
 
         <div id="install-fields"></div>
+        <div class="env-pick hidden" id="install-env-pick" data-env-pick="install" data-noun="service"></div>
       </div>
 
       <div id="install-msg" class="msg hidden"></div>
@@ -1355,6 +1425,7 @@
         <input type="file" id="app-env-file" accept=".env,.txt,text/plain" hidden />
         <span class="muted small" id="app-env-note">Imported exactly as written — comments and quotes included.</span>
       </div>
+      <div class="env-pick" id="app-env-pick" data-env-pick="app" data-noun="app"></div>
 
       <div class="row">
         <label>Docker network<select name="network" id="app-network"><option value="">Default bridge</option></select></label>
@@ -1366,6 +1437,25 @@
             <option value="no">no</option>
           </select>
         </label>
+      </div>
+
+      <div class="card auto-card" style="margin-top:14px">
+        <label class="check" style="margin-bottom:8px">
+          <input type="checkbox" name="auto_deploy" id="app-auto" /> Auto deploy when <b class="auto-branch" id="app-auto-branch">main</b> changes
+        </label>
+        <p class="muted small" style="margin:0 0 10px">
+          Merge into or push to this branch and the app rebuilds and restarts by itself.
+          <button type="button" class="link-btn small" id="btn-app-auto-branch">Deploy a different branch?</button>
+        </p>
+        <div id="app-auto-fields" class="hidden">
+          <div class="auto-triggers">
+            <label class="env-mode active"><input type="radio" name="auto_deploy_trigger" value="push" checked />
+              <span><b>Every push or commit</b><small>Any new commit on <span data-auto-branch>main</span> — direct pushes and merges</small></span></label>
+            <label class="env-mode"><input type="radio" name="auto_deploy_trigger" value="merge" />
+              <span><b>Only merged pull / merge requests</b><small>A reviewed change merged into <span data-auto-branch>main</span>, e.g. dev → main</small></span></label>
+          </div>
+          <p class="muted small" style="margin:10px 0 0" id="app-auto-how"></p>
+        </div>
       </div>
 
       <div class="card" style="margin-top:14px">
@@ -1590,12 +1680,81 @@
 </div>
 
 <!-- ------------------------------------------------- app environment -->
+<!-- ------------------------------------------- environment: add / edit -->
+<div class="modal-backdrop hidden" id="modal-environment">
+  <div class="modal" style="max-width:760px">
+    <h2 id="environment-title">New environment</h2>
+    <p class="muted small" id="environment-sub">A named set of variables you can use for any app or service.</p>
+    <form id="form-environment">
+      <div class="row">
+        <label>Name<input name="name" id="environment-name" required maxlength="120" placeholder="shop-production" autocomplete="off" /></label>
+        <label>Description <span class="muted small">(optional)</span><input name="description" id="environment-desc" maxlength="255" placeholder="Live shop: database, payments and mail" /></label>
+      </div>
+
+      <div class="section-head" style="margin:16px 0 6px">
+        <h2 style="font-size:13px">Variables <span class="muted" id="environment-count"></span></h2>
+        <div class="section-tools">
+          <div class="seg" role="group" aria-label="Editor">
+            <button type="button" class="active" data-env-editor="rows">Table</button>
+            <button type="button" data-env-editor="text">.env text</button>
+          </div>
+          <button type="button" class="btn tiny" id="btn-environment-add">+ Add variable</button>
+          <button type="button" class="btn tiny" id="btn-environment-import">Import a .env file</button>
+          <input type="file" id="environment-file" accept=".env,.txt,text/plain" hidden />
+        </div>
+      </div>
+      <div id="environment-rows" class="item-rows"></div>
+      <textarea id="environment-text" class="hidden env-text" rows="12" spellcheck="false" placeholder="DATABASE_URL=mysql://user:pass@host/db&#10;API_KEY=…"></textarea>
+      <p class="muted small" style="margin:8px 0 0">
+        An imported file is read as it is — comments are skipped, quoted values keep their spaces, and a key already here is replaced by the one in the file.
+      </p>
+
+      <label class="check hidden" id="environment-sync-wrap" style="margin-top:14px">
+        <input type="checkbox" id="environment-sync" /> <span id="environment-sync-label">Also copy these variables to the apps that use this environment</span>
+      </label>
+
+      <div id="environment-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-environment-save">Save environment</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------ environment: view -->
+<div class="modal-backdrop hidden" id="modal-environment-view">
+  <div class="modal" style="max-width:760px">
+    <div class="env-view-head">
+      <div>
+        <h2 id="envview-title">Environment</h2>
+        <p class="muted small" id="envview-sub"></p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn tiny" id="btn-envview-reveal" hidden>Show values</button>
+        <button type="button" class="btn tiny" id="btn-envview-download" hidden>Download .env</button>
+        <button type="button" class="btn tiny primary" id="btn-envview-edit" data-needs="edit">Edit</button>
+      </div>
+    </div>
+    <div id="envview-body"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop hidden" id="modal-app-env">
   <div class="modal" style="max-width:720px">
     <h2>Environment</h2>
     <p class="muted small" id="app-env-sub">—</p>
 
     <form id="form-app-env">
+      <div class="env-load">
+        <label>Load from an environment
+          <select id="app-env-source"><option value="">— keep what is here —</option></select>
+        </label>
+        <span class="muted small" id="app-env-link"></span>
+      </div>
       <div class="section-head" style="margin-bottom:6px">
         <h2 style="font-size:13px">Variables</h2>
         <div class="section-tools">
@@ -1860,6 +2019,7 @@
         <textarea name="environment" rows="3" placeholder="NODE_ENV=production&#10;PORT=3000"></textarea>
       </label>
       <label>Environment file <span class="muted small">(optional)</span><input name="environmentFile" placeholder="/srv/my-app/.env" /></label>
+      <div class="env-pick" id="service-env-pick" data-env-pick="service" data-noun="service"></div>
 
       <div class="row">
         <label>Type

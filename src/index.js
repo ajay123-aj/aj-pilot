@@ -9,7 +9,9 @@ import { dbEnginesRouter } from './routes/dbEngines.js';
 import { gitOauthRouter } from './routes/gitOauth.js';
 import { runnersRouter } from './routes/runners.js';
 import { installsRouter } from './routes/installs.js';
-import { appsRouter } from './routes/apps.js';
+import { appsRouter, deployNow } from './routes/apps.js';
+import { configureAutoDeploy, startAutoDeployPoller, handleAppWebhook } from './lib/autoDeploy.js';
+import { environmentsRouter } from './routes/environments.js';
 import { authRouter } from './routes/auth.js';
 import { teamRouter } from './routes/team.js';
 import { platformRouter, publicPlan } from './routes/platform.js';
@@ -54,6 +56,9 @@ app.use(express.static(path.join(ROOT, 'public'), {
 }));
 
 // Everything under /api knows who is asking; most of it then insists on it.
+// GitHub, GitLab and Bitbucket call this when a branch changes — no session; the token in the address is the key.
+app.post('/api/hooks/apps/:token', handleAppWebhook);
+
 app.use('/api', attachUser);
 app.use('/api/auth', authRouter);
 
@@ -131,6 +136,7 @@ app.use('/api/credentials', inOrg, credentialsRouter);
 app.use('/api/runners', inOrg, runnersRouter);
 app.use('/api/installs', inOrg, installsRouter);
 app.use('/api/apps', inOrg, appsRouter);
+app.use('/api/environments', inOrg, environmentsRouter);
 app.use('/api/git/oauth', inOrg, gitOauthRouter);
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
@@ -159,6 +165,8 @@ async function start() {
     console.log(`  → http://localhost:${config.port}`);
     console.log(`  DB: ${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}`);
     startHealthMonitor();
+    configureAutoDeploy({ deploy: deployNow });
+    startAutoDeployPoller();
     console.log('');
   });
 }

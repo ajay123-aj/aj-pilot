@@ -161,13 +161,18 @@ function resultPage(result) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${heading}</title>
 <style>
+  :root { color-scheme: dark; --bg:#07080c; --card:#10131b; --line:#1f2635; --text:#f3f5f9; --muted:#a0a9bb; --link:#60a5fa; --glow:#0f2150; }
+  @media (prefers-color-scheme: light) {
+    :root { color-scheme: light; --bg:#f6f8fc; --card:#ffffff; --line:#dfe5ef; --text:#0b1a36; --muted:#55627a; --link:#1d4ed8; --glow:#d6e2fb; }
+  }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-         background:#0b0f17; color:#e6edf6; font:15px/1.6 "Segoe UI",system-ui,sans-serif; }
-  .box { max-width:460px; padding:28px 32px; background:#141c2b; border:1px solid #22304a;
-         border-left:3px solid ${result.ok ? '#2ecc8f' : '#ff5f6d'}; border-radius:10px; }
+         background:radial-gradient(900px 500px at 50% -10%, var(--glow), transparent 70%), var(--bg);
+         color:var(--text); font:15px/1.6 "Plus Jakarta Sans","Segoe UI",system-ui,sans-serif; }
+  .box { max-width:460px; padding:28px 32px; background:var(--card); border:1px solid var(--line);
+         border-top:3px solid ${result.ok ? '#2563eb' : '#e5484d'}; border-radius:14px; box-shadow:0 20px 50px -20px rgba(0,0,0,.45); }
   h1 { margin:0 0 8px; font-size:18px; }
-  p { margin:0; color:#8ba0bd; }
-  a { color:#4f8cff; }
+  p { margin:0; color:var(--muted); }
+  a { color:var(--link); font-weight:600; }
 </style></head>
 <body>
   <div class="box">

@@ -12,6 +12,7 @@ import { all, one, run, logActivity } from '../db/index.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { connectionFromRow, withConnection } from '../lib/ssh.js';
 import { byKey, publicCatalog, containerPlan, publicSettings, extraPortPlan } from '../lib/catalog.js';
+import { resolveEnvironmentChoice } from '../lib/environments.js';
 import {
   dockerState, requireDocker, DockerMissingError, runContainer, recreateContainer,
   containerAction, containerLogs, removeContainer, installEngine, installCompose,
@@ -151,6 +152,12 @@ async function installAsContainer(entry, server, req, res) {
     return res.status(409).json({ error: `This server already has an installation named "${named.value}"` });
   }
 
+  // The variables this container gets, as an environment: link to one, or keep them as a new one.
+  const envPairs = Object.entries(plan.env || {}).filter(([k]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)).map(([k, v]) => [k, String(v)]);
+  const envChoice = { orgId: server.org_id, userId: req.user?.id, pairs: envPairs, fallbackName: named.value };
+  const envCheck = await resolveEnvironmentChoice(req.body, { ...envChoice, check: true });
+  if (envCheck.error) return res.status(envCheck.status || 400).json({ error: envCheck.error });
+
   const volume = `${named.value}-data`;
   const spec = {
     kind: entry.key,
@@ -177,6 +184,9 @@ async function installAsContainer(entry, server, req, res) {
     [server.org_id, server.id, entry.key, spec.name, spec.image, spec.tag, spec.port, spec.containerPort,
       JSON.stringify(extraPorts), spec.network, volume, JSON.stringify(publicSettings(entry, values)), encrypt(JSON.stringify(values))]
   );
+
+  const envLink = await resolveEnvironmentChoice(req.body, envChoice);
+  if (envLink.id) await run('UPDATE installations SET environment_id = ? WHERE id = ?', [envLink.id, insertId]);
 
   try {
     const result = await withConnection(connectionFromRow(server), async (conn) => {

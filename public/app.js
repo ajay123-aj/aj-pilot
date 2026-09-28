@@ -146,6 +146,7 @@ $$('.nav-item').forEach((btn) => btn.addEventListener('click', () => {
   if (view === 'servers') loadServers();
   if (view === 'apps') loadApps();
   if (view === 'installs') loadInstallsView();
+  if (view === 'environments') loadEnvironments();
   if (view === 'accounts') loadAccounts();
   if (view === 'databases') loadMysqlList();
   if (view === 'settings') loadSettings();
@@ -165,6 +166,109 @@ const roleLabel = (key) => session.roles.find((r) => r.key === key)?.label || ke
 
 /** Render a control only when the signed-in role is allowed to use it. */
 const ifCan = (action, html) => (canDo(action) ? html : '');
+
+/* ------------------------------------------ row actions: one "Actions" menu */
+
+/**
+ * A table row with two or more buttons gets one "Actions" menu instead of a
+ * row of buttons. The buttons themselves are moved (not copied) into the
+ * menu, so every delegated data-* handler keeps working exactly as before.
+ * Dangerous ones (delete, remove, sign out) go last, below a divider.
+ */
+function enhanceRowActions(root = document) {
+  root.querySelectorAll('td .row-actions:not([data-act-menu])').forEach((box) => {
+    const items = [...box.children].filter((el) => el.matches('button, a'));
+    if (items.length < 2) return;
+    box.dataset.actMenu = '1';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'act-toggle';
+    toggle.setAttribute('aria-haspopup', 'menu');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.innerHTML = '<span>Actions</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+    const menu = document.createElement('div');
+    menu.className = 'act-menu';
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    const safe = items.filter((el) => !el.classList.contains('danger'));
+    const danger = items.filter((el) => el.classList.contains('danger'));
+    [...safe, ...(safe.length && danger.length ? [Object.assign(document.createElement('hr'), { className: 'act-sep' })] : []), ...danger]
+      .forEach((el) => {
+        if (el.matches('button, a')) {
+          // Drop the button look; "primary" and "danger" stay to colour the item.
+          el.classList.remove('btn', 'tiny', 'big', 'ghost');
+          el.classList.add('act-item');
+          el.setAttribute('role', 'menuitem');
+        }
+        menu.append(el);
+      });
+    box.replaceChildren(toggle, menu);
+  });
+}
+
+let openActMenu = null;
+
+function closeActMenu() {
+  if (!openActMenu) return;
+  openActMenu.hidden = true;
+  openActMenu.previousElementSibling?.setAttribute('aria-expanded', 'false');
+  openActMenu.closest('tr')?.classList.remove('act-open');
+  openActMenu = null;
+}
+
+function showActMenu(toggle) {
+  const menu = toggle.nextElementSibling;
+  closeActMenu();
+  menu.hidden = false;
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.closest('tr')?.classList.add('act-open');
+  openActMenu = menu;
+  // Fixed, so a scrolling table card never clips it; below the button, or above when there is no room.
+  const r = toggle.getBoundingClientRect();
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+  const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  // Inside a modal (a new containing block) "fixed" is relative to it: correct for that.
+  const got = menu.getBoundingClientRect();
+  menu.style.left = `${left + (left - got.left)}px`;
+  menu.style.top = `${top + (top - got.top)}px`;
+  menu.querySelector('.act-item:not([disabled]):not(.hidden)')?.focus({ preventScroll: true });
+}
+
+document.addEventListener('click', (ev) => {
+  const toggle = ev.target.closest('.act-toggle');
+  if (toggle) {
+    if (toggle.nextElementSibling === openActMenu) closeActMenu();
+    else showActMenu(toggle);
+    return;
+  }
+  // A chosen item has already run its own handler on the way up: now close.
+  closeActMenu();
+});
+document.addEventListener('keydown', (ev) => {
+  if (!openActMenu) return;
+  if (ev.key === 'Escape') { const t = openActMenu.previousElementSibling; closeActMenu(); t?.focus(); return; }
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    const items = [...openActMenu.querySelectorAll('.act-item:not([disabled]):not(.hidden)')];
+    const at = items.indexOf(document.activeElement);
+    items[(at + (ev.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+  }
+});
+window.addEventListener('scroll', closeActMenu, true);
+window.addEventListener('resize', closeActMenu);
+
+// Every table is drawn from HTML strings at many places: convert whatever appears.
+let actPending = false;
+new MutationObserver(() => {
+  if (actPending) return;
+  actPending = true;
+  requestAnimationFrame(() => { actPending = false; enhanceRowActions(); });
+}).observe(document.body, { childList: true, subtree: true });
+enhanceRowActions();
 
 const PERMISSIONS = ['view', 'create', 'edit', 'delete', 'members', 'orgs'];
 
@@ -937,6 +1041,10 @@ async function openServer(id) {
   if (String(id) !== String(currentServerId)) {
     currentTab = 'overview';
     filesPath = '/';
+    filesData = null;
+    filesBack = [];
+    filesForward = [];
+    filesFilter = '';
   }
   currentServerId = id;
   tabsLoaded = new Set();
@@ -963,8 +1071,10 @@ async function openServer(id) {
     $('#detail-body').innerHTML = SERVER_TABS.map((t) => `
       <div class="tab-panel" data-panel="${t.key}" ${t.key === currentTab ? '' : 'hidden'}>
         ${t.key === 'overview' ? '<div class="section" id="server-summary"></div>' : ''}
-        ${t.key === 'storage' ? '<div class="section" id="files-panel"></div>' : ''}
-        ${t.facts ? (panels ? panels[t.key] : noFacts) : `<div class="section" id="${liveTabPanelId(t.key)}"></div>`}
+        ${t.key === 'storage'
+    // Drives first, like "This PC", then the explorer, then the technical tables.
+    ? `${panels ? panels.storage : ''}<div class="section" id="files-panel"></div>${panels ? panels.storageMore : ''}`
+    : t.facts ? (panels ? panels[t.key] : noFacts) : `<div class="section" id="${liveTabPanelId(t.key)}"></div>`}
       </div>`).join('');
 
     showServerTab(currentTab);
@@ -1086,6 +1196,7 @@ function renderFactTabs(f) {
   return {
     overview: factsOverview(f),
     storage: factsStorage(f),
+    storageMore: factsStorageMore(f),
     network: factsNetwork(f),
     processes: factsProcesses(f),
     system: factsSystem(f),
@@ -1164,19 +1275,33 @@ function factsOverview(f) {
   return out.join('');
 }
 
-function factsStorage(f) {
-  const out = [];
+/** A mount as Windows would name a drive: "System (/)", "boot (/boot)". */
+const driveName = (mount) => (mount === '/' ? 'System' : String(mount).split('/').filter(Boolean).pop() || mount);
+const usageTone = (p) => (p >= 90 ? 'err' : p >= 75 ? 'warn' : '');
 
-  out.push(section('Filesystems', `
-    ${table(
-      [{ label: 'Mount' }, { label: 'Filesystem' }, { label: 'Type' }, { label: 'Size', num: true }, { label: 'Used', num: true }, { label: 'Free', num: true }, { label: 'Use%', num: true }],
-      (f.disks || []).map((d) => [
-        `<b>${val(d.mount)}</b>`, val(d.filesystem), val(d.type), bytes(d.sizeBytes), bytes(d.usedBytes), bytes(d.availableBytes),
-        `<span class="badge ${d.usedPct >= 90 ? 'err' : d.usedPct >= 75 ? 'warn' : 'ok'}">${pct(d.usedPct)}</span>`,
-      ]),
-      'No filesystems reported'
-    )}
-  `));
+/** Storage tab, top: every filesystem as a drive card, like "This PC". */
+function factsStorage(f) {
+  const disks = f.disks || [];
+  if (!disks.length) return section('Devices and drives', '<div class="card"><p class="muted small" style="margin:0">No filesystems reported</p></div>');
+  return `<div class="section">
+    <div class="section-head"><h2>Devices and drives</h2><span class="muted small">${disks.length} drive${disks.length === 1 ? '' : 's'} · click one to open it below</span></div>
+    <div class="drive-grid">${disks.map((d) => `
+      <button type="button" class="drive" data-drive-go="${esc(d.mount)}" title="Open ${esc(d.mount)} in the file explorer">
+        ${FX_ICONS.drive(d.mount === '/')}
+        <span class="drive-info">
+          <b>${esc(driveName(d.mount))} <span class="muted">(${esc(d.mount)})</span></b>
+          <span class="drive-bar"><span class="${usageTone(d.usedPct)}" style="width:${Math.min(100, Number(d.usedPct) || 0)}%"></span></span>
+          <small>${bytes(d.availableBytes)} free of ${bytes(d.sizeBytes)} · ${pct(d.usedPct)} used</small>
+          <small class="muted">${val(d.type)} · ${val(d.filesystem)}</small>
+        </span>
+      </button>`).join('')}
+    </div>
+  </div>`;
+}
+
+/** Storage tab, bottom: the raw device and inode tables, folded away. */
+function factsStorageMore(f) {
+  const out = [];
 
   if ((f.blockDevices || []).length) {
     out.push(section('Block devices', table(
@@ -1196,7 +1321,9 @@ function factsStorage(f) {
     )));
   }
 
-  return out.join('');
+  return out.length
+    ? `<details class="fx-details"><summary>Technical details <span class="muted small">block devices and inodes</span></summary>${out.join('')}</details>`
+    : '';
 }
 
 /* ------------------------------------------ Storage tab: file manager */
@@ -1209,97 +1336,391 @@ const FILE_JUMPS = [
 
 let filesPath = '/';
 let filesData = null;
+let filesBack = [];      // folders behind you, for the Back button
+let filesForward = [];   // folders ahead of you after going Back
+let filesSelected = null;
+let filesFilter = '';
+let filesSort = { key: 'name', dir: 1 };
+let filesView = 'details';
+try { filesView = localStorage.getItem('ad-files-view') === 'icons' ? 'icons' : 'details'; } catch { /* storage blocked */ }
 const filesApi = (path, options) => api(`/servers/${currentServerId}${path}`, options);
 const joinPath = (dir, name) => (dir === '/' ? `/${name}` : `${dir}/${name}`);
-const fileIcon = (e) => (e.type === 'dir' ? '📁' : e.type === 'link' ? '🔗' : e.archive ? '🗜️' : /\.(log|txt|md)$/i.test(e.name) ? '📄'
-  : /\.(js|ts|json|ya?ml|conf|env|sh|py|php|ini|toml|xml|html|css|sql)$|^\.env/i.test(e.name) ? '📝' : '📄');
+const parentPath = (p) => (p === '/' ? null : p.split('/').slice(0, -1).join('/') || '/');
 const downloadUrl = (path) => `/api/servers/${currentServerId}/files/download?path=${encodeURIComponent(path)}`;
 
-async function loadFileBrowser(path = filesPath) {
+/* icons: Windows-style folders, pages and drives, drawn inline so they suit both themes */
+
+const FILE_KINDS = [
+  [/\.(zip|tar|gz|tgz|bz2|xz|7z|rar|zst)$/i, 'archive', '#d97706'],
+  [/\.(png|jpe?g|gif|svg|webp|ico|bmp)$/i, 'image', '#16a34a'],
+  [/\.(pem|key|crt|cer|pub|p12|pfx)$|^id_(rsa|ed25519|ecdsa)/i, 'key', '#dc2626'],
+  [/\.(js|mjs|cjs|ts|jsx|tsx|json|ya?ml|conf|cnf|env|sh|bash|py|php|ini|toml|xml|html?|css|scss|sql|go|rs|java|rb|c|cpp|h|service|socket|timer)$|^\.env|^Dockerfile$|^Makefile$/i, 'code', '#2563eb'],
+  [/\.(log|txt|md|csv|out|err)$/i, 'text', '#64748b'],
+];
+const fileKind = (e) => {
+  if (e.type === 'dir') return { kind: 'dir' };
+  if (e.type === 'link') return { kind: 'link', color: '#0891b2' };
+  const hit = FILE_KINDS.find(([re]) => re.test(e.name));
+  return hit ? { kind: hit[1], color: hit[2] } : { kind: 'file', color: '#475569' };
+};
+const fileExt = (name) => { const m = /\.([a-z0-9]{1,5})$/i.exec(name); return m ? m[1].toUpperCase() : ''; };
+
+const FX_ICONS = {
+  folder: () => `<svg class="fx-svg" viewBox="0 0 48 48" aria-hidden="true">
+    <path d="M5 11.5A3.5 3.5 0 0 1 8.5 8h10.1c.9 0 1.8.4 2.5 1l3.3 3H39.5a3.5 3.5 0 0 1 3.5 3.5V19H5z" fill="#e0a526"/>
+    <path d="M5 17.5A3.5 3.5 0 0 1 8.5 14h31a3.5 3.5 0 0 1 3.5 3.5v19a3.5 3.5 0 0 1-3.5 3.5h-31A3.5 3.5 0 0 1 5 36.5z" fill="#fbc94a"/>
+    <path d="M5 18h38" stroke="#fde38e" stroke-width="1.4"/></svg>`,
+  page: (color, label = '', link = false) => `<svg class="fx-svg" viewBox="0 0 48 48" aria-hidden="true">
+    <path d="M11 5.5A2.5 2.5 0 0 1 13.5 3H29l11 11v28.5a2.5 2.5 0 0 1-2.5 2.5h-24A2.5 2.5 0 0 1 11 42.5z" fill="#fdfdfe" stroke="#b9c2d0" stroke-width="1.2"/>
+    <path d="M29 3v8.5a2.5 2.5 0 0 0 2.5 2.5H40" fill="#e7ebf1" stroke="#b9c2d0" stroke-width="1.2" stroke-linejoin="round"/>
+    ${label ? `<rect x="7" y="27" width="${Math.max(18, label.length * 6.4 + 8)}" height="11" rx="2" fill="${color}"/>
+    <text x="${7 + Math.max(18, label.length * 6.4 + 8) / 2}" y="35.2" text-anchor="middle" font-family="Segoe UI,system-ui,sans-serif" font-size="7.6" font-weight="700" fill="#fff">${esc(label)}</text>`
+    : `<path d="M16 21h16M16 26h16M16 31h11" stroke="${color}" stroke-width="2" stroke-linecap="round"/>`}
+    ${link ? '<rect x="7" y="33" width="12" height="12" rx="2" fill="#fff" stroke="#b9c2d0"/><path d="M10 42l6-6m0 0h-4.5m4.5 0v4.5" stroke="#0891b2" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' : ''}</svg>`,
+  drive: (system) => `<svg class="fx-svg" viewBox="0 0 48 48" aria-hidden="true">
+    <rect x="4" y="15" width="40" height="20" rx="4" fill="#d5dbe5"/>
+    <rect x="4" y="25" width="40" height="10" rx="3.5" fill="#9ba6b9"/>
+    <rect x="9" y="29" width="15" height="2.2" rx="1.1" fill="#667389"/>
+    <circle cx="37.5" cy="30" r="2.1" fill="#3ddc97"/>
+    ${system ? '<rect x="6" y="7" width="12" height="12" rx="2.5" fill="#2563eb"/><path d="M8.5 9.5h3v3h-3zM12.5 9.5h3v3h-3zM8.5 13.5h3v3h-3zM12.5 13.5h3v3h-3z" fill="#fff"/>' : ''}</svg>`,
+};
+function entryIcon(e) {
+  const k = fileKind(e);
+  if (k.kind === 'dir') return FX_ICONS.folder();
+  return FX_ICONS.page(k.color, k.kind === 'text' || k.kind === 'file' ? '' : fileExt(e.name).slice(0, 4), k.kind === 'link');
+}
+const entryType = (e) => (e.type === 'dir' ? 'File folder' : e.type === 'link' ? 'Shortcut' : e.archive ? `${fileExt(e.name) || 'Archive'} archive` : fileExt(e.name) ? `${fileExt(e.name)} file` : 'File');
+const isPseudo = (e) => /^\/(proc|sys|dev)(\/|$)/.test(e.path);
+
+/* small line icons for the command bar and menus */
+const UI_ICON = {
+  back: '<path d="M15 6l-6 6 6 6"/>', forward: '<path d="M9 6l6 6-6 6"/>', up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>', newFolder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 10v6M9 13h6"/>',
+  newFile: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M12 11v6M9 14h6"/>',
+  upload: '<path d="M12 16V4M7 9l5-5 5 5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>', download: '<path d="M12 4v12M7 11l5 5 5-5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>',
+  details: '<path d="M4 6h16M4 12h16M4 18h16"/>', icons: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/>', more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  open: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
+  extract: '<path d="M4 7h16v13H4zM4 7l2-3h12l2 3M12 11v6M9 14l3 3 3-3"/>', rename: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  perms: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+};
+const ui = (name) => `<svg class="fx-ui" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${UI_ICON[name]}</svg>`;
+
+/* loading */
+
+async function loadFileBrowser(path = filesPath, { history = true } = {}) {
   const box = $('#files-panel');
   if (!box) return;
+  const from = filesPath;
+  if (history && filesData && path !== from) { filesBack.push(from); filesForward = []; }
   filesPath = path;
-  box.innerHTML = `<div class="section-head"><h2>Files</h2></div>
-    <div class="empty"><span class="spinner"></span>Reading ${esc(path)} and measuring folder sizes (up to 20 seconds)…</div>`;
+  filesSelected = null;
+  closeFxMenu();
+  const loading = `<div class="fx-empty"><span class="spinner"></span>Reading ${esc(path)} and measuring folder sizes (up to 20 seconds)…</div>`;
+  // Keep the explorer in place while the next folder loads, like Explorer does.
+  if ($('#files-table')) {
+    $('#files-table').innerHTML = loading;
+    $$('#fx-path .fx-crumbs').forEach((c) => { c.innerHTML = `<span class="fx-crumb">${esc(path)}</span>`; });
+  } else {
+    box.innerHTML = `<div class="section-head"><h2>File explorer</h2></div><div class="fx">${loading}</div>`;
+  }
   try {
     filesData = await filesApi(`/files?path=${encodeURIComponent(path)}`);
     filesPath = filesData.path;
     renderFileBrowser();
   } catch (err) {
-    box.innerHTML = `<div class="section-head"><h2>Files</h2></div>
+    const up = parentPath(path);
+    box.innerHTML = `<div class="section-head"><h2>File explorer</h2></div>
       <div class="msg err">${esc(err.message)}</div>
-      <p><button class="btn tiny" data-files-go="/">Go to /</button> ${path !== '/' ? `<button class="btn tiny" data-files-go="${esc(path.split('/').slice(0, -1).join('/') || '/')}">Up one level</button>` : ''}</p>`;
+      <p><button class="btn tiny" data-files-go="/">Go to /</button> ${up ? `<button class="btn tiny" data-files-go="${esc(up)}">Up one level</button>` : ''}</p>`;
   }
 }
+
+/** Folders first, then the chosen column; the index into filesData.entries rides along. */
+function sortedEntries() {
+  const { key, dir } = filesSort;
+  const value = (e) => (key === 'size' ? Number(e.size || 0) : key === 'modified' ? (e.modified ? Date.parse(e.modified) : 0)
+    : key === 'type' ? entryType(e).toLowerCase() : e.name.toLowerCase());
+  return filesData.entries.map((e, i) => ({ e, i })).sort((a, b) => {
+    const fa = a.e.type === 'dir' ? 0 : 1;
+    const fb = b.e.type === 'dir' ? 0 : 1;
+    if (fa !== fb) return fa - fb;
+    const va = value(a.e);
+    const vb = value(b.e);
+    return (va < vb ? -1 : va > vb ? 1 : a.e.name.localeCompare(b.e.name)) * dir;
+  });
+}
+
+const matchesFilter = (e) => !filesFilter || e.name.toLowerCase().includes(filesFilter);
 
 function renderFileBrowser() {
   const d = filesData;
   const folders = d.entries.filter((e) => e.type === 'dir').length;
-  const biggest = Math.max(1, ...d.entries.map((e) => Number(e.size || 0)));
-  const fs = d.filesystem;
+  const fsys = d.filesystem;
   const segments = d.path.split('/').filter(Boolean);
+  const here = segments[segments.length - 1] || '/';
+  const drives = (currentServer?.facts?.disks || []);
+  const fsPct = fsys && fsys.size ? Math.round((fsys.used / fsys.size) * 100) : null;
+  const cmd = (act, icon, label, extra = '') => `<button type="button" class="fx-cmd" data-files-act="${act}" ${extra}>${ui(icon)}<span>${label}</span></button>`;
 
   $('#files-panel').innerHTML = `
-    <div class="section-head">
-      <h2>Files</h2>
-      <div class="section-tools">
-        <input type="search" id="files-filter" placeholder="Filter this folder" />
-        <button class="btn tiny" data-files-go="${esc(d.path)}">Refresh</button>
-        ${ifCan('create', '<button class="btn tiny" data-files-act="new-folder">+ Folder</button>')}
-        ${ifCan('create', '<button class="btn tiny" data-files-act="new-file">+ File</button>')}
-        ${ifCan('create', '<button class="btn tiny primary" data-files-act="upload">Upload</button>')}
-        ${ifCan('edit', `<a class="btn tiny" href="${downloadUrl(d.path)}" download>Download folder</a>`)}
+    <div class="section-head"><h2>File explorer</h2></div>
+    <div class="fx" id="fx">
+      <div class="fx-command">
+        ${ifCan('create', cmd('new-folder', 'newFolder', 'New folder'))}
+        ${ifCan('create', cmd('new-file', 'newFile', 'New file'))}
+        ${ifCan('create', cmd('upload', 'upload', 'Upload'))}
+        ${canDo('create') && canDo('edit') ? '<span class="fx-sep"></span>' : ''}
+        ${ifCan('edit', `<a class="fx-cmd" href="${downloadUrl(d.path)}" download>${ui('download')}<span>Download folder</span></a>`)}
+        <div class="fx-view" role="group" aria-label="View">
+          <button type="button" data-fx-view="details" class="${filesView === 'details' ? 'active' : ''}" title="Details">${ui('details')}<span>Details</span></button>
+          <button type="button" data-fx-view="icons" class="${filesView === 'icons' ? 'active' : ''}" title="Large icons">${ui('icons')}<span>Large icons</span></button>
+        </div>
       </div>
-    </div>
-    <div class="chips">${FILE_JUMPS.map(([p, label]) => `<button class="btn tiny ${p === d.path ? 'primary' : ''}" data-files-go="${esc(p)}">${esc(label)}</button>`).join('')}</div>
-    <div class="crumbs">
-      <button data-files-go="/">/</button>
-      ${segments.map((s, i) => `${i ? '<span class="sep">/</span>' : ''}<button data-files-go="/${esc(segments.slice(0, i + 1).join('/'))}">${esc(s)}</button>`).join('')}
-      <form id="files-goto" style="margin-left:auto;display:flex;gap:6px">
-        <input name="path" value="${esc(d.path)}" style="min-width:260px" />
-        <button class="btn tiny" type="submit">Go</button>
-      </form>
-    </div>
-    <p class="muted small" style="margin:0 0 10px">
-      ${folders} folder${folders === 1 ? '' : 's'}, ${d.entries.length - folders} file${d.entries.length - folders === 1 ? '' : 's'}
-      ${d.total !== null ? ` · <b>${bytes(d.total)}</b> in this folder` : ''}
-      ${d.sizesComplete ? '' : ' · <span class="badge warn">some folder sizes timed out — too big to measure quickly</span>'}
-      ${fs ? ` · filesystem <code>${esc(fs.mount)}</code>: ${bytes(fs.used)} of ${bytes(fs.size)} used, ${bytes(fs.available)} free` : ''}
-    </p>
-    <div class="card scroll-table" style="padding:4px 0;max-height:560px" id="files-table">
-      <table>
-        <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th><th>Mode · owner</th><th></th></tr></thead>
-        <tbody>
-          ${d.parent !== null ? `<tr><td colspan="5"><button class="file-name dir" data-files-go="${esc(d.parent)}">📁 ..</button></td></tr>` : ''}
-          ${d.entries.map((e, i) => {
-    // /proc, /sys and /dev are views of the kernel, not files: nothing to download, copy or chmod.
-    const pseudo = /^\/(proc|sys|dev)(\/|$)/.test(e.path);
-    return `<tr data-file-row="${i}">
-            <td>${e.type === 'dir'
-    ? `<button class="file-name dir" data-files-go="${esc(e.path)}">${fileIcon(e)} ${esc(e.name)}</button>`
-    : `<button class="file-name" data-files-open="${i}">${fileIcon(e)} ${esc(e.name)}</button>`}
-              ${e.target ? `<div class="muted small">→ ${esc(e.target)}</div>` : ''}
-              ${e.protected ? ' <span class="badge">system</span>' : ''}</td>
-            <td class="num">${e.size === null ? '<span class="muted">—</span>' : bytes(e.size)}
-              ${e.size ? `<div class="size-bar"><span style="width:${Math.max(2, Math.round((e.size / biggest) * 100))}%"></span></div>` : ''}</td>
-            <td class="small">${e.modified ? esc(new Date(e.modified).toLocaleString()) : '—'}</td>
-            <td class="small"><code>${esc(e.mode)}</code> ${esc(e.owner)}:${esc(e.group)}</td>
-            <td><div class="row-actions">
-              ${e.type === 'file' ? ifCan('edit', `<button class="btn tiny" data-files-open="${i}">Edit</button>`) : ''}
-              ${e.type !== 'link' && !pseudo ? ifCan('edit', `<a class="btn tiny" href="${downloadUrl(e.path)}" download>Download</a>`) : ''}
-              ${e.archive ? ifCan('create', `<button class="btn tiny" data-files-act="extract" data-i="${i}">Extract</button>`) : ''}
-              ${e.protected ? '' : ifCan('edit', `<button class="btn tiny" data-files-act="move" data-i="${i}">Rename / move</button>`)}
-              ${pseudo ? '' : ifCan('create', `<button class="btn tiny" data-files-act="copy" data-i="${i}">Copy</button>`)}
-              ${pseudo ? '' : ifCan('edit', `<button class="btn tiny" data-files-act="perms" data-i="${i}">Permissions</button>`)}
-              ${e.protected ? '' : ifCan('delete', `<button class="btn tiny danger" data-files-act="delete" data-i="${i}">Delete</button>`)}
-            </div></td>
-          </tr>`;
-  }).join('')}
-          ${d.entries.length ? '' : '<tr><td colspan="5" class="muted">This folder is empty.</td></tr>'}
-        </tbody>
-      </table>
+
+      <div class="fx-address">
+        <button type="button" class="fx-navbtn" data-fx-nav="back" title="Back" ${filesBack.length ? '' : 'disabled'}>${ui('back')}</button>
+        <button type="button" class="fx-navbtn" data-fx-nav="forward" title="Forward" ${filesForward.length ? '' : 'disabled'}>${ui('forward')}</button>
+        <button type="button" class="fx-navbtn" data-fx-nav="up" title="Up to ${esc(d.parent ?? '/')}" ${d.parent === null ? 'disabled' : ''}>${ui('up')}</button>
+        <div class="fx-path" id="fx-path" title="Click to type a path">
+          <span class="fx-path-ico">${FX_ICONS.folder()}</span>
+          <span class="fx-crumbs">
+            <button type="button" class="fx-crumb" data-files-go="/">This server</button>
+            ${segments.map((s, i) => `<span class="fx-chev">›</span><button type="button" class="fx-crumb" data-files-go="/${esc(segments.slice(0, i + 1).join('/'))}">${esc(s)}</button>`).join('')}
+          </span>
+          <form id="files-goto" hidden><input name="path" value="${esc(d.path)}" aria-label="Path" autocomplete="off" spellcheck="false" /></form>
+        </div>
+        <button type="button" class="fx-navbtn" data-files-go="${esc(d.path)}" title="Refresh">${ui('refresh')}</button>
+        <label class="fx-search">${ui('search')}<input type="search" id="files-filter" placeholder="Search ${esc(here)}" value="${esc(filesFilter)}" /></label>
+      </div>
+
+      <div class="fx-body">
+        <nav class="fx-nav" aria-label="Places">
+          <div class="fx-nav-title">Quick access</div>
+          ${FILE_JUMPS.filter(([p]) => p !== '/').map(([p, label]) => `<button type="button" class="fx-nav-item ${p === d.path ? 'active' : ''}" data-files-go="${esc(p)}" title="${esc(p)}">${FX_ICONS.folder()}<span>${esc(label)}</span></button>`).join('')}
+          <div class="fx-nav-title">This server</div>
+          ${(drives.length ? drives : [{ mount: '/' }]).map((dv) => `<button type="button" class="fx-nav-item ${dv.mount === d.path ? 'active' : ''}" data-files-go="${esc(dv.mount)}" title="${esc(dv.mount)}">${FX_ICONS.drive(dv.mount === '/')}<span>${esc(driveName(dv.mount))} <span class="muted">(${esc(dv.mount)})</span></span></button>`).join('')}
+        </nav>
+        <div class="fx-main" id="files-table" tabindex="0" aria-label="Contents of ${esc(d.path)}">${fileItemsHtml()}</div>
+      </div>
+
+      <div class="fx-status">
+        <span>${d.entries.length} item${d.entries.length === 1 ? '' : 's'} · ${folders} folder${folders === 1 ? '' : 's'}${d.total !== null ? ` · ${bytes(d.total)}` : ''}</span>
+        <span id="fx-selected"></span>
+        ${d.sizesComplete ? '' : '<span class="badge warn">some folder sizes timed out</span>'}
+        ${fsys ? `<span class="fx-fs" title="Filesystem ${esc(fsys.mount)}"><span>${esc(driveName(fsys.mount))} (${esc(fsys.mount)})</span>
+          <span class="drive-bar"><span class="${usageTone(fsPct)}" style="width:${fsPct ?? 0}%"></span></span>
+          <span>${bytes(fsys.available)} free of ${bytes(fsys.size)}</span></span>` : ''}
+      </div>
+      <div class="fx-menu" id="fx-menu" role="menu" hidden></div>
     </div>`;
+  updateFxSelection();
 }
+
+/** The folder's contents, as a details table or as large icons. */
+function fileItemsHtml() {
+  const d = filesData;
+  const items = sortedEntries();
+  if (!items.length) return '<div class="fx-empty">This folder is empty.</div>';
+  const biggest = Math.max(1, ...d.entries.map((e) => Number(e.size || 0)));
+  const when = (e) => (e.modified ? esc(new Date(e.modified).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })) : '—');
+
+  if (filesView === 'icons') {
+    return `<div class="fx-grid">${items.map(({ e, i }) => `
+      <div class="fx-tile" data-file-row="${i}" ${matchesFilter(e) ? '' : 'hidden'} title="${esc(e.name)}${e.target ? ` → ${esc(e.target)}` : ''}">
+        ${entryIcon(e)}
+        <span class="fx-label">${esc(e.name)}</span>
+        <small>${e.type === 'dir' ? (e.size !== null ? bytes(e.size) : 'Folder') : e.size !== null ? bytes(e.size) : ''}</small>
+      </div>`).join('')}</div>`;
+  }
+
+  const head = (key, label, cls = '') => `<th class="${cls}" data-fx-sort="${key}">${label}${filesSort.key === key ? `<span class="fx-sort">${filesSort.dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`;
+  return `<table class="fx-table">
+    <thead><tr>${head('name', 'Name')}${head('modified', 'Date modified')}${head('type', 'Type')}${head('size', 'Size', 'num')}<th>Permissions</th><th aria-label="Actions"></th></tr></thead>
+    <tbody>${items.map(({ e, i }) => `
+      <tr data-file-row="${i}" ${matchesFilter(e) ? '' : 'hidden'}>
+        <td><div class="fx-name">${entryIcon(e)}<span class="fx-label">${esc(e.name)}</span>
+          ${e.target ? `<span class="fx-target">→ ${esc(e.target)}</span>` : ''}${e.protected ? '<span class="badge">system</span>' : ''}</div></td>
+        <td>${when(e)}</td>
+        <td>${esc(entryType(e))}</td>
+        <td class="num">${e.size === null ? '<span class="muted">—</span>' : bytes(e.size)}
+          ${e.size ? `<div class="size-bar"><span style="width:${Math.max(2, Math.round((e.size / biggest) * 100))}%"></span></div>` : ''}</td>
+        <td class="fx-perm"><code>${esc(e.mode)}</code> ${esc(e.owner)}:${esc(e.group)}</td>
+        <td><button type="button" class="fx-more" data-fx-menu="${i}" aria-label="Actions for ${esc(e.name)}" title="More actions">${ui('more')}</button></td>
+      </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+/* selection, menus, keyboard */
+
+function updateFxSelection() {
+  $$('#files-table [data-file-row]').forEach((el) => el.classList.toggle('selected', Number(el.dataset.fileRow) === filesSelected));
+  const e = filesSelected !== null ? filesData?.entries[filesSelected] : null;
+  const out = $('#fx-selected');
+  if (out) out.textContent = e ? `1 item selected${e.size !== null ? ` · ${bytes(e.size)}` : ''}` : '';
+}
+
+function openFxEntry(i) {
+  const e = filesData.entries[i];
+  if (!e) return;
+  if (e.type === 'dir') loadFileBrowser(e.path);
+  else openFileEditor(e.path);
+}
+
+function closeFxMenu() {
+  const m = $('#fx-menu');
+  if (m) m.hidden = true;
+}
+
+/** The right-click menu: for one item, or for the folder itself. */
+function openFxMenu(i, x, y) {
+  const m = $('#fx-menu');
+  const fx = $('#fx');
+  if (!m || !fx) return;
+  const item = (attrs, icon, label, cls = '') => `<button type="button" class="fx-menu-item ${cls}" role="menuitem" ${attrs}>${ui(icon)}<span>${label}</span></button>`;
+  const sep = '<hr class="fx-menu-sep" />';
+  let html;
+  if (i === null) {
+    html = [
+      ifCan('create', item('data-files-act="new-folder"', 'newFolder', 'New folder')),
+      ifCan('create', item('data-files-act="new-file"', 'newFile', 'New file')),
+      ifCan('create', item('data-files-act="upload"', 'upload', 'Upload files')),
+      item(`data-files-go="${esc(filesPath)}"`, 'refresh', 'Refresh'),
+    ].join('');
+  } else {
+    const e = filesData.entries[i];
+    const pseudo = isPseudo(e);
+    html = [
+      e.type === 'dir' ? item(`data-files-go="${esc(e.path)}"`, 'open', '<b>Open</b>')
+        : item(`data-files-open="${i}"`, 'edit', `<b>${canDo('edit') && e.type === 'file' ? 'Edit' : 'Open'}</b>`),
+      e.type !== 'link' && !pseudo ? ifCan('edit', `<a class="fx-menu-item" role="menuitem" href="${downloadUrl(e.path)}" download>${ui('download')}<span>Download</span></a>`) : '',
+      e.archive ? ifCan('create', item(`data-files-act="extract" data-i="${i}"`, 'extract', 'Extract here')) : '',
+      sep,
+      e.protected ? '' : ifCan('edit', item(`data-files-act="move" data-i="${i}"`, 'rename', 'Rename / move')),
+      pseudo ? '' : ifCan('create', item(`data-files-act="copy" data-i="${i}"`, 'copy', 'Copy')),
+      pseudo ? '' : ifCan('edit', item(`data-files-act="perms" data-i="${i}"`, 'perms', 'Permissions')),
+      e.protected ? '' : ifCan('delete', `${sep}${item(`data-files-act="delete" data-i="${i}"`, 'trash', 'Delete', 'danger')}`),
+    ].join('').replace(new RegExp(`(${sep})+$`), '').replace(new RegExp(`(${sep}){2,}`, 'g'), sep);
+  }
+  m.innerHTML = html;
+  m.hidden = false;
+  // Keep the menu inside the explorer.
+  const box = fx.getBoundingClientRect();
+  const left = Math.min(x - box.left, box.width - m.offsetWidth - 8);
+  const top = Math.min(y - box.top, box.height - m.offsetHeight - 8);
+  m.style.left = `${Math.max(8, left)}px`;
+  m.style.top = `${Math.max(8, top)}px`;
+}
+
+function showPathInput(show) {
+  const form = $('#files-goto');
+  if (!form) return;
+  form.hidden = !show;
+  $('#fx-path .fx-crumbs').hidden = show;
+  if (show) { const input = form.querySelector('input'); input.focus(); input.select(); }
+}
+
+const coarsePointer = () => window.matchMedia && matchMedia('(pointer: coarse)').matches;
+
+$('#detail-body').addEventListener('click', (ev) => {
+  if (!ev.target.closest('#files-panel')) {
+    const drive = ev.target.closest('[data-drive-go]');
+    if (drive) {
+      loadFileBrowser(drive.dataset.driveGo);
+      $('#files-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    return;
+  }
+  const menuItem = ev.target.closest('.fx-menu-item');
+  if (menuItem) { setTimeout(closeFxMenu); return; }
+  if (!ev.target.closest('#fx-menu')) closeFxMenu();
+
+  const nav = ev.target.closest('[data-fx-nav]');
+  if (nav) {
+    if (nav.dataset.fxNav === 'up' && filesData?.parent !== null) return loadFileBrowser(filesData.parent);
+    if (nav.dataset.fxNav === 'back' && filesBack.length) { filesForward.push(filesPath); return loadFileBrowser(filesBack.pop(), { history: false }); }
+    if (nav.dataset.fxNav === 'forward' && filesForward.length) { filesBack.push(filesPath); return loadFileBrowser(filesForward.pop(), { history: false }); }
+    return;
+  }
+  const view = ev.target.closest('[data-fx-view]');
+  if (view) {
+    filesView = view.dataset.fxView;
+    try { localStorage.setItem('ad-files-view', filesView); } catch { /* storage blocked */ }
+    $$('[data-fx-view]').forEach((b) => b.classList.toggle('active', b === view));
+    $('#files-table').innerHTML = fileItemsHtml();
+    return updateFxSelection();
+  }
+  const sort = ev.target.closest('[data-fx-sort]');
+  if (sort) {
+    const key = sort.dataset.fxSort;
+    filesSort = { key, dir: filesSort.key === key ? -filesSort.dir : (key === 'name' || key === 'type' ? 1 : -1) };
+    $('#files-table').innerHTML = fileItemsHtml();
+    return updateFxSelection();
+  }
+  const more = ev.target.closest('[data-fx-menu]');
+  if (more) {
+    ev.stopPropagation();
+    filesSelected = Number(more.dataset.fxMenu);
+    updateFxSelection();
+    const r = more.getBoundingClientRect();
+    return openFxMenu(filesSelected, r.right - 200, r.bottom + 4);
+  }
+  // Clicking the address bar (not a crumb) turns it into a text box.
+  if (ev.target.closest('#fx-path') && !ev.target.closest('[data-files-go]') && !ev.target.closest('#files-goto')) return showPathInput(true);
+
+  const row = ev.target.closest('[data-file-row]');
+  if (row) {
+    filesSelected = Number(row.dataset.fileRow);
+    updateFxSelection();
+    // Touch has no double-click: one tap opens.
+    if (coarsePointer()) openFxEntry(filesSelected);
+    return;
+  }
+  if (ev.target.closest('#files-table')) { filesSelected = null; updateFxSelection(); }
+});
+
+$('#detail-body').addEventListener('dblclick', (ev) => {
+  const row = ev.target.closest('#files-panel [data-file-row]');
+  if (row) openFxEntry(Number(row.dataset.fileRow));
+});
+
+$('#detail-body').addEventListener('contextmenu', (ev) => {
+  if (!ev.target.closest('#files-table')) return;
+  ev.preventDefault();
+  const row = ev.target.closest('[data-file-row]');
+  filesSelected = row ? Number(row.dataset.fileRow) : null;
+  updateFxSelection();
+  openFxMenu(filesSelected, ev.clientX, ev.clientY);
+});
+
+$('#detail-body').addEventListener('keydown', (ev) => {
+  if (ev.target.closest('#files-goto') && ev.key === 'Escape') return showPathInput(false);
+  if (ev.target.id !== 'files-table' || !filesData) return;
+  if (ev.key === 'Escape') return closeFxMenu();
+  const visible = $$('#files-table [data-file-row]:not([hidden])').map((el) => Number(el.dataset.fileRow));
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp' || ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+    if (!visible.length) return;
+    ev.preventDefault();
+    const at = visible.indexOf(filesSelected);
+    const step = ev.key === 'ArrowDown' || ev.key === 'ArrowRight' ? 1 : -1;
+    filesSelected = visible[at === -1 ? 0 : Math.min(visible.length - 1, Math.max(0, at + step))];
+    updateFxSelection();
+    $(`#files-table [data-file-row="${filesSelected}"]`)?.scrollIntoView({ block: 'nearest' });
+  } else if (ev.key === 'Enter' && filesSelected !== null) {
+    openFxEntry(filesSelected);
+  } else if (ev.key === 'Backspace' && filesData.parent !== null) {
+    ev.preventDefault();
+    loadFileBrowser(filesData.parent);
+  } else if (ev.key === 'Delete' && filesSelected !== null && canDo('delete') && !filesData.entries[filesSelected].protected) {
+    fileAction('delete', filesData.entries[filesSelected]).catch((err) => toast(err.message, 'err'));
+  }
+});
+
+$('#detail-body').addEventListener('focusout', (ev) => {
+  if (ev.target.closest?.('#files-goto') && !ev.relatedTarget?.closest?.('#files-goto')) setTimeout(() => showPathInput(false), 120);
+});
+document.addEventListener('click', (ev) => { if (!ev.target.closest('#fx')) closeFxMenu(); });
 
 /* file editor */
 
@@ -1519,9 +1940,9 @@ $('#detail-body').addEventListener('submit', (ev) => {
 
 $('#detail-body').addEventListener('input', (ev) => {
   if (ev.target.id !== 'files-filter') return;
-  const q = ev.target.value.trim().toLowerCase();
-  $$('#files-table tbody tr[data-file-row]').forEach((tr) => {
-    tr.hidden = q && !filesData.entries[Number(tr.dataset.fileRow)].name.toLowerCase().includes(q);
+  filesFilter = ev.target.value.trim().toLowerCase();
+  $$('#files-table [data-file-row]').forEach((el) => {
+    el.hidden = !matchesFilter(filesData.entries[Number(el.dataset.fileRow)]);
   });
 });
 
@@ -1868,6 +2289,7 @@ function openServiceModal() {
   $('#service-server-name').textContent = currentServer ? currentServer.name : 'this server';
   serviceForm.user.placeholder = currentServer?.username || 'root';
   serviceModal.classList.remove('hidden');
+  prepareServiceEnvPicker();
 }
 
 $('#btn-add-service').addEventListener('click', openServiceModal);
@@ -1884,6 +2306,11 @@ serviceForm.addEventListener('submit', async (e) => {
   body.enable = serviceForm.enable.checked;
   body.start = serviceForm.start.checked;
   body.overwrite = serviceForm.overwrite.checked;
+  // The environment picker's own fields are not the service's.
+  for (const k of Object.keys(body)) if (k.startsWith('envpick_')) delete body[k];
+  const envPick = readEnvPicker($('#service-env-pick'));
+  const envProblem = envPickerProblem($('#service-env-pick'));
+  if (envProblem) return formMsg(msg, envProblem, 'err');
 
   busy(btn, true, 'Creating…');
   log.classList.add('hidden');
@@ -1892,6 +2319,14 @@ serviceForm.addEventListener('submit', async (e) => {
     const r = await api(`/servers/${currentServerId}/services`, { method: 'POST', body });
     serviceModal.classList.add('hidden');
     toast(`${r.unit} created — ${r.active}${r.enabled ? `, ${r.enabled}` : ''}`);
+    // Its variables kept as a named environment, when that was asked for.
+    if (envPick.environment_mode === 'new') {
+      api('/environments', {
+        method: 'POST',
+        body: { name: envPick.environment_name, description: `systemd service ${r.unit} on ${currentServer?.name || 'a server'}`, env: body.environment || '' },
+      }).then((env) => { envsCache = null; toast(`Environment "${env.name}" saved with ${env.count} variable(s)`); })
+        .catch((err) => toast(`The service was created, but the environment was not saved: ${err.message}`, 'err'));
+    }
     // Land on the tab that now shows what was just created, filtered to it.
     serviceFilter.text = '';
     serviceFilter.state = 'created';
@@ -6039,9 +6474,10 @@ function appCard(a) {
     <div class="card-head">
       <div>
         <h3><button class="file-name dir" data-app-action="details" data-id="${a.id}" data-name="${esc(a.name)}" title="All details and settings">🚀 ${esc(a.name)}</button></h3>
-        <div class="muted small"><code>${esc(a.repo)}</code>${a.root_dir ? ` › <code>${esc(a.root_dir)}</code>` : ''} · ${esc(a.branch)}</div>
+        <div class="muted small"><code>${esc(a.repo)}</code>${a.root_dir ? ` › <code>${esc(a.root_dir)}</code>` : ''} · ${esc(a.branch)}${a.deployedCommit ? ` · <code title="${esc(a.deployedCommit.message)}">${esc(a.deployedCommit.short)}</code>` : ''}</div>
       </div>
       <div class="head-badges">
+        ${a.autoDeploy?.enabled ? `<span class="badge ok" title="${a.autoDeploy.trigger === 'merge' ? 'Merged pull / merge requests' : 'Every push'} to ${esc(a.branch)} deploys it">⚡ auto</span>` : ''}
         <span class="badge type">${mark.icon} ${esc(mark.label)}</span>
         <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'in progress' : esc(a.status)}</span>
       </div>
@@ -6210,6 +6646,8 @@ function renderDeployLog(log) {
     const e = END_RE.exec(line);
     if (e && e[1] === 'failed') return `${at(e[3])}<span class="log-fail">✕ ${esc(e[2])}</span>`;
     if (e) return `${at(e[3])}<span class="log-done">✓ Deployed</span>`;
+    const c = /^::commit::([0-9a-f]{7,40})::(.*)$/.exec(line);
+    if (c) return `Commit <b>${esc(c[1].slice(0, 7))}</b>${c[2] ? ` — ${esc(c[2])}` : ''}`;
     return esc(line);
   }).join('\n');
 }
@@ -6486,8 +6924,9 @@ function renderAppDetails(a) {
     <button class="btn tiny" data-ad-refresh="1">Refresh</button>
     ${ifCan('delete', `<button class="btn tiny danger" data-app-action="delete" data-id="${a.id}" data-name="${n}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">Remove</button>`)}`;
 
-  const tabs = [['overview', 'Overview'], ['settings', 'Settings'], ['domains', `Domains (${(a.domains || []).length})`],
+  const tabs = [['overview', 'Overview'], ['settings', 'Settings'], ['auto', 'Auto deploy'], ['domains', `Domains (${(a.domains || []).length})`],
     ['containers', `Containers (${a.containers.length})`], ['env', 'Environment & volumes'], ['activity', 'Activity']];
+  const ad = a.autoDeploy || {};
   const when = (v) => (v ? esc(String(v).replace('T', ' ').slice(0, 16)) : '—');
 
   const panels = {
@@ -6498,6 +6937,7 @@ function renderAppDetails(a) {
         ${tile('Domains', `${live.length} / ${(a.domains || []).length}`, 'live')}
         ${tile('Image', a.image_bytes ? bytes(a.image_bytes) : '—', `${esc(a.image)}:${esc(a.tag)}`)}
         ${tile('Last deployed', a.last_deployed_at ? esc(agoWords(a.last_deployed_at)) : 'never', when(a.last_deployed_at))}
+        ${tile('Auto deploy', ad.enabled ? '⚡ On' : 'Off', ad.enabled ? `${ad.trigger === 'merge' ? 'merged requests' : 'every push'} to ${esc(a.branch)}` : 'deploys only when you click')}
       </div>
       ${a.last_error ? `<div class="msg err" style="margin-top:12px">${esc(a.last_error)}</div>` : ''}
       <div class="two-col" style="margin-top:14px">
@@ -6511,7 +6951,8 @@ function renderAppDetails(a) {
         ${kvCard('Source', [
     ['Repository', `<code class="small">${esc(a.repo)}</code>`],
     ['Folder', a.root_dir ? `<code class="small">${esc(a.root_dir)}</code>` : 'repository root'],
-    ['Branch', esc(a.branch)],
+    ['Branch', `${esc(a.branch)}${ad.enabled ? ' <span class="badge ok">⚡ auto deploy</span>' : ''}`],
+    ['Running commit', a.deployedCommit ? `<code class="small">${esc(a.deployedCommit.short)}</code> <span class="small">${esc(a.deployedCommit.message)}</span>` : '<span class="muted">not recorded yet — shown after the next deploy</span>'],
     ['Git account', esc(a.account?.name || '—')],
     ['Image', `<code class="small">${esc(a.image)}:${esc(a.tag)}</code>${a.pushed ? ' <span class="badge ok">pushed to Docker Hub</span>' : ''}`],
   ])}
@@ -6536,6 +6977,7 @@ function renderAppDetails(a) {
   ])}
       </div>
       ${ifCan('edit', `<p style="margin-top:12px">${btn('edit', 'Edit these settings', 'primary')}</p>`)}`,
+    auto: `<div id="ad-auto-panel" data-app="${a.id}">${autoSummaryHtml(a)}</div>`,
     domains: `
       ${(a.domains || []).length ? table(
     [{ label: 'Domain' }, { label: 'Status' }, { label: 'How' }, { label: 'Port', num: true }, { label: '' }],
@@ -6579,6 +7021,7 @@ function renderAppDetails(a) {
     return `<button class="tab ${k === detailsTab ? 'active' : ''}" data-ad-tab="${k}"><span>${esc(m[1])}</span><span class="tab-count">${m[2] ?? ''}</span></button>`;
   }).join('');
   $('#ad-body').innerHTML = tabs.map(([k]) => `<div class="tab-panel" data-ad-panel="${k}" ${k === detailsTab ? '' : 'hidden'}>${panels[k]}</div>`).join('');
+  if (detailsTab === 'auto') loadAutoPanel(a);
 
   // Keep it current while something is still happening.
   clearTimeout(renderAppDetails.timer);
@@ -6611,6 +7054,7 @@ $('#view-app-detail').addEventListener('click', (e) => {
     detailsTab = tab.dataset.adTab;
     $$('#ad-tabs [data-ad-tab]').forEach((b) => b.classList.toggle('active', b === tab));
     $$('#ad-body [data-ad-panel]').forEach((p) => { p.hidden = p.dataset.adPanel !== detailsTab; });
+    if (detailsTab === 'auto') loadAutoPanel({ id: detailsAppId });
     return;
   }
   if (e.target.closest('[data-ad-refresh]')) return openAppDetails(detailsAppId, detailsTab);
@@ -6862,9 +7306,13 @@ async function openAppEnv(id, name, reload) {
   $('#env-rows').innerHTML = '<div class="empty">Loading…</div>';
   $('#modal-app-env').classList.remove('hidden');
 
+  $('#app-env-source').value = '';
   try {
     const r = await api(`/apps/${id}/env`);
     drawEnvRows($('#env-rows'), r.env);
+    envApp.linkedId = r.environment?.id ?? null;
+    envApp.environmentId = envApp.linkedId;
+    prepareAppEnvSource(r.environment);
   } catch (err) {
     $('#env-rows').innerHTML = '';
     formMsg($('#app-env-msg'), err.message, 'err');
@@ -6901,8 +7349,14 @@ $('#form-app-env').addEventListener('submit', async (e) => {
   try {
     const r = await api(`/apps/${envApp.id}/env`, {
       method: 'PUT',
-      body: { env: readEnvRows($('#env-rows')), apply },
+      body: {
+        env: readEnvRows($('#env-rows')),
+        apply,
+        // Sent only when "Load from an environment" changed the link.
+        ...(envApp.environmentId !== envApp.linkedId ? { environment_id: envApp.environmentId } : {}),
+      },
     });
+    envsCache = null;
     $('#modal-app-env').classList.add('hidden');
     toast(r.applied
       ? `${envApp.name} restarted with the new environment`
@@ -7220,6 +7674,8 @@ $('#form-app-pick').addEventListener('submit', async (e) => {
     fillDeployStep(r, fd);
     msg.classList.add('hidden');
     appStep('deploy');
+    prepareAppEnvPicker();
+    prepareAutoDeployCard();
   } catch (err) {
     formMsg(msg, err.message, 'err');
   }
@@ -7536,7 +7992,13 @@ $('#form-app-deploy').addEventListener('submit', async (e) => {
     registry_cred_id: fd.get('registry_cred_id'),
     tag: fd.get('tag') || 'latest',
     ...domainBody(form),
+    ...readEnvPicker($('#app-env-pick')),
+    auto_deploy: $('#app-auto').checked,
+    auto_deploy_trigger: form.querySelector('input[name="auto_deploy_trigger"]:checked')?.value || 'push',
   };
+
+  const envProblem = envPickerProblem($('#app-env-pick'));
+  if (envProblem) return formMsg(msg, envProblem, 'err');
 
   busy(btn, true, 'Starting…');
   log.classList.add('hidden');
@@ -7547,6 +8009,7 @@ $('#form-app-deploy').addEventListener('submit', async (e) => {
     // there, so the popup closes and the card takes over from here.
     const r = await api('/apps', { method: 'POST', body });
     appModal.classList.add('hidden');
+    envsCache = null;
     toast(`${r.name} is building on ${r.server?.name}${r.domain ? `, then ${r.domain} is set up` : ''} — watch its card for progress`);
 
     // Started from the server's own page: stay there and open its Apps tab.
@@ -7737,6 +8200,7 @@ function applyInstallKind() {
   if (isHost) {
     $('#install-fields').innerHTML = '';
     $('#install-extra-ports').innerHTML = '';
+    $('#install-env-pick').classList.add('hidden');
     return;
   }
 
@@ -7755,6 +8219,8 @@ function applyInstallKind() {
           ${p.hint ? `<span class="muted small">${esc(p.hint)}</span>` : ''}
         </label>`).join('')}</div>`
     : '';
+
+  prepareInstallEnvPicker(entry);
 }
 
 // Switching service redraws the form and re-checks the chosen server for it.
@@ -7896,6 +8362,9 @@ installForm.addEventListener('submit', async (e) => {
     // The other published ports travel as settings too, so one object carries
     // everything this service was asked for.
     for (const p of entry.extraPorts || []) body.settings[p.name] = fd.get(`extra_${p.name}`) || '';
+    Object.assign(body, readEnvPicker($('#install-env-pick')));
+    const envProblem = !$('#install-env-pick').classList.contains('hidden') && envPickerProblem($('#install-env-pick'));
+    if (envProblem) return formMsg(msg, envProblem, 'err');
   }
 
   busy(btn, true, 'Installing…');
@@ -7907,6 +8376,7 @@ installForm.addEventListener('submit', async (e) => {
   try {
     const r = await api('/installs', { method: 'POST', body });
     installModal.classList.add('hidden');
+    envsCache = null;
     toast(entry.kind === 'host'
       ? `${entry.label} installed${r.version ? ` — ${r.version}` : ''}`
       : `${entry.label} is running as "${r.name}" on port ${r.port}${r.connection ? ` — added to Databases as "${r.connection.name}"` : ''}`);
@@ -12358,6 +12828,729 @@ async function leaveOrganisation() {
 }
 
 $('#btn-sa-leave').addEventListener('click', leaveOrganisation);
+
+/* =========================================================== environments */
+
+/*
+ * Named sets of variables, kept once and used by apps, one-click services and
+ * systemd services. The page lists them; the pickers in each create form let
+ * you use one or save the new variables as one.
+ */
+
+let envsCache = null;     // the organisation's environments, without values
+let envsCanSee = false;   // whether this role may see values
+let envsFilter = '';
+
+async function fetchEnvironments(force = false) {
+  if (!envsCache || force) {
+    const r = await api('/environments');
+    envsCache = r.environments;
+    envsCanSee = r.canSeeValues;
+  }
+  return envsCache;
+}
+
+/** Pairs back into .env text: values with spaces, quotes or # are quoted. */
+const envToText = (pairs) => pairs
+  .map(([k, v]) => `${k}=${v === '' || /[\s"'#]/.test(String(v)) ? JSON.stringify(String(v)) : v}`).join('\n');
+
+function downloadEnvFile(name, pairs) {
+  const blob = new Blob([`${envToText(pairs)}\n`], { type: 'text/plain' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${name}.env` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/* ------------------------------------------------------- the list page */
+
+async function loadEnvironments() {
+  const box = $('#envs-list');
+  if (!envsCache) box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading environments…</div>';
+  try {
+    await fetchEnvironments(true);
+    renderEnvironments();
+  } catch (err) {
+    box.innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+function envUsageHtml(u) {
+  const items = [
+    ...(u?.apps || []).map((a) => `<span class="chip" title="App on ${esc(a.server || '')}">🚀 ${esc(a.name)}</span>`),
+    ...(u?.installs || []).map((i) => `<span class="chip" title="${esc(i.kind)} on ${esc(i.server || '')}">📦 ${esc(i.name)}</span>`),
+  ];
+  return items.length ? `<div class="chips">${items.join('')}</div>` : '<span class="muted small">Not used yet</span>';
+}
+
+function renderEnvironments() {
+  const list = envsCache || [];
+  const used = list.filter((e) => e.usage.apps.length || e.usage.installs.length);
+  const apps = list.reduce((n, e) => n + e.usage.apps.length, 0);
+  const installs = list.reduce((n, e) => n + e.usage.installs.length, 0);
+  $('#envs-stats').innerHTML = `
+    ${tile('Environments', list.length, 'named sets of variables')}
+    ${tile('Variables', list.reduce((n, e) => n + e.count, 0), 'across all of them')}
+    ${tile('In use', used.length, `${plural(apps, 'app')} · ${plural(installs, 'service')}`)}
+    ${tile('Not used yet', list.length - used.length, 'ready for the next app')}`;
+
+  const box = $('#envs-list');
+  if (!list.length) {
+    box.innerHTML = `<div class="card env-empty">
+      <div class="env-empty-icon">🧩</div>
+      <h3>No environments yet</h3>
+      <p class="muted">Create one here, import a <code>.env</code> file — or one is made for you when you create an app or install a service and give it a name.</p>
+      ${ifCan('create', '<div class="actions" style="justify-content:center"><button class="btn" data-env-page="import">Import .env file</button><button class="btn primary" data-env-page="new">+ New environment</button></div>')}
+    </div>`;
+    return;
+  }
+
+  const q = envsFilter;
+  const shown = list.filter((e) => !q || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q)
+    || e.keys.some((k) => k.toLowerCase().includes(q)));
+  box.innerHTML = table(
+    [{ label: 'Environment' }, { label: 'Variables' }, { label: 'Used by' }, { label: 'Updated' }, { label: '' }],
+    shown.map((e) => [
+      `<button class="link-btn" data-env-act="view" data-id="${e.id}"><b>${esc(e.name)}</b></button>
+        ${e.description ? `<div class="muted small clamp-1">${esc(e.description)}</div>` : ''}`,
+      `<b>${e.count}</b> <span class="muted small">${e.count === 1 ? 'variable' : 'variables'}</span>
+        ${e.keys.length ? `<div class="env-keys">${e.keys.slice(0, 4).map((k) => `<code>${esc(k)}</code>`).join('')}${e.keys.length > 4 ? `<span class="muted small">+${e.keys.length - 4} more</span>` : ''}</div>` : ''}`,
+      envUsageHtml(e.usage),
+      `<span class="nowrap">${esc(agoWords(e.updatedAt))}</span>${e.createdBy ? `<div class="muted small nowrap">by ${esc(e.createdBy)}</div>` : ''}`,
+      `<div class="row-actions">
+        <button class="btn tiny" data-env-act="view" data-id="${e.id}">View</button>
+        ${ifCan('edit', `<button class="btn tiny" data-env-act="edit" data-id="${e.id}">Edit</button>`)}
+        ${ifCan('edit', `<button class="btn tiny" data-env-act="download" data-id="${e.id}">Download .env</button>`)}
+        ${ifCan('create', `<button class="btn tiny" data-env-act="duplicate" data-id="${e.id}">Duplicate</button>`)}
+        ${ifCan('delete', `<button class="btn tiny danger" data-env-act="delete" data-id="${e.id}">Delete</button>`)}
+      </div>`,
+    ]),
+    'No environment matches this search'
+  );
+}
+
+$('#btn-envs-refresh').addEventListener('click', loadEnvironments);
+$('#btn-envs-new').addEventListener('click', () => openEnvironmentEditor());
+$('#btn-envs-import').addEventListener('click', () => $('#envs-import-file').click());
+$('#envs-search').addEventListener('input', (e) => { envsFilter = e.target.value.trim().toLowerCase(); renderEnvironments(); });
+
+// A file imported from the page starts a new environment named after it.
+readTextFile($('#envs-import-file'), (text, file) => {
+  const base = file.name.replace(/\.(env|txt)$/i, '').replace(/^\.env\.?/i, '').replace(/[^A-Za-z0-9 ._-]/g, '-') || 'imported';
+  openEnvironmentEditor(null, { name: base, pairs: parseEnvLines(text), note: `${file.name} imported — ${plural(parseEnvLines(text).length, 'variable')}. Check the name, then save.` });
+});
+
+$('#view-environments').addEventListener('click', async (e) => {
+  const page = e.target.closest('[data-env-page]');
+  if (page) return page.dataset.envPage === 'new' ? openEnvironmentEditor() : $('#envs-import-file').click();
+  const btn = e.target.closest('[data-env-act]');
+  if (!btn) return;
+  const env = (envsCache || []).find((x) => String(x.id) === btn.dataset.id);
+  if (!env) return;
+  const act = btn.dataset.envAct;
+  try {
+    if (act === 'view') return openEnvironmentView(env.id);
+    if (act === 'edit') return openEnvironmentEditor(env.id);
+    if (act === 'download') {
+      const full = await api(`/environments/${env.id}`);
+      return downloadEnvFile(full.name, full.env || []);
+    }
+    if (act === 'duplicate') {
+      return openMyDialog({
+        title: `Duplicate ${env.name}`,
+        intro: `A new environment with the same ${plural(env.count, 'variable')} — handy for a staging copy of production.`,
+        fields: `<label>Name of the copy<input name="name" value="${esc(`${env.name}-copy`)}" required maxlength="120" autocomplete="off" /></label>`,
+        submitLabel: 'Duplicate',
+        async submit(fd) {
+          const r = await api(`/environments/${env.id}/duplicate`, { method: 'POST', body: { name: fd.get('name') } });
+          return `Created ${r.name}`;
+        },
+        after: loadEnvironments,
+      });
+    }
+    if (act === 'delete') {
+      const users = env.usage.apps.length + env.usage.installs.length;
+      return openMyDialog({
+        title: `Delete ${env.name}?`,
+        intro: `<div class="msg err">The environment and its ${plural(env.count, 'variable')} are deleted for good.</div>
+          ${users ? `<p class="small" style="margin:10px 0 0">It is used by ${plural(users, 'app or service', 'apps and services')}. They keep the variables they already have — only the link to this environment goes.</p>` : ''}`,
+        fields: `<label>Type <code>${esc(env.name)}</code> to confirm<input name="confirm" required autocomplete="off" /></label>`,
+        submitLabel: 'Delete',
+        danger: true,
+        async submit(fd) {
+          if (fd.get('confirm') !== env.name) throw new Error('The name does not match');
+          await api(`/environments/${env.id}`, { method: 'DELETE' });
+          return `Deleted ${env.name}`;
+        },
+        after: loadEnvironments,
+      });
+    }
+  } catch (err) { toast(err.message, 'err'); }
+});
+
+/* ------------------------------------------------------------- editor */
+
+const envEditor = { id: null, mode: 'rows' };
+const envRowsBox = () => $('#environment-rows');
+
+function envEditorPairs() {
+  return envEditor.mode === 'text' ? parseEnvLines($('#environment-text').value) : readEnvRows(envRowsBox());
+}
+
+function setEnvEditorMode(mode) {
+  if (mode === envEditor.mode) return;
+  if (mode === 'text') $('#environment-text').value = envToText(readEnvRows(envRowsBox()));
+  else drawEnvRows(envRowsBox(), parseEnvLines($('#environment-text').value));
+  envEditor.mode = mode;
+  envRowsBox().classList.toggle('hidden', mode === 'text');
+  $('#environment-text').classList.toggle('hidden', mode !== 'text');
+  $('#btn-environment-add').classList.toggle('hidden', mode === 'text');
+  $$('[data-env-editor]').forEach((b) => b.classList.toggle('active', b.dataset.envEditor === mode));
+  updateEnvCount();
+}
+
+function updateEnvCount() {
+  const n = envEditorPairs().length;
+  $('#environment-count').textContent = `· ${n}`;
+}
+
+async function openEnvironmentEditor(id = null, preset = null) {
+  const form = $('#form-environment');
+  form.reset();
+  envEditor.id = id;
+  envEditor.mode = 'rows';
+  envRowsBox().classList.remove('hidden');
+  $('#environment-text').classList.add('hidden');
+  $('#btn-environment-add').classList.remove('hidden');
+  $$('[data-env-editor]').forEach((b) => b.classList.toggle('active', b.dataset.envEditor === 'rows'));
+  $('#environment-msg').classList.add('hidden');
+  $('#environment-sync-wrap').classList.add('hidden');
+  $('#environment-title').textContent = id ? 'Edit environment' : 'New environment';
+  $('#environment-sub').textContent = id ? 'Loading…' : 'A named set of variables you can use for any app or service.';
+  drawEnvRows(envRowsBox(), preset?.pairs || []);
+  $('#environment-name').value = preset?.name || '';
+  updateEnvCount();
+  $('#modal-environment').classList.remove('hidden');
+  if (preset?.note) formMsg($('#environment-msg'), preset.note, 'info');
+  if (!id) return $('#environment-name').focus();
+
+  try {
+    const r = await api(`/environments/${id}`);
+    $('#environment-name').value = r.name;
+    $('#environment-desc').value = r.description || '';
+    drawEnvRows(envRowsBox(), r.env || []);
+    updateEnvCount();
+    $('#environment-sub').textContent = `${plural(r.count, 'variable')} · updated ${agoWords(r.updatedAt)}${r.createdBy ? ` · created by ${r.createdBy}` : ''}`;
+    const apps = r.usage?.apps || [];
+    if (apps.length) {
+      $('#environment-sync-label').textContent = `Also copy these variables to the ${plural(apps.length, 'app')} using it (${apps.map((a) => a.name).join(', ')}). Variables only an app has are kept; changes apply at its next deploy or restart.`;
+      $('#environment-sync-wrap').classList.remove('hidden');
+    }
+  } catch (err) {
+    formMsg($('#environment-msg'), err.message, 'err');
+  }
+}
+
+$$('[data-env-editor]').forEach((b) => b.addEventListener('click', () => setEnvEditorMode(b.dataset.envEditor)));
+$('#environment-text').addEventListener('input', updateEnvCount);
+envRowsBox().addEventListener('input', updateEnvCount);
+$('#btn-environment-add').addEventListener('click', () => {
+  drawEnvRows(envRowsBox(), [...readEnvRows(envRowsBox()), ['', '']]);
+  $$('[data-env-key]', envRowsBox()).pop()?.focus();
+  updateEnvCount();
+});
+envRowsBox().addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-remove-row]');
+  if (!btn) return;
+  const index = $$('.item-row', envRowsBox()).indexOf(btn.closest('.item-row'));
+  drawEnvRows(envRowsBox(), readEnvRows(envRowsBox()).filter((_, i) => i !== index));
+  updateEnvCount();
+});
+$('#btn-environment-import').addEventListener('click', () => $('#environment-file').click());
+readTextFile($('#environment-file'), (text, file) => {
+  // A key the file also has is replaced; everything else is kept.
+  const merged = new Map(envEditorPairs());
+  const incoming = parseEnvLines(text);
+  for (const [k, v] of incoming) merged.set(k, v);
+  if (envEditor.mode === 'text') setEnvEditorMode('rows');
+  drawEnvRows(envRowsBox(), [...merged]);
+  updateEnvCount();
+  if (!$('#environment-name').value.trim()) $('#environment-name').value = file.name.replace(/\.(env|txt)$/i, '').replace(/^\.env\.?/i, '') || '';
+  formMsg($('#environment-msg'), `${file.name} imported — ${plural(incoming.length, 'variable')}. Review them, then save.`, 'info');
+});
+
+$('#form-environment').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('#btn-environment-save');
+  const body = {
+    name: $('#environment-name').value.trim(),
+    description: $('#environment-desc').value.trim(),
+    // The text editor is sent as written, so the server reads quotes and comments exactly.
+    env: envEditor.mode === 'text' ? $('#environment-text').value : readEnvRows(envRowsBox()),
+    sync_apps: !$('#environment-sync-wrap').classList.contains('hidden') && $('#environment-sync').checked,
+  };
+  busy(btn, true, 'Saving…');
+  try {
+    const r = envEditor.id
+      ? await api(`/environments/${envEditor.id}`, { method: 'PUT', body })
+      : await api('/environments', { method: 'POST', body });
+    $('#modal-environment').classList.add('hidden');
+    toast(`${r.name} saved — ${plural(r.count, 'variable')}${r.synced ? `, copied to ${plural(r.synced, 'app')}` : ''}`);
+    envsCache = null;
+    if (!$('#view-environments').classList.contains('hidden')) loadEnvironments();
+  } catch (err) {
+    formMsg($('#environment-msg'), err.message, 'err');
+  }
+  busy(btn, false);
+});
+
+/* ----------------------------------------------------------- view only */
+
+const envView = { data: null, reveal: false };
+
+function renderEnvironmentView() {
+  const r = envView.data;
+  const hasValues = Array.isArray(r.env);
+  const rows = hasValues ? r.env : r.keys.map((k) => [k, null]);
+  $('#btn-envview-reveal').hidden = !hasValues || !rows.length;
+  $('#btn-envview-reveal').textContent = envView.reveal ? 'Hide values' : 'Show values';
+  $('#btn-envview-download').hidden = !hasValues;
+  $('#envview-body').innerHTML = `
+    ${hasValues ? '' : '<div class="msg info" style="margin-bottom:12px">Your role can see which variables this environment has, but not their values.</div>'}
+    ${rows.length ? `<div class="card env-view-table" style="padding:0"><table>
+      <thead><tr><th>Variable</th><th>Value</th>${hasValues ? '<th></th>' : ''}</tr></thead>
+      <tbody>${rows.map(([k, v], i) => `<tr>
+        <td><code>${esc(k)}</code></td>
+        <td class="env-value">${v === null ? '<span class="muted">hidden</span>'
+    : envView.reveal ? `<code>${esc(v) || '<span class="muted">(empty)</span>'}</code>` : `<span class="env-mask">${'•'.repeat(Math.min(12, Math.max(6, String(v).length)))}</span>`}</td>
+        ${hasValues ? `<td style="width:1%"><button type="button" class="btn tiny" data-env-copy="${i}">Copy</button></td>` : ''}
+      </tr>`).join('')}</tbody></table></div>` : '<div class="empty">This environment has no variables yet.</div>'}
+    <div class="section" style="margin:18px 0 0"><div class="section-head"><h2>Used by</h2></div>${envUsageHtml(r.usage)}</div>`;
+}
+
+async function openEnvironmentView(id) {
+  envView.reveal = false;
+  $('#envview-title').textContent = 'Loading…';
+  $('#envview-sub').textContent = '';
+  $('#envview-body').innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+  $('#modal-environment-view').classList.remove('hidden');
+  try {
+    const r = await api(`/environments/${id}`);
+    envView.data = r;
+    $('#envview-title').textContent = r.name;
+    $('#envview-sub').textContent = [r.description, plural(r.count, 'variable'), `updated ${agoWords(r.updatedAt)}`, r.createdBy ? `by ${r.createdBy}` : ''].filter(Boolean).join(' · ');
+    renderEnvironmentView();
+  } catch (err) {
+    $('#envview-body').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+$('#btn-envview-reveal').addEventListener('click', () => { envView.reveal = !envView.reveal; renderEnvironmentView(); });
+$('#btn-envview-download').addEventListener('click', () => downloadEnvFile(envView.data.name, envView.data.env || []));
+$('#btn-envview-edit').addEventListener('click', () => {
+  $('#modal-environment-view').classList.add('hidden');
+  openEnvironmentEditor(envView.data.id);
+});
+$('#envview-body').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-env-copy]');
+  if (!btn) return;
+  const [k, v] = envView.data.env[Number(btn.dataset.envCopy)];
+  try {
+    await navigator.clipboard.writeText(String(v));
+    toast(`${k} copied`);
+  } catch { toast('The browser did not allow copying', 'err'); }
+});
+
+/* ----------------------------------------- the picker in the create forms */
+
+const envPickHandlers = {};
+
+/**
+ * Get a picker ready: "create a new one" (named after what is being created),
+ * "use an existing one" or "none". `onPick` fills the form from a chosen one.
+ */
+async function prepareEnvPicker(box, { name = '', onPick } = {}) {
+  if (!box) return;
+  const group = `envpick_${box.dataset.envPick}`;
+  const noun = box.dataset.noun || 'app';
+  if (onPick) envPickHandlers[box.id] = onPick;
+  if (!box.dataset.ready) {
+    box.innerHTML = `
+      <div class="env-pick-title">Environment <span class="muted small">— keep these variables under a name to reuse them</span></div>
+      <div class="env-pick-modes">
+        <label class="env-mode"><input type="radio" name="${group}" value="new" checked />
+          <span><b>Create a new environment</b><small>Saved under the name below</small></span></label>
+        <label class="env-mode" data-env-existing><input type="radio" name="${group}" value="existing" />
+          <span><b>Use an existing one</b><small data-env-existing-note>Fill the variables from it</small></span></label>
+        <label class="env-mode"><input type="radio" name="${group}" value="none" />
+          <span><b>None</b><small>Only for this ${esc(noun)}</small></span></label>
+      </div>
+      <label class="env-pick-new">Environment name
+        <input data-env-name maxlength="120" autocomplete="off" placeholder="e.g. shop-production" /></label>
+      <label class="env-pick-existing hidden">Environment
+        <select data-env-select></select></label>
+      <div class="muted small env-pick-note" data-env-note></div>`;
+    box.addEventListener('change', async (e) => {
+      if (e.target.matches('input[type=radio]')) return updateEnvPicker(box);
+      if (e.target.matches('[data-env-select]')) {
+        const note = $('[data-env-note]', box);
+        if (!e.target.value) { note.textContent = ''; return; }
+        note.textContent = 'Loading its variables…';
+        try {
+          const r = await api(`/environments/${e.target.value}`);
+          const filled = envPickHandlers[box.id]?.(r);
+          note.textContent = Array.isArray(r.env)
+            ? `${r.name}: ${plural(r.count, 'variable')}${typeof filled === 'number' ? ` — ${plural(filled, 'field')} filled in` : ' loaded into the form'}.`
+            : `${r.name} will be linked. Your role cannot see its values.`;
+        } catch (err) { note.textContent = err.message; }
+      }
+    });
+    $('[data-env-name]', box).addEventListener('input', (e) => { e.target.dataset.touched = '1'; });
+    box.dataset.ready = '1';
+  }
+
+  const nameInput = $('[data-env-name]', box);
+  delete nameInput.dataset.touched;
+  nameInput.value = name;
+  $(`input[value="new"]`, box).checked = true;
+  $('[data-env-note]', box).textContent = '';
+
+  let list = [];
+  try { list = await fetchEnvironments(true); } catch { /* the picker still offers "new" and "none" */ }
+  $('[data-env-select]', box).innerHTML = `<option value="">Choose an environment…</option>${list
+    .map((x) => `<option value="${x.id}">${esc(x.name)} — ${plural(x.count, 'variable')}</option>`).join('')}`;
+  const existing = $('input[value="existing"]', box);
+  existing.disabled = !list.length;
+  $('[data-env-existing]', box).classList.toggle('disabled', !list.length);
+  $('[data-env-existing-note]', box).textContent = list.length ? 'Fill the variables from it' : 'None yet in this organisation';
+  updateEnvPicker(box);
+}
+
+function updateEnvPicker(box) {
+  const mode = $('input[type=radio]:checked', box)?.value || 'none';
+  $('.env-pick-new', box).classList.toggle('hidden', mode !== 'new');
+  $('.env-pick-existing', box).classList.toggle('hidden', mode !== 'existing');
+  $$('.env-mode', box).forEach((l) => l.classList.toggle('active', $('input', l).checked));
+  $('[data-env-name]', box).required = mode === 'new';
+  $('[data-env-select]', box).required = mode === 'existing';
+  if (mode !== 'existing') $('[data-env-note]', box).textContent = '';
+}
+
+/** Keep the suggested name in step with the app or service name, until it is typed over. */
+function setEnvPickerName(box, name) {
+  const input = box && $('[data-env-name]', box);
+  if (input && !input.dataset.touched) input.value = name;
+}
+
+/** What the create request carries: `environment_mode` plus an id or a name. */
+function readEnvPicker(box) {
+  if (!box || box.classList.contains('hidden') || !box.dataset.ready) return {};
+  const mode = $('input[type=radio]:checked', box)?.value || 'none';
+  return {
+    environment_mode: mode,
+    environment_id: mode === 'existing' ? $('[data-env-select]', box).value : undefined,
+    environment_name: mode === 'new' ? $('[data-env-name]', box).value.trim() : undefined,
+  };
+}
+
+/** Caught in the browser first, so nothing is created under a name that is already taken. */
+function envPickerProblem(box) {
+  const pick = readEnvPicker(box);
+  if (pick.environment_mode === 'new') {
+    if (!pick.environment_name) return 'Give the new environment a name, or choose "None"';
+    if ((envsCache || []).some((x) => x.name.toLowerCase() === pick.environment_name.toLowerCase())) {
+      return `There is already an environment called "${pick.environment_name}" — pick it under "Use an existing one", or choose another name`;
+    }
+  }
+  if (pick.environment_mode === 'existing' && !pick.environment_id) return 'Pick the environment to use, or choose "None"';
+  return null;
+}
+
+/* the custom service (app) wizard */
+$('#app-name').addEventListener('input', (e) => setEnvPickerName($('#app-env-pick'), e.target.value.trim()));
+
+function prepareAppEnvPicker() {
+  return prepareEnvPicker($('#app-env-pick'), {
+    name: $('#app-name').value.trim(),
+    onPick(r) {
+      if (!Array.isArray(r.env)) return undefined;
+      $('#app-env').value = envToText(r.env.filter(([k]) => !['PORT', 'INSTANCE'].includes(k)));
+      $('#app-env-note').textContent = `Filled from the ${r.name} environment — edit anything here before you deploy.`;
+      return undefined;
+    },
+  });
+}
+
+/* one-click installs: fields that are environment variables fill from the environment */
+$('#install-name').addEventListener('input', (e) => setEnvPickerName($('#install-env-pick'), e.target.value.trim()));
+
+function prepareInstallEnvPicker(entry) {
+  const box = $('#install-env-pick');
+  const envFields = (entry?.fields || []).filter((f) => f.env);
+  box.classList.toggle('hidden', !envFields.length || entry.kind === 'host');
+  if (box.classList.contains('hidden')) return;
+  prepareEnvPicker(box, {
+    name: $('#install-name').value.trim() || entry.key,
+    onPick(r) {
+      if (!Array.isArray(r.env)) return 0;
+      const values = new Map(r.env);
+      let filled = 0;
+      for (const f of envFields) {
+        const input = installForm.querySelector(`[name="field_${f.name}"]`);
+        if (input && values.has(f.env)) { input.value = values.get(f.env); filled += 1; }
+      }
+      return filled;
+    },
+  });
+}
+
+/* systemd services: the Environment box fills from the environment */
+serviceForm.unit.addEventListener('input', (e) => setEnvPickerName($('#service-env-pick'), e.target.value.trim()));
+
+function prepareServiceEnvPicker() {
+  return prepareEnvPicker($('#service-env-pick'), {
+    name: '',
+    onPick(r) {
+      if (!Array.isArray(r.env)) return undefined;
+      serviceForm.environment.value = envToText(r.env);
+      return undefined;
+    },
+  });
+}
+
+/* the app's own Environment window: load from an environment */
+async function prepareAppEnvSource(linked) {
+  const select = $('#app-env-source');
+  $('#app-env-link').innerHTML = linked ? `Linked to <b>${esc(linked.name)}</b>` : 'Not linked to an environment';
+  try {
+    const list = await fetchEnvironments(true);
+    select.innerHTML = `<option value="">— keep what is here —</option>${list
+      .map((x) => `<option value="${x.id}">${esc(x.name)} — ${plural(x.count, 'variable')}</option>`).join('')}`;
+    select.disabled = !list.length;
+  } catch {
+    select.disabled = true;
+  }
+}
+
+$('#app-env-source').addEventListener('change', async (e) => {
+  const id = e.target.value;
+  if (!id || !envApp) return;
+  try {
+    const r = await api(`/environments/${id}`);
+    if (!Array.isArray(r.env)) return formMsg($('#app-env-msg'), 'Your role cannot see this environment\'s values.', 'err');
+    // Its keys replace the same keys here; anything only this app has is kept.
+    const merged = new Map(readEnvRows($('#env-rows')));
+    for (const [k, v] of r.env) if (!['PORT', 'INSTANCE'].includes(k)) merged.set(k, v);
+    drawEnvRows($('#env-rows'), [...merged]);
+    envApp.environmentId = r.id;
+    $('#app-env-link').innerHTML = `Will be linked to <b>${esc(r.name)}</b> when you save`;
+    formMsg($('#app-env-msg'), `${plural(r.count, 'variable')} loaded from ${r.name} — review them, then save.`, 'info');
+  } catch (err) {
+    formMsg($('#app-env-msg'), err.message, 'err');
+  }
+});
+
+/* =========================================================== auto deploy */
+
+/*
+ * An app can redeploy by itself when its branch changes: on every push, or
+ * only when a pull / merge request is merged into it. The wizard offers it when
+ * the app is created; the app's "Auto deploy" tab turns it on or off later,
+ * shows what is running against what is on the branch, and sets up the webhook.
+ */
+
+const AUTO_TRIGGER = { push: 'Every push or commit', merge: 'Only merged pull / merge requests' };
+
+/** Could GitHub reach this panel at the address it is open on? */
+function panelLooksPublic(url = location.origin) {
+  try {
+    const { hostname } = new URL(url);
+    if (hostname === 'localhost' || !hostname.includes('.') || /\.(local|internal)$/.test(hostname)) return false;
+    return !/^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(hostname) && !/^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+  } catch { return false; }
+}
+
+/** What anyone can see, before (or instead of) the full settings. */
+function autoSummaryHtml(a) {
+  const ad = a.autoDeploy || {};
+  return `<div class="card auto-panel">
+    <div class="auto-head">
+      <div><h3>Auto deploy ${ad.enabled ? '<span class="badge ok">⚡ on</span>' : '<span class="badge">off</span>'}</h3>
+        <p class="muted small">${ad.enabled
+    ? `${esc(AUTO_TRIGGER[ad.trigger] || AUTO_TRIGGER.push)} to <b>${esc(a.branch)}</b> rebuilds and restarts ${esc(a.name)}.`
+    : `${esc(a.name)} deploys only when someone clicks Redeploy.`}</p></div>
+    </div>
+    ${canDo('edit') ? '<div class="empty"><span class="spinner"></span>Reading the branch…</div>' : ''}
+  </div>`;
+}
+
+const autoCache = new Map();   // app id → { at, data }, so a refresh every few seconds does not ask GitHub every time
+
+async function loadAutoPanel(a, { fresh = false } = {}) {
+  const box = $('#ad-auto-panel');
+  if (!box || !canDo('edit')) return;
+  const cached = autoCache.get(String(a.id));
+  if (cached && !fresh && Date.now() - cached.at < 30000) return renderAutoPanel(box, a.id, cached.data);
+  try {
+    const data = await api(`/apps/${a.id}/auto-deploy`);
+    autoCache.set(String(a.id), { at: Date.now(), data });
+    if (String(box.dataset.app) === String(a.id) && document.body.contains(box)) renderAutoPanel(box, a.id, data);
+  } catch (err) {
+    box.innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+function copyRow(label, value) {
+  return `<div class="copy-row"><span class="muted small">${esc(label)}</span><code>${esc(value)}</code>
+    <button type="button" class="btn tiny" data-copy="${esc(value)}">Copy</button></div>`;
+}
+
+function renderAutoPanel(box, id, d) {
+  const head = d.head && !d.head.error ? d.head : null;
+  const upToDate = head && d.deployed && head.sha === d.deployed.sha;
+  const provider = d.provider?.label || 'your git host';
+  const hookEvents = { github: 'Just the push event, plus Pull requests', gitlab: 'Push events and Merge request events', bitbucket: 'Repository push and Pull request fulfilled' }[d.provider?.kind] || 'push and merged requests';
+
+  const how = d.webhookRegistered
+    ? `<div class="auto-how ok">✓ <b>Webhook on ${esc(provider)}</b> — a push to <b>${esc(d.branch)}</b> starts a deploy within seconds. The branch is also checked every minute, in case a delivery is missed.</div>`
+    : d.publicUrl
+      ? `<div class="auto-how warn"><b>No webhook yet.</b> The branch is checked every minute, so a change goes live within about a minute. Add the webhook to deploy within seconds.
+          ${canDo('edit') && d.enabled ? '<div style="margin-top:8px"><button type="button" class="btn tiny primary" data-auto="hook">Add the webhook on ' + esc(provider) + '</button></div>' : ''}</div>`
+      : `<div class="auto-how info"><b>Checked every minute.</b> This panel is open at <code>${esc(d.panelUrl)}</code>, which ${esc(provider)} cannot reach from the internet — so instead of a webhook the panel reads the branch every minute, and a change goes live within about a minute. Open the panel on a public address (set <code>SITE_URL</code>) to deploy within seconds.</div>`;
+
+  box.innerHTML = `
+    <div class="card auto-panel">
+      <form id="form-auto" class="auto-form">
+        <div class="auto-head">
+          <div>
+            <h3>Auto deploy ${d.enabled ? '<span class="badge ok">⚡ on</span>' : '<span class="badge">off</span>'}</h3>
+            <p class="muted small">Watches <b>${esc(d.branch)}</b> on <code>${esc(d.repo)}</code>. To watch another branch (main, master, dev…) change it under <b>Edit settings</b>.</p>
+          </div>
+          <label class="switch"><input type="checkbox" name="enabled" ${d.enabled ? 'checked' : ''} /><span></span><b>${d.enabled ? 'On' : 'Off'}</b></label>
+        </div>
+        <div class="auto-triggers">
+          ${['push', 'merge'].map((t) => `<label class="env-mode ${d.trigger === t ? 'active' : ''}"><input type="radio" name="trigger" value="${t}" ${d.trigger === t ? 'checked' : ''} />
+            <span><b>${AUTO_TRIGGER[t]}</b><small>${t === 'push'
+    ? `Any new commit on ${esc(d.branch)} — direct pushes and merges alike`
+    : `Only a pull / merge request merged into ${esc(d.branch)}, e.g. dev → ${esc(d.branch)}. Direct pushes are left alone.`}</small></span></label>`).join('')}
+        </div>
+        <div class="actions" style="margin-top:12px">
+          <button type="submit" class="btn primary" id="btn-auto-save">Save</button>
+          ${d.enabled ? '<button type="button" class="btn" data-auto="check">Check now</button>' : ''}
+        </div>
+      </form>
+    </div>
+
+    <div class="two-col" style="margin-top:14px">
+      ${kvCard('Branch and running version', [
+    ['On the branch', head ? `<code class="small">${esc(head.sha.slice(0, 7))}</code> <span class="small">${esc(head.message || '')}</span>${head.author ? `<div class="muted small">${esc(head.author)}${head.date ? ` · ${esc(agoWords(head.date))}` : ''}</div>` : ''}`
+      : `<span class="small" style="color:var(--err)">${esc(d.head?.error || 'could not be read')}</span>`],
+    ['Running now', d.deployed ? `<code class="small">${esc(d.deployed.sha.slice(0, 7))}</code> <span class="small">${esc(d.deployed.message || '')}</span>` : '<span class="muted small">not recorded yet — shown after the next deploy</span>'],
+    ['State', !head ? '—' : !d.deployed ? '<span class="badge">unknown</span>' : upToDate ? '<span class="badge ok">up to date</span>'
+      : `<span class="badge warn">a newer commit is on ${esc(d.branch)}</span>${d.enabled ? '<div class="muted small">It deploys at the next check.</div>' : ''}`],
+    ['Last checked', d.checkedAt ? esc(agoWords(d.checkedAt)) : '<span class="muted">not yet</span>'],
+  ])}
+      <div class="card">
+        <h3>How changes reach the panel</h3>
+        ${d.enabled ? how : '<p class="muted small" style="margin:0">Turn auto deploy on to choose.</p>'}
+        ${d.error ? `<div class="msg err" style="margin-top:10px">${esc(d.error)}</div>` : ''}
+      </div>
+    </div>
+
+    ${d.enabled && d.webhookUrl ? `<details class="fx-details" style="margin-top:14px">
+      <summary>Set the webhook up by hand <span class="muted small">— if the automatic one cannot be added</span></summary>
+      <div class="section">
+        <p class="small" style="margin:0 0 10px">In ${esc(provider)}, open <b>${esc(d.repo)}</b> → Settings → Webhooks → Add webhook, and fill in:</p>
+        ${copyRow('Payload URL', d.webhookUrl)}
+        ${copyRow('Secret / token', d.webhookSecret)}
+        <div class="copy-row"><span class="muted small">Content type</span><code>application/json</code></div>
+        <div class="copy-row"><span class="muted small">Events</span><span class="small">${esc(hookEvents)}</span></div>
+        <p class="muted small" style="margin:10px 0 0">Keep the URL private: anyone with it can start a deploy of this branch (never of other code).</p>
+      </div>
+    </details>` : ''}`;
+}
+
+$('#view-app-detail').addEventListener('change', (e) => {
+  const form = e.target.closest('#form-auto');
+  if (!form) return;
+  $$('.env-mode', form).forEach((l) => l.classList.toggle('active', $('input', l).checked));
+  if (e.target.name === 'enabled') $('.switch b', form).textContent = e.target.checked ? 'On' : 'Off';
+});
+
+$('#view-app-detail').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'form-auto') return;
+  e.preventDefault();
+  const form = e.target;
+  const btn = $('#btn-auto-save');
+  const body = { enabled: form.enabled.checked, trigger: form.trigger.value };
+  busy(btn, true, 'Saving…');
+  try {
+    const r = await api(`/apps/${detailsAppId}/auto-deploy`, { method: 'PUT', body });
+    toast(body.enabled
+      ? `Auto deploy is on — ${body.trigger === 'merge' ? 'merged requests' : 'every push'} to ${r.branch} deploys ${r.name}${r.webhook?.ok ? ' (webhook added)' : ''}`
+      : `Auto deploy is off for ${r.name}`);
+    if (r.webhook && !r.webhook.ok) toast(r.webhook.error, 'err');
+    autoCache.delete(String(detailsAppId));
+    openAppDetails(detailsAppId, 'auto');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  busy(btn, false);
+});
+
+$('#view-app-detail').addEventListener('click', async (e) => {
+  const copy = e.target.closest('#ad-auto-panel [data-copy]');
+  if (copy) {
+    try { await navigator.clipboard.writeText(copy.dataset.copy); toast('Copied'); } catch { toast('The browser did not allow copying', 'err'); }
+    return;
+  }
+  const act = e.target.closest('#ad-auto-panel [data-auto]');
+  if (!act) return;
+  busy(act, true, act.dataset.auto === 'check' ? 'Checking…' : 'Adding…');
+  try {
+    if (act.dataset.auto === 'check') {
+      const r = await api(`/apps/${detailsAppId}/auto-deploy/check`, { method: 'POST' });
+      if (r.error) toast(r.error, 'err');
+      else if (r.deployed) toast(`New commit ${r.sha.slice(0, 7)} found — deploying now`);
+      else toast(r.skipped === 'already deployed' ? 'Up to date — the branch has nothing new' : `Nothing to deploy: ${r.skipped}`);
+    } else {
+      const form = $('#form-auto');
+      const r = await api(`/apps/${detailsAppId}/auto-deploy`, { method: 'PUT', body: { enabled: true, trigger: form.trigger.value } });
+      if (r.webhook?.ok) toast('Webhook added — pushes now deploy within seconds');
+      else toast(r.webhook?.error || 'The webhook could not be added', 'err');
+    }
+    autoCache.delete(String(detailsAppId));
+    openAppDetails(detailsAppId, 'auto');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  busy(act, false);
+});
+
+/* the create wizard */
+
+function prepareAutoDeployCard() {
+  const branch = $('#form-app-deploy').dataset.branch || 'main';
+  $('#app-auto').checked = false;
+  $('#app-auto-fields').classList.add('hidden');
+  $('#app-auto-branch').textContent = branch;
+  $$('[data-auto-branch]').forEach((el) => { el.textContent = branch; });
+  $('input[name="auto_deploy_trigger"][value="push"]').checked = true;
+  $$('#app-auto-fields .env-mode').forEach((l) => l.classList.toggle('active', $('input', l).checked));
+  $('#app-auto-how').textContent = panelLooksPublic()
+    ? `A webhook is added on the repository for you (when the git account is allowed to), so a change to ${branch} goes live within seconds; the branch is also checked every minute.`
+    : `This panel is not reachable from the internet, so it checks ${branch} every minute instead of waiting for a webhook — a change goes live within about a minute.`;
+}
+
+$('#app-auto').addEventListener('change', (e) => $('#app-auto-fields').classList.toggle('hidden', !e.target.checked));
+$('#app-auto-fields').addEventListener('change', () => {
+  $$('#app-auto-fields .env-mode').forEach((l) => l.classList.toggle('active', $('input', l).checked));
+});
+// The watched branch is the one being deployed: changing it means going back to step one.
+$('#btn-app-auto-branch').addEventListener('click', () => appStep('pick'));
 
 /** The first thing the page does: find out whether anybody is signed in. */
 async function boot() {

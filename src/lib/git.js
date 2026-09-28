@@ -36,7 +36,8 @@ export function gitSettings(extra = {}) {
 }
 
 function authHeaders(token, s) {
-  if (s.kind === 'gitlab') return { 'PRIVATE-TOKEN': token, Accept: 'application/json' };
+  // Bearer works for every GitLab token — personal, project, group and OAuth — where PRIVATE-TOKEN refuses OAuth ones.
+  if (s.kind === 'gitlab') return { Authorization: `Bearer ${token}`, Accept: 'application/json' };
   if (s.kind === 'bitbucket') {
     return {
       Authorization: s.authUser ? `Basic ${Buffer.from(`${s.authUser}:${token}`).toString('base64')}` : `Bearer ${token}`,
@@ -194,7 +195,7 @@ export async function listRepositories(token, extra = {}, { perPage = 100 } = {}
   if (s.kind === 'gitlab') {
     const { body } = await request(
       `${s.apiUrl}/projects?membership=true&order_by=last_activity_at&per_page=${perPage}&simple=false`,
-      token, s.kind
+      token, s
     );
     return (body || []).map((p) => ({
       id: p.id,
@@ -215,7 +216,7 @@ export async function listRepositories(token, extra = {}, { perPage = 100 } = {}
 
   const { body } = await request(
     `${s.apiUrl}/user/repos?per_page=${perPage}&sort=updated&affiliation=owner,collaborator,organization_member`,
-    token, s.kind
+    token, s
   );
   return (body || []).map((r) => ({
     id: r.id,
@@ -251,7 +252,7 @@ export async function listBranches(token, extra, fullName) {
   if (s.kind === 'gitlab') {
     const { body } = await request(
       `${s.apiUrl}/projects/${encodeURIComponent(fullName)}/repository/branches?per_page=100`,
-      token, s.kind
+      token, s
     );
     return (body || []).map((b) => ({
       name: b.name,
@@ -286,7 +287,7 @@ export async function listCommits(token, extra, fullName, branch, limit = 10) {
   if (s.kind === 'gitlab') {
     const { body } = await request(
       `${s.apiUrl}/projects/${encodeURIComponent(fullName)}/repository/commits?ref_name=${encodeURIComponent(branch)}&per_page=${limit}`,
-      token, s.kind
+      token, s
     );
     return (body || []).map((c) => ({
       sha: c.short_id,
@@ -299,7 +300,7 @@ export async function listCommits(token, extra, fullName, branch, limit = 10) {
 
   const { body } = await request(
     `${s.apiUrl}/repos/${fullName}/commits?sha=${encodeURIComponent(branch)}&per_page=${limit}`,
-    token, s.kind
+    token, s
   );
   return (body || []).map((c) => ({
     sha: (c.sha || '').slice(0, 7),
@@ -621,3 +622,86 @@ async function bitbucketPages(url, token, s, maxPages = 5, opts = {}) {
 const bitbucketAuthor = (a) => a?.user?.display_name || String(a?.raw || '').replace(/\s*<[^>]*>\s*$/, '') || null;
 
 const firstLine = (text) => String(text || '').split('\n')[0].trim();
+
+/* ------------------------------------------------------- auto deploy */
+
+/** The newest commit on a branch, with its full SHA — what auto deploy compares against. */
+export async function branchHead(token, extra, fullName, branch) {
+  const s = gitSettings(extra);
+  if (s.kind === 'bitbucket') {
+    const { body } = await request(`${s.apiUrl}/repositories/${fullName}/refs/branches/${encodeURIComponent(branch)}`, token, s);
+    const c = body?.target;
+    return c ? { sha: c.hash, message: firstLine(c.message), author: bitbucketAuthor(c.author), date: c.date, parents: (c.parents || []).length } : null;
+  }
+  if (s.kind === 'gitlab') {
+    const { body } = await request(`${s.apiUrl}/projects/${encodeURIComponent(fullName)}/repository/branches/${encodeURIComponent(branch)}`, token, s);
+    const c = body?.commit;
+    return c ? { sha: c.id, message: firstLine(c.title), author: c.author_name, date: c.committed_date, parents: (c.parent_ids || []).length } : null;
+  }
+  const { body } = await request(`${s.apiUrl}/repos/${fullName}/commits/${encodeURIComponent(branch)}`, token, s);
+  return body ? {
+    sha: body.sha, message: firstLine(body.commit?.message), author: body.commit?.author?.name || body.author?.login,
+    date: body.commit?.author?.date, parents: (body.parents || []).length,
+  } : null;
+}
+
+/**
+ * The merged pull / merge request a commit came from, if any — for "deploy only
+ * on merge". A merge commit (two parents) counts too, for providers or setups
+ * where the request cannot be looked up.
+ */
+export async function mergedRequestFor(token, extra, fullName, sha, branch) {
+  const s = gitSettings(extra);
+  try {
+    if (s.kind === 'github') {
+      const { body } = await request(`${s.apiUrl}/repos/${fullName}/commits/${sha}/pulls`, token, s);
+      const pr = (body || []).find((p) => p.merged_at && (!branch || p.base?.ref === branch));
+      if (pr) return { number: pr.number, title: pr.title, url: pr.html_url, from: pr.head?.ref };
+    } else if (s.kind === 'gitlab') {
+      const { body } = await request(`${s.apiUrl}/projects/${encodeURIComponent(fullName)}/repository/commits/${sha}/merge_requests`, token, s);
+      const mr = (body || []).find((m) => m.state === 'merged' && (!branch || m.target_branch === branch));
+      if (mr) return { number: mr.iid, title: mr.title, url: mr.web_url, from: mr.source_branch };
+    } else {
+      const { body } = await request(`${s.apiUrl}/repositories/${fullName}/commit/${sha}/pullrequests`, token, s, { allow404: true });
+      const pr = (body?.values || []).find((p) => p.state === 'MERGED' && (!branch || p.destination?.branch?.name === branch));
+      if (pr) return { number: pr.id, title: pr.title, url: pr.links?.html?.href, from: pr.source?.branch?.name };
+    }
+  } catch { /* fall through to the merge-commit test */ }
+  return null;
+}
+
+/**
+ * Ask the provider to call the panel on every push and merged request.
+ * Returns the hook's id; throws with the provider's reason (usually a missing
+ * scope — GitHub needs admin:repo_hook or repo, GitLab api, Bitbucket webhooks).
+ */
+export async function createRepoWebhook(token, extra, fullName, { url, secret, branch }) {
+  const s = gitSettings(extra);
+  if (s.kind === 'gitlab') {
+    const { body } = await request(`${s.apiUrl}/projects/${encodeURIComponent(fullName)}/hooks`, token, s, {
+      method: 'POST',
+      body: { url, token: secret, push_events: true, merge_requests_events: true, push_events_branch_filter: branch, enable_ssl_verification: true },
+    });
+    return String(body?.id ?? '');
+  }
+  if (s.kind === 'bitbucket') {
+    const { body } = await request(`${s.apiUrl}/repositories/${fullName}/hooks`, token, s, {
+      method: 'POST',
+      body: { description: 'AJ Pilot auto deploy', url, active: true, events: ['repo:push', 'pullrequest:fulfilled'] },
+    });
+    return String(body?.uuid ?? '');
+  }
+  const { body } = await request(`${s.apiUrl}/repos/${fullName}/hooks`, token, s, {
+    method: 'POST',
+    body: { name: 'web', active: true, events: ['push', 'pull_request'], config: { url, content_type: 'json', secret, insecure_ssl: '0' } },
+  });
+  return String(body?.id ?? '');
+}
+
+export async function deleteRepoWebhook(token, extra, fullName, hookId) {
+  const s = gitSettings(extra);
+  const url = s.kind === 'gitlab' ? `${s.apiUrl}/projects/${encodeURIComponent(fullName)}/hooks/${hookId}`
+    : s.kind === 'bitbucket' ? `${s.apiUrl}/repositories/${fullName}/hooks/${encodeURIComponent(hookId)}`
+      : `${s.apiUrl}/repos/${fullName}/hooks/${hookId}`;
+  await request(url, token, s, { method: 'DELETE', allow404: true, raw: true });
+}

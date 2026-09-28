@@ -21,6 +21,10 @@ import {
 import { deployApp, removeApp, appAction, applyContainers, plannedContainers } from '../lib/deploy.js';
 import { parseEnvInput, formatEnvText, RESERVED, MAX_VARS } from '../lib/envVars.js';
 import { requirePermission } from '../lib/authGuard.js';
+import { resolveEnvironmentChoice } from '../lib/environments.js';
+import { createRepoWebhook, deleteRepoWebhook, branchHead } from '../lib/git.js';
+import { newWebhookToken, webhookUrl, isPublicUrl, checkApp } from '../lib/autoDeploy.js';
+import { siteUrl } from '../lib/landing.js';
 import {
   domainConfigFrom, publicDomainConfig, setupAppDomains, setupDomain, removeAppDomain, domainView,
 } from '../lib/appDomain.js';
@@ -74,7 +78,7 @@ function storedEnv(row) {
 /** An app row as the browser may see it — environment values never leave. */
 async function publicApp(row) {
   if (!row) return null;
-  const { env_enc, deploy_log, domain_log, domain_config, domain, domain_status, domain_error, ...rest } = row;
+  const { env_enc, deploy_log, domain_log, domain_config, domain, domain_status, domain_error, webhook_token, ...rest } = row;
   const domains = (await all('SELECT id, domain, port, config, status, error, log IS NOT NULL AS has_log, created_at FROM app_domains WHERE app_id = ? ORDER BY id', [row.id]))
     .map((d) => ({ id: d.id, domain: d.domain, port: d.port || row.port, status: d.status, error: d.error, hasLog: Boolean(d.has_log), config: publicDomainConfig(d.config), createdAt: d.created_at }));
   const live = domains.find((d) => d.status === 'active');
@@ -85,6 +89,7 @@ async function publicApp(row) {
     : null;
 
   const envKeys = storedEnv(row).map(([k]) => k);
+  const environment = row.environment_id ? await one('SELECT id, name FROM environments WHERE id = ?', [row.environment_id]) : null;
 
   return {
     ...rest,
@@ -95,6 +100,16 @@ async function publicApp(row) {
     ports: plannedContainers(containerSpecOf(row)).map((c) => c.port),
     volumes: storedVolumes(row),
     envKeys,
+    environment,
+    // What auto deploy is doing — the webhook address itself is secret and comes from /:id/auto-deploy.
+    autoDeploy: {
+      enabled: Boolean(row.auto_deploy),
+      trigger: row.auto_deploy_trigger || 'push',
+      webhook: Boolean(row.webhook_id),
+      checkedAt: row.auto_checked_at || null,
+      error: row.auto_error || null,
+    },
+    deployedCommit: row.deployed_sha ? { sha: row.deployed_sha, short: row.deployed_sha.slice(0, 7), message: row.deployed_message || '' } : null,
     server: server || null,
     account: account || null,
     registry,
@@ -310,6 +325,11 @@ appsRouter.post('/', async (req, res, next) => {
     }
     const image = namespace ? `${namespace}/${spec.name}` : `auto-deploy/${spec.name}`;
 
+    // An environment to link to, or a new one to make from these variables — checked before anything is written.
+    const envChoice = { orgId: req.orgId, userId: req.user?.id, pairs: spec.env, fallbackName: spec.name };
+    const envCheck = await resolveEnvironmentChoice(req.body, { ...envChoice, check: true });
+    if (envCheck.error) return res.status(envCheck.status || 400).json({ error: envCheck.error });
+
     // "Add a domain" is optional; when ticked it is checked now, and set up once the container runs.
     let domain = null;
     if (req.body.domain_enabled === true || req.body.domain_enabled === 'true' || req.body.domain_enabled === 'on') {
@@ -332,6 +352,17 @@ appsRouter.post('/', async (req, res, next) => {
 
     if (spec.rootDir) await run('UPDATE apps SET root_dir = ? WHERE id = ?', [spec.rootDir, insertId]);
 
+    const envLink = await resolveEnvironmentChoice(req.body, envChoice);
+    if (envLink.id) await run('UPDATE apps SET environment_id = ? WHERE id = ?', [envLink.id, insertId]);
+
+    // Auto deploy: on for this branch from the start, with a webhook where the panel can be reached.
+    const autoDeploy = ['true', 'on', true, 1, '1'].includes(req.body.auto_deploy);
+    if (autoDeploy) {
+      await run('UPDATE apps SET auto_deploy = 1, auto_deploy_trigger = ?, webhook_token = ? WHERE id = ?',
+        [req.body.auto_deploy_trigger === 'merge' ? 'merge' : 'push', newWebhookToken(), insertId]);
+    }
+    const base = siteUrl(req);
+
     if (domain) {
       await run("INSERT INTO app_domains (org_id, app_id, domain, port, config, status) VALUES (?,?,?,?,?, 'pending')",
         [req.orgId, insertId, domain.domain, domain.port, JSON.stringify(domain.config)]);
@@ -342,8 +373,145 @@ appsRouter.post('/', async (req, res, next) => {
     await run('UPDATE apps SET deploy_started_at = NOW() WHERE id = ?', [insertId]);
     res.status(202).json({ ok: true, started: true, ...(await publicApp(await one('SELECT * FROM apps WHERE id = ?', [insertId]))) });
     startDeployment(insertId, { first: true });
+    if (autoDeploy) {
+      // The first deploy builds what is on the branch now: auto deploy starts after that commit.
+      loadGitCredential(credential.id)
+        .then((account) => branchHead(account.token, account.extra, spec.repo, spec.branch))
+        .then((head) => head?.sha && run('UPDATE apps SET auto_seen_sha = COALESCE(auto_seen_sha, ?) WHERE id = ?', [head.sha, insertId]))
+        .catch(() => {});
+      if (isPublicUrl(base)) registerWebhook(await one('SELECT * FROM apps WHERE id = ?', [insertId]), base).catch(() => {});
+    }
   } catch (err) { next(err); }
 });
+
+/* ---------------------------------------------------------- auto deploy */
+
+/**
+ * Ask the git provider to call this panel on every push and merged request.
+ * Needs a token allowed to manage webhooks; without that, the minute-by-minute
+ * branch check still deploys every change — just not instantly.
+ */
+async function registerWebhook(row, base) {
+  const account = await loadGitCredential(row.credential_id);
+  if (row.webhook_id) await deleteRepoWebhook(account.token, account.extra, row.repo, row.webhook_id).catch(() => {});
+  try {
+    const hookId = await createRepoWebhook(account.token, account.extra, row.repo, {
+      url: webhookUrl(base, row.webhook_token), secret: row.webhook_token, branch: row.branch,
+    });
+    await run('UPDATE apps SET webhook_id = ?, auto_error = NULL WHERE id = ?', [hookId || null, row.id]);
+    await logActivity('app', row.id, 'auto_deploy_webhook', `${row.name}: webhook added on ${row.repo} — pushes to ${row.branch} now deploy instantly`);
+    return { ok: true, hookId };
+  } catch (err) {
+    const message = `The webhook could not be added on ${row.repo} (${err.message}). The branch is still checked every minute.`;
+    await run('UPDATE apps SET webhook_id = NULL, auto_error = ? WHERE id = ?', [message.slice(0, 500), row.id]);
+    return { ok: false, error: message };
+  }
+}
+
+async function removeWebhook(row) {
+  if (!row.webhook_id) return;
+  try {
+    const account = await loadGitCredential(row.credential_id);
+    await deleteRepoWebhook(account.token, account.extra, row.repo, row.webhook_id);
+  } catch { /* the hook may already be gone; the token going with it makes it harmless */ }
+  await run('UPDATE apps SET webhook_id = NULL WHERE id = ?', [row.id]);
+}
+
+/** The settings, with the webhook address — secret, so only for people who can edit. */
+appsRouter.get('/:id/auto-deploy', requirePermission('edit'), async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    const base = siteUrl(req);
+    let head = null;
+    let provider = null;
+    try {
+      const account = await loadGitCredential(row.credential_id);
+      provider = { kind: account.settings.kind, label: account.settings.label, webUrl: account.settings.webUrl };
+      head = await branchHead(account.token, account.extra, row.repo, row.branch);
+    } catch (err) { head = { error: err.message }; }
+    res.json({
+      provider,
+      enabled: Boolean(row.auto_deploy),
+      trigger: row.auto_deploy_trigger || 'push',
+      branch: row.branch,
+      repo: row.repo,
+      webhookUrl: row.webhook_token ? webhookUrl(base, row.webhook_token) : null,
+      webhookSecret: row.webhook_token || null,
+      webhookRegistered: Boolean(row.webhook_id),
+      publicUrl: isPublicUrl(base),
+      panelUrl: base,
+      checkedAt: row.auto_checked_at,
+      error: row.auto_error,
+      deployed: row.deployed_sha ? { sha: row.deployed_sha, message: row.deployed_message } : null,
+      head,
+    });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Turn auto deploy on or off, choose "every push" or "merged requests only",
+ * and (re)add the webhook. Turning it on does not deploy by itself unless the
+ * branch has already moved past what is running.
+ */
+appsRouter.put('/:id/auto-deploy', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    const enabled = ['true', 'on', true, 1, '1'].includes(req.body.enabled);
+    const trigger = req.body.trigger === 'merge' ? 'merge' : 'push';
+    const base = siteUrl(req);
+
+    if (!enabled) {
+      await removeWebhook(row);
+      await run('UPDATE apps SET auto_deploy = 0, auto_error = NULL WHERE id = ?', [row.id]);
+      await logActivity('app', row.id, 'auto_deploy_off', `${row.name}: auto deploy turned off`);
+      return res.json({ ok: true, ...(await publicApp(await getRow(row.id, req.orgId))) });
+    }
+
+    const token = row.webhook_token || newWebhookToken();
+    // An app that never recorded which commit it runs starts from the branch as it is now.
+    let seen = row.auto_seen_sha;
+    if (!row.deployed_sha && !seen) {
+      try {
+        const account = await loadGitCredential(row.credential_id);
+        seen = (await branchHead(account.token, account.extra, row.repo, row.branch))?.sha || null;
+      } catch { /* the first check will say what is wrong */ }
+    }
+    await run('UPDATE apps SET auto_deploy = 1, auto_deploy_trigger = ?, webhook_token = ?, auto_seen_sha = ? WHERE id = ?',
+      [trigger, token, seen, row.id]);
+    await logActivity('app', row.id, 'auto_deploy_on',
+      `${row.name}: auto deploy on — ${trigger === 'merge' ? 'merged pull / merge requests' : 'every push'} to ${row.branch}`);
+
+    let webhook = null;
+    const wantHook = req.body.webhook !== false && req.body.webhook !== 'false';
+    if (wantHook && isPublicUrl(base)) webhook = await registerWebhook(await getRow(row.id, req.orgId), base);
+    res.json({ ok: true, webhook, ...(await publicApp(await getRow(row.id, req.orgId))) });
+  } catch (err) { next(err); }
+});
+
+/** "Check now": read the branch and deploy if it moved, instead of waiting for the next minute. */
+appsRouter.post('/:id/auto-deploy/check', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    if (!row.auto_deploy) return res.status(400).json({ error: 'Turn auto deploy on first' });
+    const result = await checkApp(row, { source: 'manual check' });
+    res.json({ ok: !result.error, ...result });
+  } catch (err) { next(err); }
+});
+
+/**
+ * Start a deploy from outside a request — auto deploy calls this. The claim is
+ * one UPDATE, so two triggers for the same commit (a push and its merge event)
+ * cannot both start one.
+ */
+export async function deployNow(id, { reason = '' } = {}) {
+  const claimed = await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ? AND status <> 'deploying'", [id]);
+  if (!claimed.affectedRows) return false;
+  startDeployment(id, { first: false, reason });
+  return true;
+}
 
 /* ----------------------------------------------------------------- edit */
 
@@ -407,6 +575,13 @@ appsRouter.put('/:id/settings', async (req, res, next) => {
     ].filter(Boolean);
     await logActivity('app', row.id, 'settings_changed', `Changed the settings of ${row.name}${changed.length ? `: ${changed.join(', ')}` : ''}`);
 
+    // A new branch: auto deploy follows it from its current commit, and the webhook's branch filter is renewed.
+    if (before.branch !== spec.branch && row.auto_deploy) {
+      await run('UPDATE apps SET auto_seen_sha = NULL WHERE id = ?', [row.id]);
+      const base = siteUrl(req);
+      if (row.webhook_id && isPublicUrl(base)) registerWebhook(await getRow(row.id, req.orgId), base).catch(() => {});
+    }
+
     const redeploy = req.body.redeploy === true || req.body.redeploy === 'true';
     if (redeploy) {
       await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ?", [row.id]);
@@ -448,7 +623,13 @@ function startDeployment(id, options) {
   });
 }
 
-async function runDeployment(id, { first }) {
+/** The commit the clone step reported: "::commit::<sha>::<subject>". */
+function builtCommit(log) {
+  const m = /^::commit::([0-9a-f]{40})::(.*)$/m.exec(String(log || ''));
+  return m ? { sha: m[1], message: m[2].slice(0, 255) } : null;
+}
+
+async function runDeployment(id, { first, reason = '' }) {
   const row = await one('SELECT * FROM apps WHERE id = ?', [id]);
   const server = await one('SELECT * FROM servers WHERE id = ?', [row.server_id]);
 
@@ -476,10 +657,13 @@ async function runDeployment(id, { first }) {
     const text = `${live}${extra}\n::failed::${message}::${now()}\n`;
     await run("UPDATE apps SET status = 'error', last_error = ?, deploy_log = ? WHERE id = ?",
       [message, text.slice(-120000), id]);
+    // A commit that failed is not tried again by auto deploy — the next push is.
+    const tried = builtCommit(live);
+    if (tried) await run('UPDATE apps SET auto_seen_sha = ? WHERE id = ?', [tried.sha, id]);
     await logActivity('app', id, 'deploy_failed', `${row.name}: ${message}`, 'error');
   };
 
-  note('account', 'Preparing the git account', `Repository ${row.repo}, branch ${row.branch}`);
+  note('account', 'Preparing the git account', `${reason ? `${reason}\n` : ''}Repository ${row.repo}, branch ${row.branch}`);
   let account;
   try {
     account = await loadGitCredential(row.credential_id);
@@ -559,8 +743,13 @@ async function runDeployment(id, { first }) {
          containers = ?, last_error = NULL, last_deployed_at = NOW() WHERE id = ?`,
       [result.containerId, result.imageBytes, live.slice(-120000), JSON.stringify(result.containers || []), id]
     );
+    const commit = builtCommit(live);
+    if (commit) {
+      await run('UPDATE apps SET deployed_sha = ?, deployed_message = ?, auto_seen_sha = ? WHERE id = ?',
+        [commit.sha, commit.message, commit.sha, id]);
+    }
     await logActivity('app', id, first ? 'created' : 'deployed',
-      `${first ? 'Deployed' : 'Redeployed'} ${row.name} from ${row.repo}@${row.branch} on ${server.name} (port ${row.port})`);
+      `${first ? 'Deployed' : 'Redeployed'} ${row.name} from ${row.repo}@${row.branch}${commit ? ` (${commit.sha.slice(0, 7)})` : ''} on ${server.name} (port ${row.port})${reason ? ` — ${reason}` : ''}`);
 
   } catch (err) {
     // An SSH failure says nothing about which machine; say it here.
@@ -719,7 +908,8 @@ appsRouter.get('/:id/env', requirePermission('edit'), async (req, res, next) => 
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'App not found' });
     const env = storedEnv(row);
-    res.json({ ok: true, name: row.name, env, text: formatEnvText(env), max: MAX_VARS });
+    const environment = row.environment_id ? await one('SELECT id, name FROM environments WHERE id = ?', [row.environment_id]) : null;
+    res.json({ ok: true, name: row.name, env, text: formatEnvText(env), max: MAX_VARS, environment });
   } catch (err) { next(err); }
 });
 
@@ -738,6 +928,15 @@ appsRouter.put('/:id/env', async (req, res, next) => {
 
     const parsed = parseEnvInput(req.body.env);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    // Loaded from an environment in the editor: remember the link (or drop it with "none").
+    if (req.body.environment_id !== undefined) {
+      const envId = req.body.environment_id ? Number(req.body.environment_id) : null;
+      if (envId && !await one('SELECT id FROM environments WHERE id = ? AND org_id = ?', [envId, req.orgId])) {
+        return res.status(400).json({ error: 'That environment is not in this organisation' });
+      }
+      await run('UPDATE apps SET environment_id = ? WHERE id = ?', [envId, row.id]);
+    }
 
     const before = storedEnv(row).map(([k]) => k);
     const after = parsed.pairs.map(([k]) => k);
@@ -859,6 +1058,9 @@ appsRouter.delete('/:id', async (req, res, next) => {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'App not found' });
     const server = await getServer(row.server_id, req.orgId);
+
+    // Its webhook on the repository goes too, so the provider stops calling a hook that no longer exists.
+    await removeWebhook(row);
 
     const warnings = [];
 

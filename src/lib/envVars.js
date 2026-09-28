@@ -36,7 +36,7 @@ function unquote(raw) {
  * told about one problem at a time rather than a wall of them. `skipped` lists
  * the reserved keys (PORT, INSTANCE) that were left out.
  */
-export function parseEnvText(text) {
+export function parseEnvText(text, { keepReserved = false } = {}) {
   const pairs = [];
   const skipped = new Set();
   const index = new Map();
@@ -56,7 +56,7 @@ export function parseEnvText(text) {
     if (!KEY.test(key)) {
       return { pairs: [], error: `"${key.slice(0, 40)}" on line ${i + 1} is not a valid environment variable name` };
     }
-    if (RESERVED.has(key)) {
+    if (RESERVED.has(key) && !keepReserved) {
       skipped.add(key);
       continue;
     }
@@ -80,15 +80,15 @@ export function parseEnvText(text) {
  * Accept either `.env` text or the `[[key, value], …]` the editor sends.
  * Pairs are validated the same way, so neither route can smuggle a bad name in.
  */
-export function parseEnvInput(input) {
-  if (typeof input === 'string' || input === null || input === undefined) return parseEnvText(input);
+export function parseEnvInput(input, options = {}) {
+  if (typeof input === 'string' || input === null || input === undefined) return parseEnvText(input, options);
   if (!Array.isArray(input)) return { pairs: [], skipped: [], error: 'The environment must be a list of KEY=value pairs' };
 
   const asText = input.map((entry) => {
     const [k, v] = Array.isArray(entry) ? entry : [entry?.key, entry?.value];
     return `${String(k ?? '').trim()}=${JSON.stringify(String(v ?? ''))}`;
   }).join('\n');
-  return parseEnvText(asText);
+  return parseEnvText(asText, options);
 }
 
 /** The pairs back as `.env` text, for the editor to show. */

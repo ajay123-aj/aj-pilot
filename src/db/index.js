@@ -425,6 +425,21 @@ async function createSchema() {
       CONSTRAINT fk_service_server FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // Named sets of variables an organisation keeps once and hands to apps and services.
+    `CREATE TABLE IF NOT EXISTS environments (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      org_id      INT NOT NULL,
+      name        VARCHAR(120) NOT NULL,
+      description VARCHAR(255),
+      env_enc     MEDIUMTEXT,
+      var_count   INT NOT NULL DEFAULT 0,
+      created_by  INT NULL,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_env_name (org_id, name),
+      CONSTRAINT fk_env_org FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     `CREATE TABLE IF NOT EXISTS activity_log (
       id         INT AUTO_INCREMENT PRIMARY KEY,
       entity     VARCHAR(50) NOT NULL,
@@ -501,6 +516,19 @@ async function addOrgScoping() {
     ['leads', 'visit', 'JSON'],
     ['leads', 'geo', 'JSON'],
     ['leads', 'country', 'VARCHAR(2) NULL'],
+    // The environment an app or an installation was created from, if any.
+    ['apps', 'environment_id', 'INT NULL'],
+    // Auto deploy: redeploy when the branch changes (every push, or only merged pull/merge requests).
+    ['apps', 'auto_deploy', 'TINYINT(1) NOT NULL DEFAULT 0'],
+    ['apps', 'auto_deploy_trigger', "VARCHAR(10) NOT NULL DEFAULT 'push'"],
+    ['apps', 'webhook_token', 'VARCHAR(64) NULL'],
+    ['apps', 'webhook_id', 'VARCHAR(64) NULL'],
+    ['apps', 'deployed_sha', 'VARCHAR(64) NULL'],
+    ['apps', 'deployed_message', 'VARCHAR(255) NULL'],
+    ['apps', 'auto_seen_sha', 'VARCHAR(64) NULL'],
+    ['apps', 'auto_checked_at', 'DATETIME NULL'],
+    ['apps', 'auto_error', 'TEXT'],
+    ['installations', 'environment_id', 'INT NULL'],
   ];
   for (const [table, column, definition] of LATER_COLUMNS) {
     if (await columnExists(table, column)) continue;
