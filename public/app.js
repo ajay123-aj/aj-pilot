@@ -6404,7 +6404,8 @@ function stopWatchingDeployments() {
 /** "deploying… 1m 20s", counted from when the server started. */
 function tickElapsed() {
   for (const el of $$('[data-since]')) {
-    const started = Date.parse(String(el.dataset.since).replace(' ', 'T'));
+    // Through parseWhen: the database's times are UTC, and read as local they were hours off.
+    const started = parseWhen(el.dataset.since);
     if (!started) continue;
     const secs = Math.max(0, Math.round((Date.now() - started) / 1000));
     el.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
@@ -6482,7 +6483,7 @@ function appCard(a) {
         <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'in progress' : esc(a.status)}</span>
       </div>
     </div>
-    ${busyNow ? `<div class="deploy-progress">
+    ${busyNow ? `${deployBanner(a, { compact: true })}<div class="deploy-progress">
       <div class="muted small"><span class="spinner"></span>${a.currentStep ? `${esc(a.currentStep)}…` : 'Starting…'}
         <span data-since="${esc(a.deploy_started_at || '')}"></span></div>
       <div class="meter indeterminate"><span></span></div>
@@ -6647,7 +6648,15 @@ function renderDeployLog(log) {
     if (e && e[1] === 'failed') return `${at(e[3])}<span class="log-fail">✕ ${esc(e[2])}</span>`;
     if (e) return `${at(e[3])}<span class="log-done">✓ Deployed</span>`;
     const c = /^::commit::([0-9a-f]{7,40})::(.*)$/.exec(line);
-    if (c) return `Commit <b>${esc(c[1].slice(0, 7))}</b>${c[2] ? ` — ${esc(c[2])}` : ''}`;
+    if (c) {
+      // "<time>::<parents>::<author>::<subject>" — or just the subject in older logs.
+      const parts = c[2].split('::');
+      const [when, parents, author, ...subject] = parts.length >= 4 ? parts : ['', '', '', c[2]];
+      const at = when ? new Date(when) : null;
+      return `Commit <b>${esc(c[1].slice(0, 7))}</b>${subject.join('::') ? ` — ${esc(subject.join('::'))}` : ''}`
+        + `${Number(parents) >= 2 ? ' · <span class="badge kind-merge">merge commit</span>' : ''}${author ? ` · by ${esc(author)}` : ''}`
+        + `${at && !Number.isNaN(at.getTime()) ? ` · ${esc(at.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}` : ''}`;
+    }
     return esc(line);
   }).join('\n');
 }
@@ -6924,13 +6933,14 @@ function renderAppDetails(a) {
     <button class="btn tiny" data-ad-refresh="1">Refresh</button>
     ${ifCan('delete', `<button class="btn tiny danger" data-app-action="delete" data-id="${a.id}" data-name="${n}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">Remove</button>`)}`;
 
-  const tabs = [['overview', 'Overview'], ['settings', 'Settings'], ['auto', 'Auto deploy'], ['domains', `Domains (${(a.domains || []).length})`],
+  const tabs = [['overview', 'Overview'], ['settings', 'Settings'], ['auto', 'Auto deploy'], ['history', 'Deploy history'], ['domains', `Domains (${(a.domains || []).length})`],
     ['containers', `Containers (${a.containers.length})`], ['env', 'Environment & volumes'], ['activity', 'Activity']];
   const ad = a.autoDeploy || {};
   const when = (v) => (v ? esc(String(v).replace('T', ' ').slice(0, 16)) : '—');
 
   const panels = {
     overview: `
+      ${deployBanner(a)}
       <div class="tiles">
         ${tile('Status', busyNow ? 'deploying' : esc(a.status), a.currentStep ? esc(a.currentStep) : a.last_error ? 'see the error below' : '')}
         ${tile('Containers', `${a.containers.filter((c) => c.status === 'running').length} / ${a.containers.length}`, 'running')}
@@ -6977,7 +6987,8 @@ function renderAppDetails(a) {
   ])}
       </div>
       ${ifCan('edit', `<p style="margin-top:12px">${btn('edit', 'Edit these settings', 'primary')}</p>`)}`,
-    auto: `<div id="ad-auto-panel" data-app="${a.id}">${autoSummaryHtml(a)}</div>`,
+    auto: `${deployBanner(a)}<div id="ad-auto-panel" data-app="${a.id}">${autoSummaryHtml(a)}</div>`,
+    history: `${deployBanner(a)}<div id="ad-history-panel" data-app="${a.id}"><div class="empty"><span class="spinner"></span>Reading the deploy history…</div></div>`,
     domains: `
       ${(a.domains || []).length ? table(
     [{ label: 'Domain' }, { label: 'Status' }, { label: 'How' }, { label: 'Port', num: true }, { label: '' }],
@@ -7022,6 +7033,7 @@ function renderAppDetails(a) {
   }).join('');
   $('#ad-body').innerHTML = tabs.map(([k]) => `<div class="tab-panel" data-ad-panel="${k}" ${k === detailsTab ? '' : 'hidden'}>${panels[k]}</div>`).join('');
   if (detailsTab === 'auto') loadAutoPanel(a);
+  if (detailsTab === 'history') loadHistoryPanel(a.id);
 
   // Keep it current while something is still happening.
   clearTimeout(renderAppDetails.timer);
@@ -7055,6 +7067,7 @@ $('#view-app-detail').addEventListener('click', (e) => {
     $$('#ad-tabs [data-ad-tab]').forEach((b) => b.classList.toggle('active', b === tab));
     $$('#ad-body [data-ad-panel]').forEach((p) => { p.hidden = p.dataset.adPanel !== detailsTab; });
     if (detailsTab === 'auto') loadAutoPanel({ id: detailsAppId });
+    if (detailsTab === 'history') loadHistoryPanel(detailsAppId);
     return;
   }
   if (e.target.closest('[data-ad-refresh]')) return openAppDetails(detailsAppId, detailsTab);
@@ -7161,6 +7174,7 @@ async function appCardAction(btn, reload) {
   if (action === 'edit') return openAppEdit(id, name, reload);
   if (action === 'domain-log') return openDomainLog(id, name, reload, btn.dataset.domainId);
   if (action === 'details') return openAppDetails(id, 'overview');
+  if (action === 'history') return openAppDetails(id, 'history');
   if (action === 'domain-remove') return removeDomain(id, btn.dataset.domainId, btn.dataset.domain, reload);
   if (action === 'domain-retry') {
     busy(btn, true, '…');
@@ -13551,6 +13565,159 @@ $('#app-auto-fields').addEventListener('change', () => {
 });
 // The watched branch is the one being deployed: changing it means going back to step one.
 $('#btn-app-auto-branch').addEventListener('click', () => appStep('pick'));
+
+/* ========================================================= deploy history */
+
+/*
+ * Every deploy of an app is kept with its log: what started it (a person, the
+ * first deploy, or auto deploy), the branch, whether the change was a merge or
+ * a commit, when that was made, and how the deploy ended. A deploy running now
+ * is announced on the app's card and page, with its live log one click away.
+ */
+
+const TRIGGER_WORD = { auto: '⚡ Auto deploy', manual: 'Redeploy', first: 'First deploy' };
+const DEPLOY_STATE = { running: ['in progress', 'warn'], success: ['deployed', 'ok'], failed: ['failed', 'err'], interrupted: ['interrupted', ''] };
+
+/** "Merge #42 from dev" / "Commit" — what kind of change was deployed. */
+function changeKindHtml(d) {
+  if (d.kind === 'merge' || d.pr) {
+    return `<span class="badge kind-merge">🔀 Merge${d.pr ? ` #${esc(d.pr.number)}` : ''}${d.pr?.from ? ` from ${esc(d.pr.from)}` : ''}</span>`;
+  }
+  if (d.kind === 'commit') return '<span class="badge kind-commit">● Commit</span>';
+  return '<span class="muted small">—</span>';
+}
+
+const whenFull = (v) => (v ? new Date(parseWhen(v) || v).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+
+/** Seconds between two times, as "1m 20s". */
+function deployDuration(d) {
+  const a = parseWhen(d.startedAt);
+  const b = d.finishedAt ? parseWhen(d.finishedAt) : Date.now();
+  return a && b ? duration((b - a) / 1000) : '—';
+}
+
+/** The banner on a card or page while a deploy runs: why, which change, and the live log. */
+function deployBanner(a, { compact = false } = {}) {
+  const d = a.currentDeploy;
+  if (!d) return '';
+  const auto = d.trigger === 'auto';
+  const c = d.commit;
+  const change = d.pr
+    ? `merge #${esc(d.pr.number)}${d.pr.from ? ` from <b>${esc(d.pr.from)}</b>` : ''}${d.pr.title ? ` — ${esc(d.pr.title)}` : ''}`
+    : c ? `commit <code>${esc(c.short)}</code>${c.message ? ` — ${esc(c.message)}` : ''}` : 'the latest commit';
+  return `<div class="deploy-banner ${auto ? 'auto' : ''} ${compact ? 'compact' : ''}">
+    <div class="deploy-banner-text">
+      <b>${auto ? '⚡ Auto deploy in progress' : d.trigger === 'first' ? 'First deploy in progress' : 'Deploy in progress'}</b>
+      <span>on <b>${esc(d.branch || a.branch)}</b> · ${change}</span>
+      <span class="muted small">${c?.author ? `by ${esc(c.author)} · ` : ''}${c?.at ? `${d.kind === 'merge' || d.pr ? 'merged' : 'committed'} ${esc(agoWords(c.at))} · ` : ''}started ${esc(agoWords(d.startedAt))}${d.by ? ` by ${esc(d.by)}` : ''}</span>
+    </div>
+    <div class="deploy-banner-actions">
+      <button class="btn tiny primary" data-app-action="progress" data-id="${a.id}" data-name="${esc(a.name)}"><span class="spinner"></span>View live logs</button>
+      ${compact ? '' : `<button class="btn tiny" data-app-action="history" data-id="${a.id}" data-name="${esc(a.name)}">All deploys</button>`}
+    </div>
+  </div>`;
+}
+
+/* ------------------------------------------------ the Deploy history tab */
+
+async function loadHistoryPanel(appId) {
+  const box = $('#ad-history-panel');
+  if (!box) return;
+  try {
+    const r = await api(`/apps/${appId}/deployments`);
+    if (String(box.dataset.app) !== String(appId) || !document.body.contains(box)) return;
+    const list = r.deployments;
+    if (!list.length) {
+      box.innerHTML = '<div class="card"><p class="muted small" style="margin:0">No deploys recorded yet — the next deploy appears here with its full log.</p></div>';
+      return;
+    }
+    const counts = { success: 0, failed: 0, auto: 0 };
+    for (const d of list) { if (d.status === 'success') counts.success += 1; if (d.status === 'failed') counts.failed += 1; if (d.trigger === 'auto') counts.auto += 1; }
+    box.innerHTML = `
+      <div class="tiles" style="margin-bottom:14px">
+        ${tile('Deploys', list.length, 'kept with their logs (last 50)')}
+        ${tile('Succeeded', counts.success, `${counts.failed} failed`)}
+        ${tile('Automatic', counts.auto, 'started by auto deploy')}
+        ${tile('Last one', esc(agoWords(list[0].startedAt)), esc((DEPLOY_STATE[list[0].status] || [list[0].status])[0]))}
+      </div>
+      ${table(
+    [{ label: 'Started' }, { label: 'Branch' }, { label: 'Change' }, { label: 'Merged / committed' }, { label: 'Result' }, { label: '' }],
+    list.map((d) => [
+      `<span class="nowrap">${esc(TRIGGER_WORD[d.trigger] || d.trigger)}</span>
+        <div class="muted small nowrap">${esc(whenFull(d.startedAt))}</div>
+        <div class="muted small nowrap">${esc(agoWords(d.startedAt))}${d.by ? ` · ${esc(d.by)}` : ''}</div>`,
+      `<code class="small">${esc(d.branch || '—')}</code>`,
+      // A merged request is named by its title; a plain commit by its message.
+      `${changeKindHtml(d)}<div class="small change-text">${d.commit ? `<code>${esc(d.commit.short)}</code> ` : ''}${esc(d.pr?.title || d.commit?.message || '')}</div>`,
+      d.commit?.at ? `<span class="nowrap">${esc(whenFull(d.commit.at))}</span><div class="muted small">${d.commit.author ? `${esc(d.commit.author)} · ` : ''}${esc(agoWords(d.commit.at))}</div>` : '<span class="muted small">—</span>',
+      `<span class="badge ${(DEPLOY_STATE[d.status] || [])[1] || ''}">${d.status === 'running' ? '<span class="spinner"></span>' : ''}${esc((DEPLOY_STATE[d.status] || [d.status])[0])}</span>
+        <div class="muted small">${esc(deployDuration(d))}</div>`,
+      `<div class="row-actions"><button class="btn tiny ${d.status === 'running' ? 'primary' : ''}" data-deploy-log="${d.id}">${d.status === 'running' ? 'Live log' : 'View log'}</button></div>`,
+    ])
+  )}`;
+  } catch (err) {
+    box.innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+/* ------------------------------------------------------- one deploy's log */
+
+const deployLog = { appId: null, id: null, timer: null, text: '' };
+
+async function openDeployLog(appId, id) {
+  clearTimeout(deployLog.timer);
+  Object.assign(deployLog, { appId, id, text: '' });
+  $('#deploylog-title').textContent = 'Loading…';
+  $('#deploylog-state').innerHTML = '';
+  $('#deploylog-facts').innerHTML = '';
+  $('#deploylog-log').innerHTML = '';
+  $('#modal-deploy-log').classList.remove('hidden');
+  await refreshDeployLog();
+}
+
+async function refreshDeployLog() {
+  const { appId, id } = deployLog;
+  if ($('#modal-deploy-log').classList.contains('hidden') || !id) return;
+  try {
+    const d = await api(`/apps/${appId}/deployments/${id}`);
+    if (deployLog.id !== id) return;
+    deployLog.text = d.log || '';
+    $('#deploylog-title').textContent = `${TRIGGER_WORD[d.trigger] || 'Deploy'} · ${whenFull(d.startedAt)}`;
+    $('#deploylog-state').innerHTML = `<span class="badge ${(DEPLOY_STATE[d.status] || [])[1] || ''}">${d.live ? '<span class="spinner"></span>' : ''}${esc((DEPLOY_STATE[d.status] || [d.status])[0])}</span>`;
+    const c = d.commit;
+    $('#deploylog-facts').innerHTML = [
+      ['Branch', `<code>${esc(d.branch || '—')}</code>`],
+      ['Change', `${changeKindHtml(d)}${c ? ` <code>${esc(c.short)}</code> ${esc(c.message || '')}` : ''}`],
+      ['Merged / committed', c?.at ? `${esc(whenFull(c.at))}${c.author ? ` · ${esc(c.author)}` : ''}` : '—'],
+      ['Started by', `${esc(TRIGGER_WORD[d.trigger] || d.trigger)}${d.by ? ` · ${esc(d.by)}` : ''}`],
+      ['Duration', `${esc(deployDuration(d))}${d.finishedAt ? ` · ended ${esc(whenFull(d.finishedAt))}` : ' so far'}`],
+      ...(d.reason ? [['Why', esc(d.reason)]] : []),
+      ...(d.error ? [['Error', `<span style="color:var(--err)">${esc(d.error)}</span>`]] : []),
+    ].map(([k, v]) => `<div><span class="muted small">${k}</span><div>${v}</div></div>`).join('');
+    $('#deploylog-follow-wrap').classList.toggle('hidden', !d.live);
+    const pre = $('#deploylog-log');
+    pre.innerHTML = renderDeployLog(deployLog.text) || '<span class="muted">No log was recorded.</span>';
+    if (d.live && $('#deploylog-follow').checked) pre.scrollTop = pre.scrollHeight;
+    // A running deploy keeps writing: read it again every two seconds until it ends.
+    if (d.live) deployLog.timer = setTimeout(refreshDeployLog, 2000);
+  } catch (err) {
+    $('#deploylog-log').textContent = err.message;
+  }
+}
+
+$('#btn-deploylog-download').addEventListener('click', () => {
+  const clean = deployLog.text.replace(/^::(step|done|failed)::.*$/gm, '').replace(/^::commit::([0-9a-f]{7}).*$/gm, 'Commit $1');
+  const blob = new Blob([clean], { type: 'text/plain' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `deploy-${deployLog.id}.log` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+});
+
+$('#view-app-detail').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-deploy-log]');
+  if (btn) openDeployLog(detailsAppId, Number(btn.dataset.deployLog));
+});
 
 /** The first thing the page does: find out whether anybody is signed in. */
 async function boot() {

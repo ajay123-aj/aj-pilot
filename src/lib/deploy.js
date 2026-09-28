@@ -133,7 +133,8 @@ CLONE_URL="$(echo ${b64(spec.cloneUrl)} | base64 -d)"
 git clone --depth 1 --single-branch --branch ${q(spec.branch)} "$CLONE_URL" "$NEW" 2>&1 | sed 's#//[^@/]*@#//***@#g'
 [ -d "$NEW/.git" ] || { echo "The repository could not be cloned" >&2; rm -rf "$NEW"; exit 4; }
 # The exact commit being built, for the panel to remember (auto deploy compares against it).
-echo "::commit::$(git -C "$NEW" rev-parse HEAD 2>/dev/null)::$(git -C "$NEW" log -1 --format=%s 2>/dev/null | head -c 200)"
+# Format: ::commit::<sha>::<commit time>::<parent count>::<author>::<subject> — two parents is a merge commit.
+echo "::commit::$(git -C "$NEW" rev-parse HEAD 2>/dev/null)::$(git -C "$NEW" log -1 --format=%cI 2>/dev/null)::$(git -C "$NEW" cat-file -p HEAD 2>/dev/null | grep -c '^parent ')::$(git -C "$NEW" log -1 --format=%an 2>/dev/null | tr -d ':' | head -c 80)::$(git -C "$NEW" log -1 --format=%s 2>/dev/null | head -c 200)"
 rm -rf "$NEW/.git"
 echo "Cloned: $(ls -1A "$NEW" | wc -l) entries at the top level."
 # The project may live in a folder of the repository (apps/api, apps/web, …); that folder is what gets built.

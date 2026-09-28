@@ -2144,6 +2144,28 @@
 <input type="file" id="files-upload-input" multiple hidden />
 
 <!-- -------------------------------------- custom service progress -->
+<!-- ---------------------------------------------- one deploy's full log -->
+<div class="modal-backdrop hidden" id="modal-deploy-log">
+  <div class="modal" style="max-width:980px">
+    <div class="section-head" style="margin-bottom:4px">
+      <h2 id="deploylog-title" style="margin:0">Deploy</h2>
+      <span id="deploylog-state"></span>
+    </div>
+    <div class="deploy-facts" id="deploylog-facts"></div>
+    <div class="section-head" style="margin:12px 0 6px">
+      <h2 style="font-size:13px;margin:0">Log</h2>
+      <div class="section-tools">
+        <label class="check" id="deploylog-follow-wrap"><input type="checkbox" id="deploylog-follow" checked /> Follow</label>
+        <button type="button" class="btn tiny" id="btn-deploylog-download">Download log</button>
+      </div>
+    </div>
+    <pre class="log tall" id="deploylog-log"></pre>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop hidden" id="modal-app-progress">
   <div class="modal" style="max-width:980px">
     <div class="section-head" style="margin-bottom:4px">

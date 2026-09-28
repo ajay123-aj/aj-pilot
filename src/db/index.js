@@ -440,6 +440,32 @@ async function createSchema() {
       CONSTRAINT fk_env_org FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // Every deploy of an app — who or what started it, the commit, and its full log.
+    `CREATE TABLE IF NOT EXISTS deployments (
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      org_id      INT NULL,
+      app_id      INT NOT NULL,
+      \`trigger\`   VARCHAR(20) NOT NULL DEFAULT 'manual',
+      reason      VARCHAR(500),
+      user_id     INT NULL,
+      branch      VARCHAR(190),
+      kind        VARCHAR(10),
+      sha         VARCHAR(64),
+      message     VARCHAR(255),
+      author      VARCHAR(190),
+      committed_at DATETIME NULL,
+      pr_number   VARCHAR(20),
+      pr_title    VARCHAR(255),
+      pr_from     VARCHAR(190),
+      status      VARCHAR(20) NOT NULL DEFAULT 'running',
+      error       TEXT,
+      log         MEDIUMTEXT,
+      started_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at DATETIME NULL,
+      KEY idx_deploy_app (app_id, id),
+      CONSTRAINT fk_deploy_app FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     `CREATE TABLE IF NOT EXISTS activity_log (
       id         INT AUTO_INCREMENT PRIMARY KEY,
       entity     VARCHAR(50) NOT NULL,

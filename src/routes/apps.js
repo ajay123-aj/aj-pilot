@@ -9,6 +9,7 @@
 
 import { Router } from 'express';
 import { all, one, run, logActivity } from '../db/index.js';
+import { currentUserId } from '../lib/context.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { loadGitCredential } from '../lib/gitAccounts.js';
 import { readRepoFile, listRepoRoot, listBranches, authenticatedCloneUrl, listRepositories, findProjectFolders } from '../lib/git.js';
@@ -90,6 +91,9 @@ async function publicApp(row) {
 
   const envKeys = storedEnv(row).map(([k]) => k);
   const environment = row.environment_id ? await one('SELECT id, name FROM environments WHERE id = ?', [row.environment_id]) : null;
+  // The deploy happening now: what started it and which commit, for the "in progress" banner.
+  const running = row.status === 'deploying'
+    ? await one(`SELECT ${DEPLOY_COLS} FROM deployments WHERE app_id = ? AND status = 'running' ORDER BY id DESC LIMIT 1`, [row.id]) : null;
 
   return {
     ...rest,
@@ -110,6 +114,7 @@ async function publicApp(row) {
       error: row.auto_error || null,
     },
     deployedCommit: row.deployed_sha ? { sha: row.deployed_sha, short: row.deployed_sha.slice(0, 7), message: row.deployed_message || '' } : null,
+    currentDeploy: running ? await publicDeployment(running, row) : null,
     server: server || null,
     account: account || null,
     registry,
@@ -506,12 +511,57 @@ appsRouter.post('/:id/auto-deploy/check', async (req, res, next) => {
  * one UPDATE, so two triggers for the same commit (a push and its merge event)
  * cannot both start one.
  */
-export async function deployNow(id, { reason = '' } = {}) {
+export async function deployNow(id, { reason = '', meta = null } = {}) {
   const claimed = await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ? AND status <> 'deploying'", [id]);
   if (!claimed.affectedRows) return false;
-  startDeployment(id, { first: false, reason });
+  startDeployment(id, { first: false, reason, meta });
   return true;
 }
+
+/* ------------------------------------------------------ deploy history */
+
+const DEPLOY_COLS = 'id, `trigger`, reason, user_id, branch, kind, sha, message, author, committed_at, pr_number, pr_title, pr_from, status, error, started_at, finished_at';
+
+async function publicDeployment(d, app) {
+  const user = d.user_id ? await one('SELECT name FROM users WHERE id = ?', [d.user_id]) : null;
+  // A "running" row whose app is no longer deploying was cut off by a restart.
+  const status = d.status === 'running' && app.status !== 'deploying' ? 'interrupted' : d.status;
+  return {
+    id: d.id,
+    trigger: d.trigger,
+    reason: d.reason,
+    by: user?.name || null,
+    branch: d.branch,
+    kind: d.kind,
+    commit: d.sha ? { sha: d.sha, short: d.sha.slice(0, 7), message: d.message, author: d.author, at: d.committed_at } : null,
+    pr: d.pr_number ? { number: d.pr_number, title: d.pr_title, from: d.pr_from } : null,
+    status,
+    error: d.error,
+    startedAt: d.started_at,
+    finishedAt: d.finished_at,
+  };
+}
+
+appsRouter.get('/:id/deployments', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    const rows = await all(`SELECT ${DEPLOY_COLS} FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT 50`, [row.id]);
+    res.json({ deployments: await Promise.all(rows.map((d) => publicDeployment(d, row))) });
+  } catch (err) { next(err); }
+});
+
+/** One deploy with its full log — the running one reads the live log. */
+appsRouter.get('/:id/deployments/:did', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    const d = await one(`SELECT ${DEPLOY_COLS}, log FROM deployments WHERE id = ? AND app_id = ?`, [Number(req.params.did), row.id]);
+    if (!d) return res.status(404).json({ error: 'Deploy not found' });
+    const running = d.status === 'running' && row.status === 'deploying';
+    res.json({ ...(await publicDeployment(d, row)), log: running ? (row.deploy_log || '') : (d.log || ''), live: running });
+  } catch (err) { next(err); }
+});
 
 /* ----------------------------------------------------------------- edit */
 
@@ -620,16 +670,58 @@ function startDeployment(id, options) {
     console.error('[apps] deployment crashed:', err);
     await run("UPDATE apps SET status = 'error', last_error = ? WHERE id = ?",
       [`The deployment stopped unexpectedly: ${err.message}`, id]).catch(() => {});
+    await run("UPDATE deployments SET status = 'failed', error = ?, finished_at = NOW() WHERE app_id = ? AND status = 'running'",
+      [`The deployment stopped unexpectedly: ${err.message}`, id]).catch(() => {});
   });
 }
 
-/** The commit the clone step reported: "::commit::<sha>::<subject>". */
+/**
+ * The commit the clone step reported:
+ * "::commit::<sha>::<commit time>::<parents>::<author>::<subject>" (two parents is a merge).
+ */
 function builtCommit(log) {
-  const m = /^::commit::([0-9a-f]{40})::(.*)$/m.exec(String(log || ''));
-  return m ? { sha: m[1], message: m[2].slice(0, 255) } : null;
+  const line = /^::commit::([0-9a-f]{40})::(.*)$/m.exec(String(log || ''));
+  if (!line) return null;
+  const parts = line[2].split('::');
+  // Older logs carry only the subject after the SHA.
+  if (parts.length < 4) return { sha: line[1], message: line[2].slice(0, 255), author: null, committedAt: null, parents: null };
+  const [when, parents, author, ...subject] = parts;
+  const at = new Date(when);
+  return {
+    sha: line[1], message: subject.join('::').slice(0, 255), author: author || null,
+    committedAt: Number.isNaN(at.getTime()) ? null : at, parents: /^\d+$/.test(parents) ? Number(parents) : null,
+  };
 }
 
-async function runDeployment(id, { first, reason = '' }) {
+/** A deploy is recorded when it starts and completed when it ends — the history, with every log. */
+async function openDeployment(row, { first, reason, meta }) {
+  const trigger = meta?.trigger || (first ? 'first' : 'manual');
+  const { insertId } = await run(
+    `INSERT INTO deployments (org_id, app_id, \`trigger\`, reason, user_id, branch, kind, sha, message, author, committed_at, pr_number, pr_title, pr_from)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [row.org_id, row.id, trigger, reason || null, currentUserId(), row.branch, meta?.kind || null, meta?.sha || null,
+      meta?.message ? String(meta.message).slice(0, 255) : null, meta?.author || null,
+      meta?.date ? new Date(meta.date) : null, meta?.pr?.number != null ? String(meta.pr.number) : null,
+      meta?.pr?.title ? String(meta.pr.title).slice(0, 255) : null, meta?.pr?.from || null]
+  );
+  // The last fifty are kept, with their logs.
+  await run(`DELETE FROM deployments WHERE app_id = ? AND id NOT IN (
+      SELECT id FROM (SELECT id FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT 50) keep)`, [row.id, row.id]);
+  return insertId;
+}
+
+async function closeDeployment(deployId, { status, error = null, log }) {
+  const c = builtCommit(log);
+  await run(
+    `UPDATE deployments SET status = ?, error = ?, log = ?, finished_at = NOW(),
+       sha = COALESCE(?, sha), message = COALESCE(?, message), author = COALESCE(author, ?), committed_at = COALESCE(committed_at, ?),
+       kind = COALESCE(kind, ?) WHERE id = ?`,
+    [status, error, String(log || '').slice(-200000), c?.sha || null, c?.message || null, c?.author || null, c?.committedAt || null,
+      c?.parents != null ? (c.parents >= 2 ? 'merge' : 'commit') : null, deployId]
+  );
+}
+
+async function runDeployment(id, { first, reason = '', meta = null }) {
   const row = await one('SELECT * FROM apps WHERE id = ?', [id]);
   const server = await one('SELECT * FROM servers WHERE id = ?', [row.server_id]);
 
@@ -649,6 +741,9 @@ async function runDeployment(id, { first, reason = '' }) {
   const now = () => Math.floor(Date.now() / 1000);
   const note = (key, label, detail = '') => progress(`::step::${key}::${label}::${now()}\n${detail ? `${detail}\n` : ''}`);
   await run('UPDATE apps SET deploy_log = NULL WHERE id = ?', [id]);
+  // Anything still "running" from before (a panel restart mid-deploy) did not finish.
+  await run("UPDATE deployments SET status = 'interrupted', finished_at = NOW() WHERE app_id = ? AND status = 'running'", [id]);
+  const deployId = await openDeployment(row, { first, reason, meta });
 
   const fail = async (message, detail = null) => {
     await flush();
@@ -660,6 +755,7 @@ async function runDeployment(id, { first, reason = '' }) {
     // A commit that failed is not tried again by auto deploy — the next push is.
     const tried = builtCommit(live);
     if (tried) await run('UPDATE apps SET auto_seen_sha = ? WHERE id = ?', [tried.sha, id]);
+    await closeDeployment(deployId, { status: 'failed', error: message, log: text });
     await logActivity('app', id, 'deploy_failed', `${row.name}: ${message}`, 'error');
   };
 
@@ -744,6 +840,7 @@ async function runDeployment(id, { first, reason = '' }) {
       [result.containerId, result.imageBytes, live.slice(-120000), JSON.stringify(result.containers || []), id]
     );
     const commit = builtCommit(live);
+    await closeDeployment(deployId, { status: 'success', log: live });
     if (commit) {
       await run('UPDATE apps SET deployed_sha = ?, deployed_message = ?, auto_seen_sha = ? WHERE id = ?',
         [commit.sha, commit.message, commit.sha, id]);

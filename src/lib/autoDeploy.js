@@ -80,7 +80,15 @@ export async function considerHead(app, head, { source, merged = null, account =
     : `new commit ${short(head.sha)} "${head.message || ''}"${head.author ? ` by ${head.author}` : ''}`;
   const reason = `Auto deploy (${source}): ${what} on ${app.branch}`;
   await logActivity('app', app.id, 'auto_deploy', `${app.name}: ${reason}`);
-  await deployFn(app.id, { reason });
+  await deployFn(app.id, {
+    reason,
+    meta: {
+      trigger: 'auto',
+      kind: merge || head.parents >= 2 ? 'merge' : 'commit',
+      sha: head.sha, message: head.message, author: head.author, date: head.date || null,
+      pr: merge?.number != null ? { number: merge.number, title: merge.title, from: merge.from } : null,
+    },
+  });
   return { deployed: true, sha: head.sha };
 }
 
@@ -139,28 +147,28 @@ function readDelivery(req) {
   if (gh === 'ping' || bb === 'diagnostics:ping') return { ping: true };
   if (gh === 'push' && !b.deleted) {
     const c = b.head_commit || {};
-    return { branch: String(b.ref || '').replace(/^refs\/heads\//, ''), head: { sha: b.after, message: String(c.message || '').split('\n')[0], author: c.author?.name } };
+    return { branch: String(b.ref || '').replace(/^refs\/heads\//, ''), head: { sha: b.after, message: String(c.message || '').split('\n')[0], author: c.author?.name, date: c.timestamp } };
   }
   if (gh === 'pull_request' && b.action === 'closed' && b.pull_request?.merged) {
     const pr = b.pull_request;
-    return { branch: pr.base?.ref, head: { sha: pr.merge_commit_sha, message: pr.title, author: pr.merged_by?.login }, merged: { number: pr.number, title: pr.title, from: pr.head?.ref } };
+    return { branch: pr.base?.ref, head: { sha: pr.merge_commit_sha, message: pr.title, author: pr.merged_by?.login, date: pr.merged_at }, merged: { number: pr.number, title: pr.title, from: pr.head?.ref } };
   }
   if (gl === 'Push Hook') {
     const c = (b.commits || []).find((x) => x.id === b.checkout_sha) || (b.commits || []).slice(-1)[0] || {};
-    return { branch: String(b.ref || '').replace(/^refs\/heads\//, ''), head: { sha: b.checkout_sha || b.after, message: String(c.title || c.message || '').split('\n')[0], author: c.author?.name } };
+    return { branch: String(b.ref || '').replace(/^refs\/heads\//, ''), head: { sha: b.checkout_sha || b.after, message: String(c.title || c.message || '').split('\n')[0], author: c.author?.name, date: c.timestamp } };
   }
   if (gl === 'Merge Request Hook' && b.object_attributes?.action === 'merge') {
     const mr = b.object_attributes;
-    return { branch: mr.target_branch, head: { sha: mr.merge_commit_sha || mr.last_commit?.id, message: mr.title, author: b.user?.name }, merged: { number: mr.iid, title: mr.title, from: mr.source_branch } };
+    return { branch: mr.target_branch, head: { sha: mr.merge_commit_sha || mr.last_commit?.id, message: mr.title, author: b.user?.name, date: mr.updated_at }, merged: { number: mr.iid, title: mr.title, from: mr.source_branch } };
   }
   if (bb === 'repo:push') {
     const change = (b.push?.changes || []).find((c) => c.new?.type === 'branch');
     if (!change) return null;
-    return { branch: change.new.name, head: { sha: change.new.target?.hash, message: String(change.new.target?.message || '').split('\n')[0], author: change.new.target?.author?.user?.display_name } };
+    return { branch: change.new.name, head: { sha: change.new.target?.hash, message: String(change.new.target?.message || '').split('\n')[0], author: change.new.target?.author?.user?.display_name, date: change.new.target?.date } };
   }
   if (bb === 'pullrequest:fulfilled') {
     const pr = b.pullrequest || {};
-    return { branch: pr.destination?.branch?.name, head: { sha: pr.merge_commit?.hash, message: pr.title }, merged: { number: pr.id, title: pr.title, from: pr.source?.branch?.name } };
+    return { branch: pr.destination?.branch?.name, head: { sha: pr.merge_commit?.hash, message: pr.title, date: pr.updated_on }, merged: { number: pr.id, title: pr.title, from: pr.source?.branch?.name } };
   }
   return null;
 }
