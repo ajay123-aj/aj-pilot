@@ -1632,6 +1632,22 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 .deploy-banner.compact { margin: 10px 0 8px; padding: 10px 12px; }
 .deploy-banner.compact .deploy-banner-text { font-size: 12.5px; }
 
+/* the step-by-step progress bar inside the banner */
+.deploy-bar { flex: 1 1 100%; margin-top: 4px; }
+.deploy-bar-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12.5px; margin-bottom: 6px; }
+.deploy-bar-head b { font-weight: 700; }
+.deploy-segments { display: flex; gap: 4px; }
+.deploy-segments span { flex: 1; height: 8px; border-radius: 3px; background: var(--surface-3); border: 1px solid var(--line); }
+.deploy-segments .seg-done { background: var(--ok); border-color: transparent; }
+.deploy-segments .seg-now {
+  border-color: transparent;
+  background: repeating-linear-gradient(45deg, var(--accent) 0 8px, color-mix(in srgb, var(--accent) 60%, #fff) 8px 16px);
+  background-size: 200% 100%;
+  animation: seg-move 1s linear infinite;
+}
+@keyframes seg-move { to { background-position: -22.6px 0; } }
+.deploy-banner.compact .deploy-segments span { height: 7px; }
+
 /* merge or commit, in the history */
 .badge.kind-merge { color: #8b5cf6; border-color: rgba(139, 92, 246, .35); background: rgba(139, 92, 246, .10); }
 .badge.kind-commit { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-soft); }

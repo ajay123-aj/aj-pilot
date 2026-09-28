@@ -6411,6 +6411,8 @@ function tickElapsed() {
     el.textContent = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
   }
 }
+// Every second, so "1m 20s" counts up smoothly on cards and on the app page alike.
+setInterval(() => { if (document.querySelector('[data-since]')) tickElapsed(); }, 1000);
 
 async function loadApps({ quiet = false } = {}) {
   const box = $('#app-list');
@@ -6483,7 +6485,7 @@ function appCard(a) {
         <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'in progress' : esc(a.status)}</span>
       </div>
     </div>
-    ${busyNow ? `${deployBanner(a, { compact: true })}<div class="deploy-progress">
+    ${busyNow && a.currentDeploy ? deployBanner(a, { compact: true }) : busyNow ? `<div class="deploy-progress">
       <div class="muted small"><span class="spinner"></span>${a.currentStep ? `${esc(a.currentStep)}…` : 'Starting…'}
         <span data-since="${esc(a.deploy_started_at || '')}"></span></div>
       <div class="meter indeterminate"><span></span></div>
@@ -13596,6 +13598,30 @@ function deployDuration(d) {
   return a && b ? duration((b - a) / 1000) : '—';
 }
 
+/**
+ * How far a running deploy has got: one segment per step (done, running now,
+ * still to come), "Step 5 of 8 · Build the image", a percentage and the time so far.
+ */
+function deployProgressHtml(a) {
+  const d = a.currentDeploy;
+  const seen = d?.steps || [];
+  // Pushing to Docker Hub is a step only for an app that pushes.
+  const plan = DEPLOY_STEPS.filter(([key]) => key !== 'push' || a.pushed || seen.includes('push'));
+  const current = seen[seen.length - 1];
+  const at = Math.max(0, plan.findIndex(([key]) => key === current));
+  const started = seen.length > 0;
+  // A step counts half while it runs, so the bar moves as soon as it starts.
+  const pct = started ? Math.min(99, Math.round(((at + 0.5) / plan.length) * 100)) : 2;
+  const label = started ? (plan[at]?.[1] || a.currentStep || 'Working') : 'Starting';
+  return `<div class="deploy-bar" title="${esc(plan.map(([, l]) => l).join(' → '))}">
+    <div class="deploy-bar-head">
+      <span><b>Step ${started ? at + 1 : 0} of ${plan.length}</b> · ${esc(label)}…</span>
+      <span><b>${pct}%</b> · <span data-since="${esc(a.deploy_started_at || d?.startedAt || '')}"></span></span>
+    </div>
+    <div class="deploy-segments">${plan.map(([key, l], i) => `<span class="seg-${!started ? 'todo' : i < at ? 'done' : i === at ? 'now' : 'todo'}" title="${esc(l)}"></span>`).join('')}</div>
+  </div>`;
+}
+
 /** The banner on a card or page while a deploy runs: why, which change, and the live log. */
 function deployBanner(a, { compact = false } = {}) {
   const d = a.currentDeploy;
@@ -13615,6 +13641,7 @@ function deployBanner(a, { compact = false } = {}) {
       <button class="btn tiny primary" data-app-action="progress" data-id="${a.id}" data-name="${esc(a.name)}"><span class="spinner"></span>View live logs</button>
       ${compact ? '' : `<button class="btn tiny" data-app-action="history" data-id="${a.id}" data-name="${esc(a.name)}">All deploys</button>`}
     </div>
+    ${deployProgressHtml(a)}
   </div>`;
 }
 

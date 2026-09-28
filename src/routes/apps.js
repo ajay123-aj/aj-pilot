@@ -114,7 +114,11 @@ async function publicApp(row) {
       error: row.auto_error || null,
     },
     deployedCommit: row.deployed_sha ? { sha: row.deployed_sha, short: row.deployed_sha.slice(0, 7), message: row.deployed_message || '' } : null,
-    currentDeploy: running ? await publicDeployment(running, row) : null,
+    currentDeploy: running ? {
+      ...(await publicDeployment(running, row)),
+      // The steps the log has reached, in order — the card draws its progress bar from them.
+      steps: [...new Set([...String(deploy_log || '').matchAll(/^::step::([a-z]+)::/gm)].map((m) => m[1]))],
+    } : null,
     server: server || null,
     account: account || null,
     registry,
