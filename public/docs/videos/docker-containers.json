@@ -1,0 +1,29 @@
+{
+  "duration": 46,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server’s Docker tab"
+    },
+    {
+      "t": 10.9,
+      "label": "Every container: its image, state, ports and who created it"
+    },
+    {
+      "t": 15,
+      "label": "Click a name for its details — ports, volumes, networks, health"
+    },
+    {
+      "t": 23.4,
+      "label": "Actions → Logs: the container’s latest output"
+    },
+    {
+      "t": 32,
+      "label": "Actions → Restart, stop, pause or remove"
+    },
+    {
+      "t": 40.1,
+      "label": "Images, volumes and networks are further down the tab"
+    }
+  ]
+}

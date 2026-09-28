@@ -7,6 +7,10 @@
  * super admins only and never appear publicly.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { ROOT } from '../config.js';
+
 const tip = (html) => `<div class="doc-tip">💡 ${html}</div>`;
 const warn = (html) => `<div class="doc-warn">⚠️ ${html}</div>`;
 
@@ -59,11 +63,28 @@ ${tip('Stuck? <a href="/docs/troubleshooting">Troubleshooting</a> covers the pro
   <li><b>Name</b> — anything that helps you recognise it, e.g. <code>prod-web-01</code>.</li>
   <li><b>Host / IP</b> and <b>Port</b> — the address you would use with <code>ssh</code>; the port is usually <code>22</code>.</li>
   <li><b>SSH username</b> — e.g. <code>root</code> or <code>ubuntu</code>.</li>
-  <li><b>Authentication</b> — a <b>password</b>, or a <b>private key</b> (paste the whole block, including the
-    <code>-----BEGIN … KEY-----</code> lines) with its passphrase if it has one.</li>
+  <li><b>Authentication</b> — a <b>password</b>, or a <b>private key</b> with its passphrase if it has one.
+    For a key, click <b>Import key file</b> and choose it (or drop the file on the key box), or paste the whole block,
+    including the <code>-----BEGIN … KEY-----</code> lines.</li>
   <li><b>Sudo password</b> — only if your user needs a password for <code>sudo</code>.</li>
   <li>Click <b>Test connection</b>. When it succeeds, click <b>Save &amp; connect</b>.</li>
 </ol>
+<h2>Importing a private key file</h2>
+<p>Choose <b>Private key</b> under Authentication, then <b>Import key file</b>. The file is read in your browser and only
+its text goes into the form. Your key is usually in the <code>.ssh</code> folder of your home folder:</p>
+<table class="doc-table">
+  <tr><th>Computer</th><th>Where the key usually is</th></tr>
+  <tr><td>Windows</td><td><code>C:\\Users\\<i>you</i>\\.ssh\\id_ed25519</code> or <code>id_rsa</code></td></tr>
+  <tr><td>macOS / Linux</td><td><code>~/.ssh/id_ed25519</code> or <code>~/.ssh/id_rsa</code></td></tr>
+  <tr><td>Cloud provider</td><td>The <code>.pem</code> file you downloaded when the server was created (e.g. AWS)</td></tr>
+</table>
+<ul>
+  <li><b>Choose the private key</b> — the file <i>without</i> <code>.pub</code>. If you pick the <code>.pub</code> file,
+    the panel tells you and nothing is filled in.</li>
+  <li><b>A key with a passphrase</b> is recognised; the panel asks for it and moves you to the <b>Key passphrase</b> box.</li>
+  <li><b>A PuTTY key (.ppk)</b> has to be converted first: open it in PuTTYgen, choose
+    <b>Conversions → Export OpenSSH key</b>, and import that file.</li>
+</ul>
 <p>AJ Pilot then reads the whole machine — hardware, disks, network, open ports, services — and keeps an eye on it:
 the dot next to each server turns red within seconds if it goes offline.</p>
 ${tip('Every password and key is encrypted before it is stored, and is never shown again.')}
@@ -75,7 +96,8 @@ ${warn('"Connection timed out" means the server could not be reached: check the 
     title: 'The server page and its tabs',
     summary: 'What each tab on a server shows, and what you can do from it.',
     body: `
-<p>Click a server to open it. <b>Fetch system details</b> reads it again; <b>Test connection</b> checks the SSH login.</p>
+<p>Click a server to open it. <b>Fetch system details</b> reads it again; <b>Test connection</b> checks the SSH login;
+<b>Reboot</b> restarts the machine after you confirm — see <a href="/docs/reboot-a-server">Reboot a server</a>.</p>
 <table class="doc-table">
   <tr><th>Tab</th><th>What it is for</th></tr>
   <tr><td>Overview</td><td>Operating system, CPU, memory, disks and a summary of everything running.</td></tr>
@@ -88,6 +110,7 @@ ${warn('"Connection timed out" means the server could not be reached: check the 
   <tr><td>Docker</td><td>Containers, images, networks and volumes — details, logs, start, stop, restart, remove.</td></tr>
   <tr><td>Nginx</td><td>Sites, upstreams and SSL certificates. See <a href="/docs/nginx-and-ssl">Nginx sites &amp; SSL</a>.</td></tr>
   <tr><td>Cron</td><td>Scheduled jobs. See <a href="/docs/cron-jobs">Scheduled jobs</a>.</td></tr>
+  <tr><td>Users</td><td>Ubuntu logins, passwords, sudo and SSH keys. See <a href="/docs/server-users">Server users &amp; SSH keys</a>.</td></tr>
   <tr><td>Services</td><td>systemd services. See <a href="/docs/create-a-service">Create a service</a>.</td></tr>
   <tr><td>Runners</td><td>CI runners installed on this server.</td></tr>
 </table>`,
@@ -131,6 +154,110 @@ ${tip('Only services AJ Pilot created can be deleted from here, so a system serv
 </ol>
 <p>Edit or remove jobs from the same list.</p>
 ${tip('Send a job\'s output to a file (<code>&gt;&gt; /var/log/myjob.log 2&gt;&amp;1</code>) so you can read what happened later in the <b>Storage</b> tab.')}`,
+  },
+  {
+    slug: 'server-users',
+    category: 'Servers',
+    title: 'Server users & SSH keys',
+    summary: 'Add, edit, lock and delete Ubuntu users, set passwords and sudo, and generate SSH keys — without a terminal.',
+    body: `
+<p>The <b>Users</b> tab of a server lists its Ubuntu accounts and lets you manage them: give a developer, a CI job or a
+client their own login, and take it away again when they no longer need it.</p>
+
+<h2>Who can use it</h2>
+<p>Two checks happen before anything is shown. If either fails, the tab says <b>“You are not permitted”</b> and why:</p>
+<ul>
+  <li><b>Your role</b> — admins and editors can open the tab and add or change users; only admins can delete them or
+    remove a key. View-only members are not permitted, because a Linux account can be given root. See
+    <a href="/docs/team-and-roles">Team &amp; roles</a>.</li>
+  <li><b>The server's SSH login</b> — the account the panel connects with must be able to become root: be
+    <code>root</code>, have passwordless sudo, or have its sudo password stored on the server
+    (<b>Edit server → Sudo password</b>). Fix that, then click <b>Check again</b>.</li>
+</ul>
+
+<h2>What the list shows</h2>
+<p>Each user with its UID, whether it has <b>sudo</b>, how it logs in (<b>password</b>, <b>no password</b>, number of
+<b>SSH keys</b>, <b>locked</b>), its groups, shell and last login. The account the panel logs in with is marked
+<b>panel login</b>. Tick <b>Show system accounts</b> to see the accounts that belong to packages
+(<code>www-data</code>, <code>mysql</code>…) — they are read-only.</p>
+
+<h2>Add a user</h2>
+<ol class="doc-steps">
+  <li>Open the server, go to the <b>Users</b> tab and click <b>+ Add user</b>.</li>
+  <li><b>Username</b> — lowercase letters, digits, <code>-</code> and <code>_</code>, e.g. <code>deploy</code>.
+    <b>Full name</b> is optional.</li>
+  <li><b>Password</b> — type one twice, or click <b>Generate a strong password</b> (it is copied for you). Leave it
+    empty for a key-only login.</li>
+  <li><b>SSH keys</b> — tick <b>Generate a new key pair</b>, and/or paste public keys, one per line
+    (<code>ssh-ed25519 AAAA… you@laptop</code>).</li>
+  <li><b>Access</b> — tick <b>Administrator (sudo)</b> to let the user run commands as root, and
+    <b>Without asking for the password</b> for automation or key-only users. Choose the <b>Login shell</b> and any
+    <b>Extra groups</b> — <code>docker</code> to run containers, <code>www-data</code> for web files.</li>
+  <li>Click <b>Add the user</b>.</li>
+</ol>
+${tip('A user needs a password, an SSH key, or both — otherwise nobody could log in as them, and the panel will not create it.')}
+
+<h2>New SSH key — save the private key</h2>
+<p>When you generate a key, a fresh <code>ed25519</code> key pair is made on the server. Its public half goes into the
+user's <code>~/.ssh/authorized_keys</code>; the private half is shown to you <b>once</b>:</p>
+<ol class="doc-steps">
+  <li>Click <b>Download</b> (or <b>Copy</b>) and keep the file safe — e.g. <code>~/.ssh/deploy_203.0.113.10</code>.</li>
+  <li>On macOS or Linux, run <code>chmod 600</code> on it.</li>
+  <li>Connect with <code>ssh -i ~/.ssh/deploy_203.0.113.10 deploy@203.0.113.10</code>.</li>
+</ol>
+${warn('The private key is not kept by the panel and is deleted from the server. If you close the window without saving it, generate a new key and remove the old one.')}
+
+<h2>Change a user</h2>
+<p>Open the row's <b>Actions</b> menu:</p>
+<table class="doc-table">
+  <tr><th>Action</th><th>What it does</th></tr>
+  <tr><td>Edit</td><td>Full name, new password (leave empty to keep the old one), shell, groups and sudo.</td></tr>
+  <tr><td>SSH keys</td><td>Lists the user's keys with their label and fingerprint. <b>Generate a new key</b> or
+    <b>Paste a public key</b>, and <b>Remove</b> a key someone should no longer use.</td></tr>
+  <tr><td>Lock login</td><td>Refuses password and SSH key logins until you <b>Unlock</b> it. Files and running jobs
+    are left alone — the safe choice when someone leaves for a while.</td></tr>
+  <tr><td>Delete</td><td>Stops the user's processes and removes the account. Choose <b>Delete, keep files</b> or
+    <b>Delete with home folder</b>.</td></tr>
+  <tr><td>Change password</td><td>For <code>root</code> only — root's password and SSH keys are the only things the panel
+    changes on it.</td></tr>
+</table>
+
+<h2>What the panel will never do</h2>
+<ul>
+  <li>Delete, lock or rename <b>root</b>.</li>
+  <li>Delete or lock the <b>panel login</b>, take its sudo away or remove its shell — the panel would lose access to the server.</li>
+  <li>Change <b>system accounts</b> — they belong to packages.</li>
+</ul>
+${tip('Re-creating a user whose home folder was kept? Its files are handed to the new account, but the old <code>authorized_keys</code> is disabled, so the previous owner cannot log in with their old key.')}
+${warn('Removing an SSH key from the panel login can lock the panel out if it is the key the panel uses. The panel warns you before removing a key from that account.')}
+<p>Every change is written to the <b>Activity</b> log.</p>`,
+  },
+  {
+    slug: 'reboot-a-server',
+    category: 'Servers',
+    title: 'Reboot a server',
+    summary: 'Restart a server safely from its page, after a confirmation, and watch it come back.',
+    body: `
+<p>Reboot after kernel or security updates (the <b>System</b> tab shows when one is needed), or when a machine has stopped
+responding properly.</p>
+<ol class="doc-steps">
+  <li>Open the server and click <b>Reboot</b> at the top of its page.</li>
+  <li>Read the confirmation: every app, database and service on the server stops answering until it is back, and anyone
+    signed in to it is disconnected.</li>
+  <li>Click <b>Reboot now</b> to go ahead. <b>Cancel</b>, <kbd>Esc</kbd> or clicking outside changes nothing.</li>
+  <li>The status turns <b>rebooting</b> and the page waits for the server. You are told when it is <b>back online</b> —
+    usually within a minute or two.</li>
+</ol>
+
+<h2>Who can reboot</h2>
+<ul>
+  <li><b>Admins and editors</b> see the <b>Reboot</b> button; view-only members do not.</li>
+  <li>The server's SSH login must be able to become root. If it cannot, you see <b>“You are not permitted to reboot this
+    server”</b> — connect as root, give the login sudo, or store its sudo password with <b>Edit server</b>.</li>
+</ul>
+${tip('Apps deployed with AJ Pilot start again on their own after a reboot (their restart setting is <b>unless-stopped</b> unless you changed it), and so do services that are enabled on boot. The <b>System</b> tab shows <b>Reboot required</b> when updates are waiting for one.')}
+${warn('If the server has not answered after five minutes, the page tells you. Check it in your cloud provider\'s console — a machine can hang while shutting down, or a disk check can make the start slow.')}
+<p>Every reboot is written to the <b>Activity</b> log with who started it.</p>`,
   },
   {
     slug: 'file-manager',
@@ -191,6 +318,73 @@ Docker installed (<a href="/docs/one-click-installs">how</a>).</p>
   <li>Edit environment variables and ports from the app's page.</li>
 </ul>
 ${warn('If a deploy fails, click <b>Check progress</b>: the step that failed shows the exact error from the build.')}`,
+  },
+  {
+    slug: 'auto-deploy',
+    category: 'Apps & deployments',
+    title: 'Auto deploy on merge or push',
+    summary: 'Let an app rebuild itself when its branch changes — on every push, or only on merged pull / merge requests.',
+    body: `
+<p>With auto deploy on, an app follows its branch: when <code>main</code> (or <code>master</code>, <code>dev</code>, any branch)
+changes, the panel rebuilds and restarts it by itself, and records exactly which change went live.</p>
+<h2>Turn it on</h2>
+<ol class="doc-steps">
+  <li>When you create the app (<b>Apps → + Custom service</b>) pick the <b>branch</b>, and tick
+    <b>Auto deploy when <i>branch</i> changes</b>. For an existing app, open it and use its <b>Auto deploy</b> tab.</li>
+  <li>Choose what deploys it:
+    <ul>
+      <li><b>Every push or commit</b> — any new commit on the branch, direct pushes and merges. Good for a dev or staging server.</li>
+      <li><b>Only merged pull / merge requests</b> — a reviewed change merged into the branch, e.g. <code>dev → main</code>.
+        Direct pushes are left alone. Good for production.</li>
+    </ul>
+  </li>
+  <li>Save. The panel adds a <b>webhook</b> to the repository on GitHub, GitLab or Bitbucket, so a change starts a deploy
+    within seconds.</li>
+</ol>
+${tip('If the panel cannot be reached from the internet (a server at home or behind a firewall), the webhook cannot call it — the branch is then checked every minute instead, and the deploy starts at the next check.')}
+<h2>Watch a deploy</h2>
+<ul>
+  <li>The app's card shows a <b>progress bar</b> with the step it is on while an auto deploy runs.</li>
+  <li>Open it for the <b>live log</b>, step by step.</li>
+</ul>
+<h2>Deploy history</h2>
+<p>The <b>Deploy history</b> tab of an app keeps every deploy: the <b>branch</b>, whether it came from a <b>merge</b> (with the
+pull / merge request number and title) or a <b>commit</b>, the commit and its author, <b>when</b> it happened,
+whether it worked — and its full <b>log</b>.</p>
+${warn('Auto deploy needs the git account that owns the repository to be connected (see <a href="/docs/connect-github-gitlab">Connect GitHub or GitLab</a>) so the webhook can be added. If adding it fails, the minute-by-minute check is used instead.')}`,
+  },
+  {
+    slug: 'environments',
+    category: 'Apps & deployments',
+    title: 'Environments',
+    summary: 'Keep database URLs, API keys and secrets once — encrypted — and use them for any app, install or service.',
+    body: `
+<p>An <b>environment</b> is a named set of variables — <code>shop-production</code>, <code>shop-staging</code> — kept once in
+the panel instead of pasted into every app. Values are encrypted with AES-256.</p>
+<h2>Create one</h2>
+<ol class="doc-steps">
+  <li>Open <b>Environments</b> in the main menu and click <b>+ New environment</b>.</li>
+  <li>Give it a <b>name</b> (and a description if you like).</li>
+  <li>Click <b>Import a .env file</b> to read an existing file — comments are skipped and quoted values keep their
+    spaces — and/or <b>+ Add variable</b> to type them. Switch to <b>.env text</b> to edit it as plain text.</li>
+  <li>Click <b>Save environment</b>.</li>
+</ol>
+${tip('<b>Import .env file</b> at the top of the Environments page creates a new environment straight from a file.')}
+<h2>Use it</h2>
+<p>When you create an <b>app</b>, a <b>one-click install</b> or a <b>systemd service</b>, the <b>Environment</b> box offers:</p>
+<ul>
+  <li><b>Use an existing one</b> — pick it, and its variables fill the form.</li>
+  <li><b>Create a new environment</b> — the variables you type are saved under the name you give, ready for next time.</li>
+  <li><b>None</b> — the variables are kept only with that app or service.</li>
+</ul>
+<h2>Manage them</h2>
+<p>Each environment's <b>Actions</b> menu has <b>View</b>, <b>Edit</b>, <b>Download .env</b>, <b>Duplicate</b> (a staging
+copy of production, say) and <b>Delete</b>. The list shows which apps and services use each one.</p>
+<ul>
+  <li><b>View</b> hides the values until you click <b>Show values</b>.</li>
+  <li>When you edit an environment that apps were made from, you can copy the change to them; their own extra values are kept.</li>
+  <li><b>View-only</b> team members see the variable names, never the values.</li>
+</ul>`,
   },
   {
     slug: 'app-domains',
@@ -499,11 +693,51 @@ visitor's location, computer and whether they enquired before.</p>
 ];
 
 /** The guides a visitor may see: everything except super-admin guides, unless asked for. */
+/*
+ * Video walkthroughs. A guide gets a player at the top as soon as its video is
+ * in public/docs/videos, named after the guide: <slug>.webm or <slug>.mp4.
+ * Optional next to it: <slug>.jpg (the still shown before it plays) and
+ * <slug>.json — { "duration": 74, "chapters": [{ "t": 0, "label": "…" }] } —
+ * which lists the steps under the player, each one a jump into the video.
+ */
+const VIDEO_DIR = path.join(ROOT, 'public', 'docs', 'videos');
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+export function videoFor(slug) {
+  const ext = ['webm', 'mp4'].find((e) => fs.existsSync(path.join(VIDEO_DIR, `${slug}.${e}`)));
+  if (!ext) return null;
+  const stamp = Math.floor(fs.statSync(path.join(VIDEO_DIR, `${slug}.${ext}`)).mtimeMs / 1000);
+  let meta = {};
+  try { meta = JSON.parse(fs.readFileSync(path.join(VIDEO_DIR, `${slug}.json`), 'utf8')); } catch { /* no chapters */ }
+  return {
+    src: `/docs/videos/${slug}.${ext}?v=${stamp}`,
+    type: `video/${ext}`,
+    poster: fs.existsSync(path.join(VIDEO_DIR, `${slug}.jpg`)) ? `/docs/videos/${slug}.jpg?v=${stamp}` : null,
+    duration: Number(meta.duration) || null,
+    chapters: Array.isArray(meta.chapters) ? meta.chapters.filter((c) => Number.isFinite(c.t) && c.label) : [],
+  };
+}
+
+function videoHtml(title, v) {
+  return `<figure class="doc-video">
+  <div class="doc-video-frame"><video controls preload="none" playsinline${v.poster ? ` poster="${v.poster}"` : ''} aria-label="${escHtml(`Video: ${title}`)}">
+    <source src="${v.src}" type="${v.type}" />
+  </video></div>
+  <figcaption><span class="doc-video-badge">▶ Video walkthrough</span>${v.duration ? ` <span>${clock(v.duration)}</span>` : ''}<span class="doc-video-note">no sound — the steps are captioned</span></figcaption>
+  ${v.chapters.length ? `<ol class="doc-chapters">${v.chapters.map((c) => `<li><button type="button" data-seek="${c.t}"><time>${clock(c.t)}</time>${escHtml(c.label)}</button></li>`).join('')}</ol>` : ''}
+</figure>`;
+}
+
 export function docsFor({ admin = false } = {}) {
   // In menu order — by category, then as written — so Previous / Next follow the menu.
   const rank = (d) => DOC_CATEGORIES.indexOf(d.category);
   return DOCS.filter((d) => admin || d.audience !== 'admin')
-    .map((d, i) => ({ d, i })).sort((a, b) => rank(a.d) - rank(b.d) || a.i - b.i).map(({ d }) => d);
+    .map((d, i) => ({ d, i })).sort((a, b) => rank(a.d) - rank(b.d) || a.i - b.i).map(({ d }) => d)
+    .map((d) => {
+      const video = videoFor(d.slug);
+      return video ? { ...d, video, body: videoHtml(d.title, video) + d.body } : d;
+    });
 }
 
 export const findDoc = (slug, opts) => docsFor(opts).find((d) => d.slug === slug) || null;

@@ -1,0 +1,41 @@
+{
+  "duration": 59,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open a server from the Servers list"
+    },
+    {
+      "t": 7.2,
+      "label": "The header: status, Test connection, Edit, Reboot and Fetch system details"
+    },
+    {
+      "t": 14.5,
+      "label": "Overview — a summary of everything on the machine; each tile opens its tab"
+    },
+    {
+      "t": 17,
+      "label": "Live — CPU, memory, disk and network in real time"
+    },
+    {
+      "t": 23.3,
+      "label": "Storage — disks, and a file manager"
+    },
+    {
+      "t": 27.9,
+      "label": "Network — addresses and every listening port"
+    },
+    {
+      "t": 32.3,
+      "label": "Processes and System — what is busy, updates, firewall, SSH"
+    },
+    {
+      "t": 39.7,
+      "label": "Apps, Docker, Nginx and Cron — each read live from the server"
+    },
+    {
+      "t": 47.2,
+      "label": "Users and Services — Ubuntu logins and systemd services"
+    }
+  ]
+}

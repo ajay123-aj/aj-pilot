@@ -1,0 +1,41 @@
+{
+  "duration": 52,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open your AJ Pilot address and click “Sign in”"
+    },
+    {
+      "t": 8.2,
+      "label": "Sign in with the email and password you were given"
+    },
+    {
+      "t": 16.5,
+      "label": "Servers — your Ubuntu machines, with their live status"
+    },
+    {
+      "t": 20.6,
+      "label": "Apps — deploy from GitHub or GitLab, with domains and auto deploy"
+    },
+    {
+      "t": 24.9,
+      "label": "Installations — Docker, databases and more, one click each"
+    },
+    {
+      "t": 29.1,
+      "label": "Environments — variables and secrets, kept once"
+    },
+    {
+      "t": 33.3,
+      "label": "Databases — MySQL, PostgreSQL, MongoDB and Redis"
+    },
+    {
+      "t": 37.5,
+      "label": "Account management — connect GitHub, GitLab, Cloudflare, Docker Hub"
+    },
+    {
+      "t": 41.9,
+      "label": "Plan & billing, and these Docs — always one click away"
+    }
+  ]
+}

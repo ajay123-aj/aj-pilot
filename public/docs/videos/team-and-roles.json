@@ -1,0 +1,37 @@
+{
+  "duration": 60,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open your menu (top right) → Settings"
+    },
+    {
+      "t": 8.4,
+      "label": "The Team tab lists everyone in your organisation"
+    },
+    {
+      "t": 12.2,
+      "label": "Click “+ Add person” — name, email and mobile"
+    },
+    {
+      "t": 21.8,
+      "label": "Choose a role — each one says what it allows"
+    },
+    {
+      "t": 31.5,
+      "label": "Set a first password, and add them"
+    },
+    {
+      "t": 40.1,
+      "label": "Actions: change a role, lock someone out, or remove them"
+    },
+    {
+      "t": 46.5,
+      "label": "Your account: name, email, mobile and password"
+    },
+    {
+      "t": 50.7,
+      "label": "Activity: every change, by whom and when"
+    }
+  ]
+}

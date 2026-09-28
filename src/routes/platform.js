@@ -271,7 +271,7 @@ platformRouter.put('/organisations/:id/subscription', async (req, res, next) => 
 
 /**
  * End any plan — free or paid — on a date, or now: after it the organisation
- * can still see everything but not add or change anything.
+ * sees only the renew page until the plan is renewed; nothing is deleted.
  *   { action: 'now' }                      expires straight away
  *   { action: 'date', date: '2026-10-31' } ends at the end of that day
  *   { action: 'extend', days: 15 }         moves the end (or today) on by that many days

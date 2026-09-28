@@ -1,0 +1,21 @@
+{
+  "duration": 28,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Leads: every request sent from the home page"
+    },
+    {
+      "t": 8.2,
+      "label": "Open one: what they asked, where they came from, and notes"
+    },
+    {
+      "t": 15.3,
+      "label": "Move it along — contacted, demo, won or lost"
+    },
+    {
+      "t": 19.9,
+      "label": "Lead analysis: sources, campaigns and how many became clients"
+    }
+  ]
+}

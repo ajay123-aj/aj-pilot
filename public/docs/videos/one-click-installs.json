@@ -1,0 +1,25 @@
+{
+  "duration": 44,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open “Installations” — everything you can add in one click"
+    },
+    {
+      "t": 7.7,
+      "label": "Start with Docker — every other service runs in it"
+    },
+    {
+      "t": 19.3,
+      "label": "Now Redis — choose the server, a name, a version and a port"
+    },
+    {
+      "t": 29.3,
+      "label": "Install — the image is pulled and the container started"
+    },
+    {
+      "t": 35.6,
+      "label": "Everything the panel installed, on every server"
+    }
+  ]
+}

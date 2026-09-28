@@ -1,0 +1,33 @@
+{
+  "duration": 57,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open Servers and click “+ Add server”"
+    },
+    {
+      "t": 6.8,
+      "label": "Name it, and enter its IP address and SSH user"
+    },
+    {
+      "t": 15.6,
+      "label": "Choose “Private key”, then “Import key file”"
+    },
+    {
+      "t": 24.6,
+      "label": "Add tags and a note to find it later (optional)"
+    },
+    {
+      "t": 30.7,
+      "label": "Test the connection before saving"
+    },
+    {
+      "t": 37,
+      "label": "Save & connect — the whole machine is read"
+    },
+    {
+      "t": 42,
+      "label": "Its page opens with everything the panel found"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "duration": 47,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open “Databases” — a connection per database server"
+    },
+    {
+      "t": 12.6,
+      "label": "Open it — statistics at a glance"
+    },
+    {
+      "t": 17.1,
+      "label": "Databases, users and configuration — each on its own tab"
+    },
+    {
+      "t": 27.7,
+      "label": "Run a query — here one read-only Redis command"
+    },
+    {
+      "t": 37.7,
+      "label": "Add another: MySQL, PostgreSQL, MongoDB or Redis — even on localhost, over SSH"
+    }
+  ]
+}

@@ -23,7 +23,7 @@ function sideNav(current) {
     const items = docs.filter((d) => d.category === cat);
     if (!items.length) return '';
     return `<div class="docs-group"><div class="docs-group-title">${esc(cat)}</div>
-      ${items.map((d) => `<a href="/docs/${d.slug}" class="docs-link ${d.slug === current ? 'active' : ''}" data-search="${esc(`${d.title} ${d.summary} ${d.category}`.toLowerCase())}">${esc(d.title)}</a>`).join('')}
+      ${items.map((d) => `<a href="/docs/${d.slug}" class="docs-link ${d.slug === current ? 'active' : ''}" data-search="${esc(`${d.title} ${d.summary} ${d.category}`.toLowerCase())}">${esc(d.title)}${d.video ? ' <span class="docs-has-video" title="Has a video walkthrough">▶</span>' : ''}</a>`).join('')}
     </div>`;
   }).join('');
 }
@@ -161,6 +161,16 @@ ${THEME}
 })();
 </script>
 <script>
+// The steps under a video jump to that moment and play from there.
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-seek]');
+  if (!b) return;
+  var v = b.closest('.doc-video').querySelector('video');
+  v.currentTime = Number(b.dataset.seek) || 0;
+  v.play().catch(function () {});
+});
+</script>
+<script>
 // Filter the guides as you type: the menu here, and the cards on the docs home.
 (function () {
   var box = document.getElementById('docs-search');
@@ -189,7 +199,7 @@ export function renderDocsHome(req) {
       const items = docs.filter((d) => d.category === cat);
       if (!items.length) return '';
       return `<section class="docs-cat"><h2>${esc(cat)}</h2><div class="docs-cards">
-        ${items.map((d) => `<a class="docs-card" href="/docs/${d.slug}" data-search="${esc(`${d.title} ${d.summary} ${d.category}`.toLowerCase())}"><b>${esc(d.title)}</b><span>${esc(d.summary)}</span></a>`).join('')}
+        ${items.map((d) => `<a class="docs-card" href="/docs/${d.slug}" data-search="${esc(`${d.title} ${d.summary} ${d.category}`.toLowerCase())}"><b>${esc(d.title)}${d.video ? ' <span class="docs-has-video" title="Has a video walkthrough">▶ video</span>' : ''}</b><span>${esc(d.summary)}</span></a>`).join('')}
       </div></section>`;
     }).join('')}`;
   return page({
@@ -231,7 +241,13 @@ export function renderDoc(req, slug) {
       '@context': 'https://schema.org',
       '@graph': [
         { '@type': 'TechArticle', headline: d.title, description: d.summary, url: `${url}/docs/${d.slug}`, articleSection: d.category,
-          publisher: { '@type': 'Organization', name: 'AJ Pilot', url: `${url}/` }, image: `${url}/og-image.png` },
+          publisher: { '@type': 'Organization', name: 'AJ Pilot', url: `${url}/` }, image: `${url}/og-image.png`,
+          ...(d.video ? { video: {
+            '@type': 'VideoObject', name: `${d.title} — video walkthrough`, description: d.summary,
+            contentUrl: `${url}${d.video.src.split('?')[0]}`, thumbnailUrl: `${url}${(d.video.poster || '/og-image.png').split('?')[0]}`,
+            uploadDate: new Date(Number(d.video.src.split('v=')[1]) * 1000).toISOString(),
+            ...(d.video.duration ? { duration: `PT${Math.floor(d.video.duration / 60)}M${Math.round(d.video.duration % 60)}S` } : {}),
+          } } : {}) },
         { '@type': 'BreadcrumbList', itemListElement: [
           { '@type': 'ListItem', position: 1, name: 'Home', item: `${url}/` },
           { '@type': 'ListItem', position: 2, name: 'Docs', item: `${url}/docs` },

@@ -1,0 +1,41 @@
+{
+  "duration": 66,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server’s Services tab — every systemd service"
+    },
+    {
+      "t": 10.2,
+      "label": "Click “+ Add service”, give it a name and description"
+    },
+    {
+      "t": 18,
+      "label": "The start command, its folder and the user it runs as"
+    },
+    {
+      "t": 26.2,
+      "label": "Environment variables — or pick a saved environment"
+    },
+    {
+      "t": 32.2,
+      "label": "Restart “always”, start on boot, start it now"
+    },
+    {
+      "t": 37.1,
+      "label": "Create the service — it is written, enabled and started"
+    },
+    {
+      "t": 42.6,
+      "label": "Find it in the list — running, and marked “created here”"
+    },
+    {
+      "t": 48.9,
+      "label": "Click its name to read the journal"
+    },
+    {
+      "t": 54.6,
+      "label": "Actions: restart, stop, turn “start on boot” off, or delete"
+    }
+  ]
+}

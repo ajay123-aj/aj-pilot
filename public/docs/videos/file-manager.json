@@ -1,0 +1,33 @@
+{
+  "duration": 52,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server’s Storage tab — the disks, then a file explorer"
+    },
+    {
+      "t": 9.9,
+      "label": "Go to any folder — type a path, or use the quick links"
+    },
+    {
+      "t": 15.9,
+      "label": "Folders show their sizes, so you see what fills a disk"
+    },
+    {
+      "t": 19.4,
+      "label": "Upload a file from your computer"
+    },
+    {
+      "t": 25.2,
+      "label": "Double-click a text file to edit it in the browser"
+    },
+    {
+      "t": 31.7,
+      "label": "Save — the file is written back to the server"
+    },
+    {
+      "t": 35.6,
+      "label": "Create folders, and use ⋯ for rename, copy, permissions and more"
+    }
+  ]
+}

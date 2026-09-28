@@ -1,0 +1,25 @@
+{
+  "duration": 32,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server and click “Reboot”"
+    },
+    {
+      "t": 9.2,
+      "label": "Read what happens — nothing is done until you confirm"
+    },
+    {
+      "t": 15.4,
+      "label": "Click “Reboot now”"
+    },
+    {
+      "t": 18.6,
+      "label": "The status shows “rebooting” while the page waits for it"
+    },
+    {
+      "t": 24.9,
+      "label": "Back online — you are told as soon as it answers"
+    }
+  ]
+}

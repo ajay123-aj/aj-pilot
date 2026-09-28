@@ -1,0 +1,37 @@
+{
+  "duration": 65,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open “Environments” in the main menu"
+    },
+    {
+      "t": 7.6,
+      "label": "Click “+ New environment” and give it a name"
+    },
+    {
+      "t": 15.9,
+      "label": "Import a .env file — comments and quoted values are understood"
+    },
+    {
+      "t": 21.8,
+      "label": "Add or change a variable by hand"
+    },
+    {
+      "t": 28.2,
+      "label": "Save — every value is encrypted"
+    },
+    {
+      "t": 31.7,
+      "label": "View it — values stay hidden until you choose to see them"
+    },
+    {
+      "t": 39.9,
+      "label": "Actions: edit, download as .env, duplicate or delete"
+    },
+    {
+      "t": 46.5,
+      "label": "Pick it when you create an app, a one-click install or a service"
+    }
+  ]
+}

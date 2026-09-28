@@ -1,0 +1,33 @@
+{
+  "duration": 52,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server’s Nginx tab — install nginx if it is not there yet"
+    },
+    {
+      "t": 15.6,
+      "label": "Click “+ Add site” and enter its domain names"
+    },
+    {
+      "t": 21.2,
+      "label": "Serve a folder of files — or proxy to an app’s port"
+    },
+    {
+      "t": 29.6,
+      "label": "Save — the config is tested with nginx -t before it is used"
+    },
+    {
+      "t": 33.6,
+      "label": "Your site, with its domains, root and certificate status"
+    },
+    {
+      "t": 37.5,
+      "label": "Actions → SSL: a free Let’s Encrypt certificate, once DNS points here"
+    },
+    {
+      "t": 44.5,
+      "label": "Test the whole configuration any time, and reload nginx"
+    }
+  ]
+}

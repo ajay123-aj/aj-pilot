@@ -1,0 +1,25 @@
+{
+  "duration": 45,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Plans: + Plan sets prices, limits and features"
+    },
+    {
+      "t": 13.8,
+      "label": "A client chose a paid plan — the request waits on the dashboard"
+    },
+    {
+      "t": 20.3,
+      "label": "Open the organisation and record the payment"
+    },
+    {
+      "t": 31.9,
+      "label": "Then Activate — the client is on the new plan at once"
+    },
+    {
+      "t": 36.9,
+      "label": "Payments: every payment from every client"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "duration": 37,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "On the free plan, the top bar shows which day you are on"
+    },
+    {
+      "t": 10,
+      "label": "Open “Plan & billing” for your plan and what you use"
+    },
+    {
+      "t": 17,
+      "label": "Compare the plans — monthly or yearly"
+    },
+    {
+      "t": 23.1,
+      "label": "Choose a plan — a paid plan is switched on once payment is confirmed"
+    },
+    {
+      "t": 30.4,
+      "label": "Your request waits here — you can withdraw it until it is switched on"
+    }
+  ]
+}

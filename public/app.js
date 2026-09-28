@@ -28,7 +28,7 @@ async function api(path, options = {}) {
     // A session that has gone away sends you back to the front door.
     if (res.status === 401 && data.needsAuth) signedOut();
     // No plan: a client is shown the plan page instead of a dead end.
-    // An ended free trial is different: everything stays visible, only changes are refused.
+    // An ended plan is handled there too: the panel shows only the renew page until it is renewed.
     if (res.status === 402 && data.needsPlan) planRequired();
     const err = new Error(data.error || `Request failed (${res.status})`);
     // Long output — an install log, a journal — travels alongside the message.
@@ -12012,7 +12012,7 @@ function pfPlanExpiry(o) {
   openMyDialog({
     title: `Plan expiry — ${o.name}`,
     intro: `<b>${esc(sub.plan)}</b> · ${esc(planEndWords(sub))}${e && !e.set && e.free ? ' <span class="muted">(the free trial)</span>' : ''}.
-      <br><span class="muted small">After the end, ${esc(o.name)} can still see everything but cannot add or change anything until you extend it or change the plan.</span>`,
+      <br><span class="muted small">After the end, ${esc(o.name)} sees only the renew page — nothing is deleted — until you extend it or change the plan.</span>`,
     fields: `
       <div class="expiry-choices">
         <label class="env-mode active"><input type="radio" name="action" value="date" checked /><span><b>End on a date</b><small>Access stops at the end of that day</small></span></label>
@@ -12037,7 +12037,7 @@ function pfPlanExpiry(o) {
     },
     async submit(fd) {
       const action = fd.get('action');
-      if (action === 'now' && !await askConfirm(`Expire the ${sub.plan} plan of ${o.name} now? They keep view-only access.`)) throw new Error('Nothing was changed');
+      if (action === 'now' && !await askConfirm(`Expire the ${sub.plan} plan of ${o.name} now? They see only the renew page until it is renewed — nothing is deleted.`)) throw new Error('Nothing was changed');
       const r = await api(`/platform/organisations/${o.id}/subscription/expiry`, {
         method: 'PUT', body: { action, date: fd.get('date'), days: fd.get('days') },
       });
@@ -13507,8 +13507,8 @@ function renderTrial() {
     <div class="trial-text">
       <b>${esc(t.expired ? endedTitle : `${name} · day ${t.day} of ${t.totalDays}`)}</b>
       <span>${t.expired
-    ? `You can still see everything, but adding, deploying and changing things now needs ${needs}.`
-    : `${t.left} — ends ${trialDate(t.endsAt)}. After that you can look around, but not add or change anything.`}</span>
+    ? `The panel is locked until you renew — nothing has been deleted. Renewing needs ${needs}.`
+    : `${t.left} — ends ${trialDate(t.endsAt)}. After that the panel is locked until you renew or choose a paid plan — nothing is deleted.`}</span>
     </div>
     ${trialBarHtml(t)}
     <button type="button" class="btn ${t.tone === "ok" ? "" : "primary"}" data-trial-upgrade>${canChoose ? (trial ? "Upgrade plan" : "Renew or upgrade") : "See plans"}</button>`;
@@ -13601,7 +13601,7 @@ function renderBilling() {
             <b class="trial-pct">${b.trial.percent}%</b>
           </div>
           ${trialBarHtml(trialInfo() || b.trial)}
-          <p class="muted small" style="margin:10px 0 0">${b.trial.free && !b.trial.set ? `The free plan runs ${b.trialDays} days, once per organisation. After it ends` : 'This plan has an end date. After it'} everything stays visible, but adding, deploying and changing things needs ${b.trial.free && !b.trial.set ? 'a paid plan' : 'the plan renewed or changed'}${b.canChoose ? ' — choose one below' : ''}.</p>
+          <p class="muted small" style="margin:10px 0 0">${b.trial.free && !b.trial.set ? `The free plan runs ${b.trialDays} days, once per organisation. After it ends` : 'This plan has an end date. After it'} the panel is locked — nothing is deleted — until ${b.trial.free && !b.trial.set ? 'you choose a paid plan' : 'the plan is renewed or changed'}${b.canChoose ? ' — choose one below' : ''}.</p>
         </div>` : ''}
         ${usageMeters(b.usage, b.limits)}
       </div>
@@ -13729,7 +13729,7 @@ function renderDocsNav() {
       && (!q || `${d.title} ${d.summary} ${d.category} ${d.body.replace(/<[^>]+>/g, ' ')}`.toLowerCase().includes(q)));
     if (!items.length) return '';
     return `<div class="docs-group"><div class="docs-group-title">${esc(cat)}${cat === 'Platform admin' ? ' <span class="badge">super admin</span>' : ''}</div>
-      ${items.map((d) => `<a href="/docs/${d.slug}" class="docs-link ${d.slug === docsState.slug ? 'active' : ''}" data-doc="${d.slug}">${esc(d.title)}</a>`).join('')}</div>`;
+      ${items.map((d) => `<a href="/docs/${d.slug}" class="docs-link ${d.slug === docsState.slug ? 'active' : ''}" data-doc="${d.slug}">${esc(d.title)}${d.video ? ' <span class="docs-has-video" title="Has a video walkthrough">▶</span>' : ''}</a>`).join('')}</div>`;
   }).join('') || '<p class="muted small">Nothing matches — try another word.</p>';
 }
 
@@ -13751,6 +13751,15 @@ function renderDocArticle() {
     <div class="docs-help">Can't find the answer? Ask us through the <a href="/#contact" target="_blank" rel="noopener">contact form</a>${session.user?.role !== 'super_admin' ? ' or your organisation\'s admin' : ''}.</div>`;
   window.scrollTo({ top: 0 });
 }
+
+// The steps under a guide's video jump to that moment and play from there.
+$('#app-docs-body').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-seek]');
+  if (!b) return;
+  const v = b.closest('.doc-video').querySelector('video');
+  v.currentTime = Number(b.dataset.seek) || 0;
+  v.play().catch(() => {});
+});
 
 // Links between guides open inside the app instead of leaving it.
 ['#app-docs-nav', '#app-docs-body'].forEach((sel) => $(sel).addEventListener('click', (e) => {

@@ -1,0 +1,29 @@
+{
+  "duration": 43,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "The dashboard: revenue, organisations, clients and plan requests"
+    },
+    {
+      "t": 7.2,
+      "label": "Organisations — every client organisation and its plan"
+    },
+    {
+      "t": 11.3,
+      "label": "View one: plan, usage, clients, plan history and payments"
+    },
+    {
+      "t": 17.9,
+      "label": "Plan expiry: end any plan on a date, extend it, or end it now"
+    },
+    {
+      "t": 25.6,
+      "label": "Open — work inside the organisation, as its admin would"
+    },
+    {
+      "t": 32.4,
+      "label": "Clients and super admins — add, edit, move or remove people"
+    }
+  ]
+}

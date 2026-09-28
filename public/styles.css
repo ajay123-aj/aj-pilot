@@ -1925,3 +1925,28 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 .key-import-note.ok { color: var(--ok); }
 .key-import-note.err { color: var(--err); }
 #btn-detail-reboot svg { margin-right: 4px; }
+
+/* ------------------------------------------------ docs: video walkthroughs */
+.doc-video { margin: 4px 0 26px; }
+.doc-video-frame {
+  position: relative; overflow: hidden; border-radius: 14px; aspect-ratio: 16 / 9;
+  background: #05070b; border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+}
+.doc-video video { display: block; width: 100%; height: 100%; object-fit: contain; background: #05070b; }
+.doc-video figcaption { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.doc-video-badge { font-weight: 700; color: var(--accent); }
+.doc-video-note::before { content: '·'; margin-right: 8px; }
+.doc-chapters {
+  list-style: none; margin: 12px 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px;
+}
+.doc-chapters button {
+  width: 100%; display: flex; align-items: baseline; gap: 10px; text-align: left; cursor: pointer;
+  padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
+  color: var(--text); font: inherit; font-size: 13px; line-height: 1.35;
+  transition: border-color .15s ease, background .15s ease;
+}
+.doc-chapters button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.doc-chapters time { flex: none; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; color: var(--accent); }
+.docs-has-video { font-size: 10px; color: var(--accent); vertical-align: 1px; margin-left: 2px; }
+.docs-card .docs-has-video { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); }

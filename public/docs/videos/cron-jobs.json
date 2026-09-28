@@ -1,0 +1,33 @@
+{
+  "duration": 56,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server’s Cron tab — every job, in plain words"
+    },
+    {
+      "t": 10.5,
+      "label": "Click “+ Add a job” and choose who runs it"
+    },
+    {
+      "t": 14.9,
+      "label": "Pick a schedule — it is said in words as you type"
+    },
+    {
+      "t": 20.1,
+      "label": "The command — full paths, and send its output to a log"
+    },
+    {
+      "t": 24.9,
+      "label": "Add the job — cron checks it before anything changes"
+    },
+    {
+      "t": 31.3,
+      "label": "Actions → Edit to change it — here, to 02:30"
+    },
+    {
+      "t": 43.6,
+      "label": "Actions → Delete removes a job; it stops running at once"
+    }
+  ]
+}

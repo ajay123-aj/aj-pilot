@@ -1,0 +1,49 @@
+{
+  "duration": 83,
+  "chapters": [
+    {
+      "t": 3.9,
+      "label": "Open the server and its Users tab — permission is checked first"
+    },
+    {
+      "t": 11.6,
+      "label": "Click “+ Add user” — a name and, if you like, a full name"
+    },
+    {
+      "t": 18.4,
+      "label": "Set a password — or generate a strong one"
+    },
+    {
+      "t": 21.9,
+      "label": "Tick “Generate a new key pair” for SSH login"
+    },
+    {
+      "t": 25.5,
+      "label": "Access: sudo, without a password prompt, and the docker group"
+    },
+    {
+      "t": 32.2,
+      "label": "Add the user"
+    },
+    {
+      "t": 35.4,
+      "label": "Download the private key — it is shown only once"
+    },
+    {
+      "t": 45.1,
+      "label": "The new user: sudo, a key, the docker group"
+    },
+    {
+      "t": 49.2,
+      "label": "Actions → SSH keys: see, add or remove keys"
+    },
+    {
+      "t": 60.2,
+      "label": "Actions → Lock login: shut it out, files untouched"
+    },
+    {
+      "t": 69.8,
+      "label": "Actions → Delete: keep the home folder, or delete it too"
+    }
+  ]
+}
