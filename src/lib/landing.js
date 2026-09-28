@@ -44,6 +44,8 @@ export const FAQ = [
     'Yes. Turn on auto deploy for the branch the app runs — main, master, dev or any other — and choose "every push or commit" or "only merged pull / merge requests". A webhook on GitHub, GitLab or Bitbucket starts the deploy within seconds; where the panel cannot be reached from the internet, the branch is checked every minute instead. Every deploy is kept with its branch, whether it was a merge or a commit, when it was made and its full log.'],
   ['What are environments?',
     'Named sets of environment variables — database URLs, API keys, secrets — kept once, encrypted, and used for any app, one-click database or systemd service. Import a .env file when you add or edit one, pick one when you create something, or save a new one by name as you create it. Viewers see which variables exist, never their values.'],
+  ['Can I manage the Linux users on my servers?',
+    'Yes. The Users tab of a server lists its Ubuntu accounts. Add a user with a password, an SSH key or both; change their name, shell, groups and sudo rights; generate a new SSH key pair (the private key is shown to you once and never stored); lock a login or delete it, with or without its home folder. Only admins and editors can open it, and only when the panel\'s SSH login can become root — anyone else sees "You are not permitted". root and the account the panel logs in with are never deleted or locked.'],
   ['How do domains and SSL work?',
     'Connect your Cloudflare account, choose a domain and type a subdomain. The DNS record, the Nginx site and a free Let\'s Encrypt certificate are created for you. For servers without open ports, apps can be published through a Cloudflare Zero Trust tunnel instead. An app can have several domains.'],
   ['Which databases are supported?',
@@ -129,6 +131,7 @@ function jsonLd(url, plans) {
       description: 'Self-hosted control panel to manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static apps from GitHub or GitLab, run Docker, MySQL, PostgreSQL, MongoDB and Redis, and connect domains with Cloudflare, Nginx and free SSL.',
       featureList: [
         'Server inventory and live monitoring over SSH', 'systemd service, cron and file management',
+        'Ubuntu user management with passwords, sudo and SSH key generation',
         'Git-based app deployment for Next.js, NestJS, Nuxt, Angular, React, Vue and Node.js', 'Monorepo folder deploys',
         'Auto deploy on every push or on merged pull / merge requests, per branch', 'GitHub, GitLab and Bitbucket webhooks',
         'Deploy history with branch, merge or commit, time and full logs', 'Encrypted named environments with .env import',

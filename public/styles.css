@@ -469,6 +469,10 @@ a.btn, a.btn:hover { text-decoration: none; }
 /* --------------------------------------------------------------- cards */
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+/* Servers: two to a row on a desktop, one on a phone. */
+#server-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#server-list > .empty { grid-column: 1 / -1; }
+@media (max-width: 760px) { #server-list { grid-template-columns: minmax(0, 1fr); } }
 
 .card {
   background: var(--card);
@@ -1853,3 +1857,71 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 /* the only thing an organisation sees once its plan has ended */
 .plan-gate.plan-expired { background: var(--err-soft); border-color: var(--err-line); }
 .plan-gate.plan-expired h2 { color: var(--err); }
+
+/* ---------------------------------------------------------- server users */
+.badge.info { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-soft); }
+.msg.warn { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-line); }
+.osu-denied {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px;
+  padding: 44px 24px; border: 1px dashed var(--err-line); border-radius: 16px;
+  background: linear-gradient(180deg, var(--err-soft), transparent 70%);
+}
+.osu-denied-icon {
+  width: 64px; height: 64px; border-radius: 20px; display: grid; place-items: center; margin-bottom: 8px;
+  color: var(--err); background: var(--err-soft); box-shadow: 0 0 0 8px color-mix(in srgb, var(--err-soft) 50%, transparent);
+}
+.osu-denied h3 { margin: 0; font-size: 18px; color: var(--text); }
+.osu-denied p { margin: 0; max-width: 520px; color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+.osu-perm { white-space: normal; }
+.osu-chips { min-width: 140px; max-width: 230px; }
+.osu-chips .chip { padding: 2px 8px; font-size: 11.5px; }
+.osu-toggle { margin: 0 6px 0 0; font-size: 12.5px; }
+.osu-who { display: flex; align-items: center; gap: 10px; min-width: 170px; }
+.osu-avatar {
+  flex: none; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center;
+  font-weight: 700; font-size: 13px; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-ring);
+}
+.osu-avatar.root { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+.osu-avatar.system { color: var(--muted); background: var(--surface-2); border-color: var(--line); }
+.osu-block { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.osu-block > label:first-of-type, .osu-block .row:first-of-type { margin-top: 0; }
+.osu-block-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.osu-block-head b { font-size: 13.5px; }
+.osu-pw { display: flex; gap: 6px; align-items: center; }
+.osu-pw input { flex: 1; }
+.osu-sub { margin-left: 26px; }
+.osu-groups { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.osu-group {
+  display: inline-flex !important; align-items: center; gap: 6px; margin: 0 !important; cursor: pointer;
+  padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+  font-size: 12.5px; font-weight: 500; color: var(--text);
+}
+.osu-group:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.osu-group input { margin: 0; }
+.osu-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); margin-bottom: 10px; }
+.osu-seg label { display: inline-flex !important; margin: 0 !important; cursor: pointer; }
+.osu-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.osu-seg span { padding: 6px 12px; border-radius: 7px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.osu-seg input:checked + span { background: var(--card); color: var(--text); box-shadow: var(--shadow-sm); }
+.osu-seg input:focus-visible + span { outline: 2px solid var(--accent); }
+.osu-keys { display: flex; flex-direction: column; gap: 8px; }
+.osu-key { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.osu-key-icon { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--ok); background: var(--ok-soft); }
+.osu-key-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.osu-priv { max-height: 260px; overflow: auto; font-size: 11.5px; user-select: all; }
+@media (max-width: 640px) {
+  .osu-sub { margin-left: 0; }
+  .osu-key { flex-wrap: wrap; }
+}
+
+/* ------------------------------------------- private key import (add server) */
+.key-import { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.key-import-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.key-import .btn svg { margin-right: 4px; }
+.key-drop { margin-top: 6px !important; }
+.key-drop textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; transition: border-color .15s ease, background .15s ease; }
+.key-drop.dragging textarea { border-color: var(--accent); border-style: dashed; background: var(--accent-soft); }
+.key-import-note { margin: 6px 0 0; }
+.key-import-note.ok { color: var(--ok); }
+.key-import-note.err { color: var(--err); }
+#btn-detail-reboot svg { margin-right: 4px; }

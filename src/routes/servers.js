@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { all, one, run, logActivity } from '../db/index.js';
 import { encrypt } from '../lib/crypto.js';
-import { connectionFromRow, withConnection, testConnection, exec } from '../lib/ssh.js';
+import { connectionFromRow, withConnection, testConnection, exec, rootExec } from '../lib/ssh.js';
 import { collectSystemInfo } from '../lib/systemInfo.js';
 import {
   listServices, describeService, controlService, createService, deleteService,
@@ -20,6 +20,11 @@ import {
   validateUser, validateSchedule, validateCommand,
 } from '../lib/cron.js';
 import { liveStatus } from '../lib/healthMonitor.js';
+import {
+  usersState, createUser, updateUser, removeKey, deleteUser, NOT_PERMITTED,
+  validateUsername, validatePassword, validateShell, validateFullName, validateGroups, validatePublicKeys, validateKeyComment,
+} from '../lib/sysUsers.js';
+import { can } from '../lib/auth.js';
 import { config } from '../config.js';
 import {
   nginxState, nginxAction, installNginx, installCertbot, buildSiteConfig,
@@ -709,6 +714,187 @@ serversRouter.put('/:id/cron/jobs', async (req, res, next) => {
     }
   } catch (err) { next(err); }
 });
+
+/* --------------------------------------------------------------- reboot */
+
+/**
+ * Restart the machine. The reboot is started detached a couple of seconds
+ * later, so this SSH session can answer before the connection drops.
+ */
+serversRouter.post('/:id/reboot', requirePermission('edit'), serverRoute(async (conn, row, req) => {
+  if (String(req.body?.confirm || '') !== row.name) {
+    throw Object.assign(new Error('Type the server name to confirm the reboot'), { status: 400 });
+  }
+  const result = await rootExec(conn, row, `set -u
+[ "$(id -u)" = 0 ] || { echo "@@notroot" >&2; exit 97; }
+setsid nohup sh -c 'sleep 2; systemctl reboot || shutdown -r now || reboot' >/dev/null 2>&1 < /dev/null &
+echo scheduled`, { timeout: 20000 });
+  if (result.code === 97 || /(a password is required|no tty present|not in the sudoers file|incorrect password attempt)/i.test(result.stderr)) {
+    throw new Error(`You are not permitted to reboot this server — the SSH login "${row.username}" cannot become root. Connect as root, give it sudo, or store its sudo password on the server.`);
+  }
+  if (!/scheduled/.test(result.stdout)) {
+    throw new Error(`The reboot could not be started${result.stderr ? `: ${result.stderr.trim().split('\n').slice(-2).join(' · ').slice(0, 200)}` : ''}`);
+  }
+  await markStatus(row.id, 'rebooting');
+  await logActivity('server', row.id, 'server_rebooted', `${req.user.name} rebooted ${row.name}`);
+  return { rebooting: true };
+}));
+
+/* --------------------------------------------------------- ubuntu users */
+
+/**
+ * Linux accounts can grant root, so the panel role is checked first: looking
+ * needs "edit" (an editor or an admin), adding "create", changing "edit",
+ * deleting "delete". Then the server itself is asked whether the SSH login
+ * can become root — without it nothing is read.
+ */
+const usersAccess = (action) => (req, res, next) => {
+  if (can(req.user, 'edit') && can(req.user, action)) return next();
+  res.status(403).json({
+    error: `${NOT_PERMITTED}. Your role (${String(req.user?.role || 'viewer').replace('_', ' ')}) cannot ${action === 'delete' ? 'delete' : action === 'create' ? 'add' : 'change'} server users — ask an admin of your organisation.`,
+    forbidden: true, notPermitted: true,
+  });
+};
+
+/** Run fn with the server's current users, answering "not permitted" rather than failing when the login is not root. */
+function usersRoute(action, fn) {
+  return [usersAccess(action), async (req, res, next) => {
+    try {
+      const row = await getRow(req.params.id, req.orgId);
+      if (!row) return res.status(404).json({ error: 'Server not found' });
+      try {
+        res.json({ ok: true, ...(await withConnection(connectionFromRow(row), (conn) => fn(conn, row, req))) });
+      } catch (err) {
+        if (err.notPermitted) return res.status(403).json({ ok: false, error: err.message, notPermitted: true, sshNotRoot: true });
+        res.status(err.status || 400).json({ ok: false, error: err.message, detail: err.cause || null });
+      }
+    } catch (err) { next(err); }
+  }];
+}
+
+const refuse = (message, status = 400) => Object.assign(new Error(message), { status });
+
+/** The account being changed, and whether the panel may change it in this way. */
+async function targetUser(conn, row, name, want) {
+  const state = await usersState(conn, row);
+  const u = state.users.find((x) => x.name === name);
+  if (!u) throw refuse(`There is no user called "${name}" on this server — refresh the page`, 404);
+  if (u.kind === 'system') throw refuse(`"${name}" is a system account that belongs to a package; the panel does not change it`);
+  if (u.kind === 'root' && want.some((w) => !['password', 'keys'].includes(w))) {
+    throw refuse('For root the panel only changes the password and SSH keys — it is never deleted, locked or renamed');
+  }
+  if (u.isLogin && want.includes('delete')) throw refuse(`"${name}" is the account this panel logs in with — deleting it would cut the panel off from the server`);
+  if (u.isLogin && want.includes('lock')) throw refuse(`"${name}" is the account this panel logs in with — locking it would cut the panel off from the server`);
+  if (u.isLogin && want.includes('unsudo')) throw refuse(`"${name}" is the account this panel logs in with — it has to keep sudo`);
+  if (u.isLogin && want.includes('noshell')) throw refuse(`"${name}" is the account this panel logs in with — it needs a login shell`);
+  return u;
+}
+
+serversRouter.get('/:id/users', ...usersRoute('edit', async (conn, row) => ({ users: await usersState(conn, row) })));
+
+serversRouter.post('/:id/users', ...usersRoute('create', async (conn, row, req) => {
+  const b = req.body || {};
+  const checks = {
+    username: validateUsername(b.username, { creating: true }),
+    fullName: validateFullName(b.full_name),
+    shell: validateShell(b.shell),
+    password: validatePassword(b.password),
+    groups: validateGroups(b.groups),
+    keys: validatePublicKeys(b.public_keys),
+    keyComment: validateKeyComment(b.key_comment),
+  };
+  const bad = Object.values(checks).find((c) => c.error);
+  if (bad) throw refuse(bad.error);
+  const spec = Object.fromEntries(Object.entries(checks).map(([k, c]) => [k, c.value]));
+  spec.sudo = Boolean(b.sudo);
+  spec.noPasswordSudo = Boolean(b.sudo && b.no_password_sudo);
+  spec.generateKey = Boolean(b.generate_key);
+  if (!spec.password && !spec.keys.length && !spec.generateKey) {
+    throw refuse('Give the user a password, an SSH key, or both — otherwise nobody can log in as them');
+  }
+
+  const result = await createUser(conn, row, spec);
+  await logActivity('server', row.id, 'os_user_created',
+    `Added the user ${spec.username} on ${row.name}${spec.sudo ? ' (sudo)' : ''}${spec.keys.length || spec.generateKey ? ' with an SSH key' : ''}`);
+  return { username: spec.username, ...result };
+}));
+
+serversRouter.put('/:id/users/:name', ...usersRoute('edit', async (conn, row, req) => {
+  const b = req.body || {};
+  const name = validateUsername(req.params.name);
+  if (name.error) throw refuse(name.error);
+
+  const spec = {};
+  const want = [];
+  if (b.full_name !== undefined) { const v = validateFullName(b.full_name); if (v.error) throw refuse(v.error); spec.fullName = v.value; want.push('profile'); }
+  if (b.shell !== undefined) {
+    const v = validateShell(b.shell); if (v.error) throw refuse(v.error);
+    spec.shell = v.value; want.push('profile');
+    if (/(nologin|false)$/.test(v.value)) want.push('noshell');
+  }
+  if (b.groups !== undefined) { const v = validateGroups(b.groups); if (v.error) throw refuse(v.error); spec.groups = v.value; want.push('groups'); }
+  if (b.password) { const v = validatePassword(b.password); if (v.error) throw refuse(v.error); spec.password = v.value; want.push('password'); }
+  if (b.sudo !== undefined) {
+    spec.sudo = Boolean(b.sudo); spec.noPasswordSudo = Boolean(b.sudo && b.no_password_sudo);
+    want.push(spec.sudo ? 'sudo' : 'unsudo');
+  }
+  if (b.locked !== undefined) { spec.locked = Boolean(b.locked); want.push(spec.locked ? 'lock' : 'unlock'); }
+
+  const u = await targetUser(conn, row, name.value, want);
+  // Nothing actually moving on sudo is not a change worth refusing or logging.
+  if (spec.sudo !== undefined && spec.sudo === u.sudo && spec.noPasswordSudo === u.noPasswordSudo) delete spec.sudo;
+  if (spec.fullName === u.fullName) delete spec.fullName;
+  if (spec.shell === u.shell) delete spec.shell;
+
+  await updateUser(conn, row, name.value, spec);
+  const what = [
+    spec.password && 'password', spec.fullName !== undefined && 'name', spec.shell && `shell ${spec.shell}`,
+    spec.groups && 'groups', spec.sudo !== undefined && (spec.sudo ? 'sudo on' : 'sudo off'),
+    spec.locked === true && 'locked', spec.locked === false && 'unlocked',
+  ].filter(Boolean);
+  if (what.length) await logActivity('server', row.id, 'os_user_updated', `Changed the user ${name.value} on ${row.name}: ${what.join(', ')}`);
+  return { changed: what };
+}));
+
+/** Add public keys, or have the server make a new pair and hand back the private half once. */
+serversRouter.post('/:id/users/:name/keys', ...usersRoute('create', async (conn, row, req) => {
+  const b = req.body || {};
+  const name = validateUsername(req.params.name);
+  if (name.error) throw refuse(name.error);
+  const keys = validatePublicKeys(b.public_keys);
+  if (keys.error) throw refuse(keys.error);
+  const comment = validateKeyComment(b.key_comment);
+  if (comment.error) throw refuse(comment.error);
+  const generateKey = Boolean(b.generate_key);
+  if (!keys.value.length && !generateKey) throw refuse('Paste a public key, or choose to generate a new one');
+
+  await targetUser(conn, row, name.value, ['keys']);
+  const result = await updateUser(conn, row, name.value, { keys: keys.value, generateKey, keyComment: comment.value });
+  await logActivity('server', row.id, 'os_user_key_added',
+    `${generateKey ? 'Generated a new SSH key' : `Added ${keys.value.length} SSH key${keys.value.length > 1 ? 's' : ''}`} for ${name.value} on ${row.name}`);
+  return result;
+}));
+
+serversRouter.delete('/:id/users/:name/keys', ...usersRoute('delete', async (conn, row, req) => {
+  const name = validateUsername(req.params.name);
+  if (name.error) throw refuse(name.error);
+  const fp = String(req.body?.fingerprint || '').trim();
+  if (!/^(SHA256|MD5):[A-Za-z0-9+/=:]+$/.test(fp)) throw refuse('Which key to remove was not sent — refresh the page');
+  await targetUser(conn, row, name.value, ['keys']);
+  await removeKey(conn, row, name.value, fp);
+  await logActivity('server', row.id, 'os_user_key_removed', `Removed the SSH key ${fp} from ${name.value} on ${row.name}`);
+  return {};
+}));
+
+serversRouter.delete('/:id/users/:name', ...usersRoute('delete', async (conn, row, req) => {
+  const name = validateUsername(req.params.name);
+  if (name.error) throw refuse(name.error);
+  const removeHome = ['1', 'true', 'on'].includes(String(req.query.remove_home || req.body?.remove_home || ''));
+  await targetUser(conn, row, name.value, ['delete']);
+  await deleteUser(conn, row, name.value, { removeHome });
+  await logActivity('server', row.id, 'os_user_deleted', `Deleted the user ${name.value} from ${row.name}${removeHome ? ' with its home folder' : ''}`);
+  return { removeHome };
+}));
 
 serversRouter.delete('/:id/cron/jobs', async (req, res, next) => {
   try {

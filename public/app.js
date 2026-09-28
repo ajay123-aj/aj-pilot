@@ -73,6 +73,7 @@ const DIALOG_ICONS = {
   danger: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>',
   warn: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></svg>',
   info: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
+  power: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>',
   input: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
 };
 const DANGER_WORDS = /^(delete|remove|revoke|disconnect|drop|expire|cancel|decline|sign this|lock|stop|pause|withdraw|replace)/i;
@@ -86,7 +87,7 @@ function dialogEsc(v) {
  * buttons: [{ label, value, kind: 'primary'|'danger'|'' }]; dismissing
  * (Esc, backdrop, ×) resolves to `dismiss`.
  */
-function openAsk({ message, title, tone, buttons, dismiss, input }) {
+function openAsk({ message, title, tone, buttons, dismiss, input, icon }) {
   return new Promise((resolve) => {
     const text = String(message || '').trim();
     let [first, ...rest] = text.split(/\n\s*\n/);
@@ -100,7 +101,7 @@ function openAsk({ message, title, tone, buttons, dismiss, input }) {
     wrap.innerHTML = `
       <div class="ask ask-${tone}" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
         <button type="button" class="ask-x" aria-label="Close" data-dismiss>×</button>
-        <div class="ask-icon">${DIALOG_ICONS[tone] || DIALOG_ICONS.info}</div>
+        <div class="ask-icon">${DIALOG_ICONS[icon] || DIALOG_ICONS[tone] || DIALOG_ICONS.info}</div>
         <h3 id="ask-title">${dialogEsc(head)}</h3>
         ${body ? `<div class="ask-body">${body.split(/\n\s*\n/).map((p) => `<p>${dialogEsc(p).replace(/\n/g, '<br>')}</p>`).join('')}</div>` : ''}
         ${input ? `<input class="ask-input" type="text" autocomplete="off" spellcheck="false" value="${dialogEsc(input.value || '')}" placeholder="${dialogEsc(input.placeholder || '')}">` : ''}
@@ -143,13 +144,13 @@ function openAsk({ message, title, tone, buttons, dismiss, input }) {
 }
 
 /** Yes / no, in the theme. The button is named after the first word of the question unless `ok` says otherwise. */
-function askConfirm(message, { title, ok, cancel = 'Cancel', danger } = {}) {
+function askConfirm(message, { title, ok, cancel = 'Cancel', danger, icon } = {}) {
   const text = String(message || '').trim();
   const verb = text.match(/^([A-Z][a-z]+)\b/)?.[1];
   const isDanger = danger ?? DANGER_WORDS.test(text);
   const okLabel = ok || (verb && !/^(Also|Keep|Run|The|This|It|Are|Is|Do)$/.test(verb) ? verb : 'Continue');
   return openAsk({
-    message: text, title, tone: isDanger ? 'danger' : /can cut|cannot be undone|will fail/i.test(text) ? 'warn' : 'info',
+    message: text, title, icon, tone: isDanger ? 'danger' : /can cut|cannot be undone|will fail/i.test(text) ? 'warn' : 'info',
     dismiss: false,
     buttons: [{ label: cancel, value: false }, { label: okLabel, value: true, kind: isDanger ? 'danger solid' : 'primary', main: true }],
   });
@@ -1300,6 +1301,7 @@ const SERVER_TABS = [
   { key: 'docker', label: 'Docker', load: () => loadServerDocker() },
   { key: 'nginx', label: 'Nginx', load: () => loadServerNginx() },
   { key: 'cron', label: 'Cron', load: () => loadServerCron() },
+  { key: 'users', label: 'Users', load: () => loadServerUsers() },
   { key: 'services', label: 'Services', load: () => loadServerServices() },
   { key: 'runners', label: 'Runners', load: () => loadServerRunners() },
 ];
@@ -1357,7 +1359,7 @@ async function openServer(id) {
 
 const liveTabPanelId = (key) => ({
   live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel',
-  cron: 'cron-panel', services: 'services-panel', runners: 'server-runners-panel',
+  cron: 'cron-panel', users: 'users-panel', services: 'services-panel', runners: 'server-runners-panel',
 }[key]);
 
 function showServerTab(key) {
@@ -2735,6 +2737,7 @@ function openServerModal(server = null) {
   editingServerId = server?.id ?? null;
   serverForm.reset();
   $('#server-form-msg').classList.add('hidden');
+  keyImportNote('');
 
   $('#server-modal-title').textContent = server ? `Edit ${server.name}` : 'Add server';
   $('#server-modal-hint').textContent = server
@@ -2772,6 +2775,59 @@ $('#btn-detail-edit').addEventListener('click', () => {
   if (currentServer) openServerModal(currentServer);
 });
 
+/** Reboot only after a clear yes; then watch the server go down and come back. */
+$('#btn-detail-reboot').addEventListener('click', async (e) => {
+  const s = currentServer;
+  const btn = e.currentTarget;
+  if (!s) return;
+  const ok = await askConfirm(
+    `Reboot ${s.name}?\n\n${s.username}@${s.host} restarts now. Every app, database and service on it stops answering until it is back — usually a minute or two. `
+    + 'Anyone signed in to it is disconnected, and anything unsaved in memory is lost.',
+    { ok: 'Reboot now', danger: true, icon: 'power' }
+  );
+  if (!ok) return;
+  busy(btn, true, 'Rebooting…');
+  try {
+    await api(`/servers/${s.id}/reboot`, { method: 'POST', body: { confirm: s.name } });
+    toast(`${s.name} is rebooting — it should be back in a minute or two`);
+    $('#detail-status').innerHTML = '<span class="badge warn"><span class="spinner"></span>rebooting</span><span class="muted small"> waiting for it to come back…</span>';
+    watchReboot(s.id, btn);
+  } catch (err) {
+    busy(btn, false);
+    toast(err.message, 'err');
+  }
+});
+
+/** Poll until the server answers again (or give up after five minutes). */
+function watchReboot(id, btn) {
+  const started = Date.now();
+  let wentDown = false;
+  const tick = async () => {
+    if (String(currentServerId) !== String(id)) { busy(btn, false); return; }
+    try {
+      const all = await api('/servers/status');
+      const st = (Array.isArray(all) ? all : all.servers || []).find((x) => String(x.id) === String(id));
+      const online = st?.status === 'online' || st?.online === true;
+      if (!online) wentDown = true;
+      // Seconds after the reboot the old answer can still be "online"; wait until it has dropped once.
+      if (online && (wentDown || Date.now() - started > 90000)) {
+        busy(btn, false);
+        toast(`${currentServer?.name || 'The server'} is back online`);
+        pollServerStatuses();
+        return;
+      }
+    } catch { /* keep waiting */ }
+    if (Date.now() - started > 300000) {
+      busy(btn, false);
+      toast('The server has not answered for five minutes — check it at your provider', 'err');
+      pollServerStatuses();
+      return;
+    }
+    setTimeout(tick, 5000);
+  };
+  setTimeout(tick, 8000);
+}
+
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => {
   b.closest('.modal-backdrop').classList.add('hidden');
 }));
@@ -2780,6 +2836,60 @@ serverForm.auth_type.addEventListener('change', (e) => {
   const isKey = e.target.value === 'key';
   $('#field-key').classList.toggle('hidden', !isKey);
   $('#field-password').classList.toggle('hidden', isKey);
+});
+
+/*
+ * A private key from a file instead of copy and paste: the Import button or a
+ * file dropped on the box. The file is read in the browser and only its text
+ * goes into the form — the usual mistakes are caught before saving.
+ */
+function keyImportNote(text, kind = '') {
+  const el = $('#key-import-note');
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.className = `muted small key-import-note ${kind}`;
+}
+
+/** An OpenSSH key names its cipher right after "openssh-key-v1": "none" means no passphrase. */
+function opensshCipher(text) {
+  if (!/OPENSSH PRIVATE KEY/.test(text)) return 'none';
+  try {
+    const body = text.split('\n').filter((l) => !l.startsWith('-----')).join('').slice(0, 64);
+    const raw = atob(body.slice(0, body.length - (body.length % 4)));
+    return /aes\d+-(ctr|cbc)|aes\d+-gcm|chacha20/.test(raw) ? 'encrypted' : 'none';
+  } catch { return 'none'; }
+}
+
+async function importKeyFile(file) {
+  if (!file) return;
+  if (file.size > 64 * 1024) return keyImportNote(`${file.name} is too big to be an SSH key (${Math.round(file.size / 1024)} KB).`, 'err');
+  const text = (await file.text()).replace(/\r\n/g, '\n').trim();
+  if (/^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-)/.test(text) || /\.pub$/i.test(file.name)) {
+    return keyImportNote(`${file.name} is the public key. Choose the private key — the same name without .pub (for example id_ed25519).`, 'err');
+  }
+  if (/^PuTTY-User-Key-File/.test(text)) {
+    return keyImportNote(`${file.name} is a PuTTY key. In PuTTYgen choose Conversions → Export OpenSSH key, then import that file.`, 'err');
+  }
+  if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----/.test(text)) {
+    return keyImportNote(`${file.name} does not look like a private key — it should start with -----BEGIN … PRIVATE KEY-----.`, 'err');
+  }
+  serverForm.private_key.value = `${text}\n`;
+  const encrypted = /ENCRYPTED/.test(text) || opensshCipher(text) !== 'none';
+  keyImportNote(`Imported ${file.name}.${encrypted ? ' It is protected by a passphrase — type it below.' : ''}`, 'ok');
+  if (encrypted) serverForm.passphrase.focus();
+}
+
+$('#btn-key-import').addEventListener('click', () => $('#key-import-file').click());
+$('#key-import-file').addEventListener('change', async (e) => {
+  try { await importKeyFile(e.target.files[0]); } catch { keyImportNote('That file could not be read.', 'err'); }
+  e.target.value = '';
+});
+const keyDrop = $('#key-drop');
+['dragenter', 'dragover'].forEach((t) => keyDrop.addEventListener(t, (e) => { e.preventDefault(); keyDrop.classList.add('dragging'); }));
+['dragleave', 'drop'].forEach((t) => keyDrop.addEventListener(t, () => keyDrop.classList.remove('dragging')));
+keyDrop.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  try { await importKeyFile(e.dataTransfer.files[0]); } catch { keyImportNote('That file could not be read.', 'err'); }
 });
 
 function serverFormData() {
@@ -10088,6 +10198,406 @@ $('#view-server-detail').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-cron]');
   if (btn) return cronPanelAction(btn);
   return undefined;
+});
+
+/* ------------------------------------------------------- the users tab */
+
+/*
+ * Ubuntu accounts on the server. Two gates come first: the signed-in role
+ * (looking needs "edit", as a Linux account can hand out root) and whether
+ * the SSH login can become root on the server. Failing either shows
+ * "You are not permitted" and nothing else.
+ */
+let osUsers = null;
+let osShowSystem = false;
+let osEditing = null;
+let osKeysFor = null;
+const USEFUL_GROUPS = ['docker', 'www-data', 'adm', 'systemd-journal', 'users', 'plugdev', 'lxd'];
+
+function notPermittedHtml(message) {
+  return `<div class="osu-denied">
+    <div class="osu-denied-icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+    <h3>You are not permitted</h3>
+    <p>${esc(message)}</p>
+  </div>`;
+}
+
+async function loadServerUsers() {
+  const box = $('#users-panel');
+  if (!box) return;
+  tabsLoaded.add('users');
+  const head = (tools = '') => `
+    <div class="section-head">
+      <h2>Server users</h2>
+      <div class="section-tools">${tools}</div>
+    </div>`;
+
+  if (!canDo('edit')) {
+    setTabCount('users', '🔒');
+    box.innerHTML = `${head()}${notPermittedHtml(`Your role (${roleLabel(session.user?.role)}) cannot manage the Ubuntu users of this server. Ask an admin of your organisation if you need access.`)}`;
+    return;
+  }
+
+  box.innerHTML = `${head()}<div class="empty"><span class="spinner"></span>Checking permission and reading the users…</div>`;
+  try {
+    const { users } = await api(`/servers/${currentServerId}/users`);
+    osUsers = users;
+    renderServerUsers();
+  } catch (err) {
+    osUsers = null;
+    if (err.body?.notPermitted || err.body?.forbidden || /not permitted/i.test(err.message)) {
+      setTabCount('users', '🔒');
+      box.innerHTML = `${head('<button class="btn tiny" data-osu="reload">Check again</button>')}${notPermittedHtml(err.message.replace(/^You are not permitted[^.]*\.\s*/, '') || err.message)}`;
+      return;
+    }
+    setTabCount('users', '!', 'err');
+    box.innerHTML = `${head('<button class="btn tiny" data-osu="reload">Refresh</button>')}<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+const osPasswordBadge = (u) => ({
+  set: '<span class="badge ok">password</span>',
+  locked: `<span class="badge ${u.kind === 'user' && !u.keys.length ? 'warn' : ''}">no password</span>`,
+  empty: '<span class="badge err">empty password</span>',
+}[u.password] || '<span class="badge">unknown</span>');
+
+function osUserRow(u) {
+  const mine = u.isLogin ? '<span class="badge info" title="The panel connects to this server as this user">panel login</span>' : '';
+  const kindBadge = u.kind === 'system' ? '<span class="badge">system</span>' : '';
+  const locked = Boolean(u.locked);
+  const groups = u.groups.filter((g) => g !== 'sudo' && g !== u.name);
+  const editable = u.kind !== 'system';
+  const actions = editable ? [
+    u.kind === 'user' ? ifCan('edit', `<button class="btn tiny" data-osu="edit" data-name="${esc(u.name)}">Edit</button>`) : '',
+    u.kind === 'root' ? ifCan('edit', `<button class="btn tiny" data-osu="password" data-name="${esc(u.name)}">Change password</button>`) : '',
+    `<button class="btn tiny" data-osu="keys" data-name="${esc(u.name)}">SSH keys</button>`,
+    u.kind === 'user' && !u.isLogin ? ifCan('edit', `<button class="btn tiny" data-osu="${locked ? 'unlock' : 'lock'}" data-name="${esc(u.name)}">${locked ? 'Unlock' : 'Lock login'}</button>`) : '',
+    u.kind === 'user' && !u.isLogin ? ifCan('delete', `<button class="btn tiny danger" data-osu="delete" data-name="${esc(u.name)}">Delete</button>`) : '',
+  ].filter(Boolean).join('') : '<span class="muted small">read-only</span>';
+
+  return [
+    `<div class="osu-who">
+       <span class="osu-avatar ${u.kind}">${esc((u.fullName || u.name).slice(0, 1).toUpperCase())}</span>
+       <div><b>${esc(u.name)}</b> ${kindBadge} ${mine}
+         <div class="muted small">${u.fullName && u.fullName !== u.name ? `${esc(u.fullName)} · ` : ''}UID ${u.uid}</div></div>
+     </div>`,
+    u.sudo ? `<span class="badge warn">sudo${u.noPasswordSudo ? ' · no password' : ''}</span>` : '<span class="muted small">—</span>',
+    `${u.locked ? '<span class="badge err">locked</span> ' : ''}${osPasswordBadge(u)} ${u.keys.length ? `<span class="badge ok">${u.keys.length} key${u.keys.length > 1 ? 's' : ''}</span>` : ''}
+     ${!u.canLogin ? '<span class="badge">no shell</span>' : ''}`,
+    groups.length ? `<div class="chips osu-chips">${groups.slice(0, 4).map((g) => `<span class="chip">${esc(g)}</span>`).join('')}${groups.length > 4 ? `<span class="chip muted">+${groups.length - 4}</span>` : ''}</div>` : '<span class="muted small">—</span>',
+    `<code class="small">${esc(u.shell)}</code>`,
+    u.sessions ? `<span class="badge ok">${u.sessions} signed in</span>` : `<span class="muted small">${u.lastLogin ? esc(u.lastLogin.replace(/ [+-]\d{4}/, '')) : u.lastLogin === null ? 'never' : '—'}</span>`,
+    `<div class="row-actions">${actions}</div>`,
+  ];
+}
+
+function renderServerUsers() {
+  const box = $('#users-panel');
+  if (!box || !osUsers) return;
+  const people = osUsers.users.filter((u) => u.kind !== 'system');
+  const system = osUsers.users.filter((u) => u.kind === 'system');
+  const shown = osShowSystem ? osUsers.users : people;
+  setTabCount('users', people.length);
+
+  box.innerHTML = `
+    <div class="section-head">
+      <h2>Server users</h2>
+      <div class="section-tools">
+        <label class="check osu-toggle"><input type="checkbox" data-osu-system ${osShowSystem ? 'checked' : ''} /> <span>Show ${system.length} system accounts</span></label>
+        ${ifCan('create', '<button class="btn tiny primary" data-osu="add">+ Add user</button>')}
+        <button class="btn tiny" data-osu="reload">Refresh</button>
+      </div>
+    </div>
+    <div class="msg ok osu-perm" style="margin:0 0 14px"><b>Permitted.</b> The panel logs in as <code>${esc(osUsers.login)}</code>, which can become root on this server.</div>
+    <div class="tiles" style="margin-bottom:14px">
+      ${tile('Users', String(people.length), 'root and people (UID ≥ 1000)')}
+      ${tile('Administrators', String(people.filter((u) => u.sudo).length), 'can use sudo')}
+      ${tile('SSH keys', String(people.reduce((n, u) => n + u.keys.length, 0)), `on ${people.filter((u) => u.keys.length).length} account(s)`)}
+      ${tile('Signed in now', String(people.reduce((n, u) => n + u.sessions, 0)), 'open sessions')}
+    </div>
+    ${table(
+    [{ label: 'User' }, { label: 'Sudo' }, { label: 'Login' }, { label: 'Groups' }, { label: 'Shell' }, { label: 'Last login' }, { label: '' }],
+    shown.map(osUserRow),
+    'No users'
+  )}
+    <p class="muted small" style="margin:10px 0 0">root can only have its password and SSH keys changed. System accounts belong to packages and are shown read-only.
+      The account the panel logs in with cannot be deleted, locked or taken out of sudo.</p>`;
+}
+
+const osUser = (name) => osUsers?.users.find((u) => u.name === name) || null;
+
+/* add / edit */
+
+function osGroupChoices(u) {
+  const names = new Set(osUsers.groups.map((g) => g.name));
+  const people = new Set(osUsers.users.map((x) => x.name));
+  const list = [
+    ...USEFUL_GROUPS.filter((g) => names.has(g)),
+    ...osUsers.groups.filter((g) => !g.system && !people.has(g.name) && g.name !== 'nogroup' && !USEFUL_GROUPS.includes(g.name)).map((g) => g.name),
+    // Whatever the user is already in stays visible, so it can be taken away.
+    ...(u?.groups || []).filter((g) => g !== 'sudo' && g !== u.name),
+  ];
+  return [...new Set(list)];
+}
+
+function openOsUserModal(u = null, { passwordOnly = false } = {}) {
+  osEditing = u;
+  const f = $('#form-osuser');
+  f.reset();
+  $('#osuser-msg').classList.add('hidden');
+  $('#osuser-pw-strength').textContent = '';
+  $('#osuser-password').type = 'password';
+  $('#osuser-password2').type = 'password';
+  $('#osuser-title').textContent = !u ? 'Add a server user' : passwordOnly ? `Change the password of ${u.name}` : `Edit ${u.name}`;
+  $('#osuser-intro').innerHTML = !u
+    ? 'An Ubuntu account on this server, with its own home folder under <code>/home</code>.'
+    : `UID ${u.uid} · home <code>${esc(u.home)}</code>${u.isLogin ? ' · <b>the panel logs in as this user</b>' : ''}`;
+  $('#btn-osuser-save').textContent = !u ? 'Add the user' : passwordOnly ? 'Change password' : 'Save changes';
+  $('#osuser-pw-note').textContent = u
+    ? 'Leave empty to keep the current password.'
+    : 'Used for console login and sudo. Leave empty for key-only login.';
+
+  $('#osuser-username').value = u?.name || '';
+  $('#osuser-username').disabled = Boolean(u);
+  $('#osuser-fullname').value = u?.fullName || '';
+  $('#osuser-shell').innerHTML = [...new Set([...(osUsers.shells || []), u?.shell].filter(Boolean))]
+    .map((s) => `<option value="${esc(s)}">${esc(s)}${/nologin|false$/.test(s) ? ' — no login' : ''}</option>`).join('');
+  $('#osuser-shell').value = u?.shell || '/bin/bash';
+  $('#osuser-sudo').checked = Boolean(u?.sudo);
+  $('#osuser-nopw').checked = Boolean(u?.noPasswordSudo);
+  $('#osuser-nopw-field').hidden = !$('#osuser-sudo').checked;
+  $('#osuser-sudo').disabled = Boolean(u?.isLogin && u?.sudo);
+  $('#osuser-groups').innerHTML = osGroupChoices(u).map((g) => `
+    <label class="osu-group"><input type="checkbox" value="${esc(g)}" ${u?.groups.includes(g) ? 'checked' : ''} /> <span>${esc(g)}</span></label>`).join('')
+    || '<span class="muted small">No extra groups on this server</span>';
+
+  // New users get keys here; existing ones have their own SSH keys window.
+  $('#osuser-keys-block').hidden = Boolean(u);
+  // Changing only the password hides everything else.
+  ['#osuser-names', '#osuser-access-block'].forEach((s) => { $(s).hidden = passwordOnly; });
+  f.dataset.passwordOnly = passwordOnly ? '1' : '';
+  $('#modal-osuser').classList.remove('hidden');
+  (u ? $(passwordOnly ? '#osuser-password' : '#osuser-fullname') : $('#osuser-username')).focus();
+}
+
+$('#osuser-sudo').addEventListener('change', (e) => { $('#osuser-nopw-field').hidden = !e.target.checked; });
+
+function strongPassword(n = 20) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#%^*-_=+';
+  const r = crypto.getRandomValues(new Uint32Array(n));
+  return [...r].map((x) => chars[x % chars.length]).join('');
+}
+
+$('#form-osuser').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-osu-pw]');
+  if (!b) return;
+  const pw = $('#osuser-password');
+  const pw2 = $('#osuser-password2');
+  if (b.dataset.osuPw === 'show') {
+    const show = pw.type === 'password';
+    pw.type = show ? 'text' : 'password';
+    pw2.type = pw.type;
+    b.textContent = show ? 'Hide' : 'Show';
+  } else {
+    const v = strongPassword();
+    pw.value = v; pw2.value = v; pw.type = 'text'; pw2.type = 'text';
+    $('[data-osu-pw="show"]').textContent = 'Hide';
+    try { await navigator.clipboard.writeText(v); $('#osuser-pw-strength').textContent = 'Generated and copied — keep it somewhere safe.'; } catch { $('#osuser-pw-strength').textContent = 'Generated — copy it somewhere safe.'; }
+  }
+});
+
+$('#form-osuser').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const msg = $('#osuser-msg');
+  const btn = $('#btn-osuser-save');
+  const passwordOnly = f.dataset.passwordOnly === '1';
+  const pw = $('#osuser-password').value;
+  if (pw !== $('#osuser-password2').value) return formMsg(msg, 'The two passwords are not the same', 'err');
+  if (pw && pw.length < 8) return formMsg(msg, 'The password must be at least 8 characters', 'err');
+  if (passwordOnly && !pw) return formMsg(msg, 'Type the new password', 'err');
+
+  const groups = $$('#osuser-groups input:checked').map((c) => c.value);
+  const body = passwordOnly ? { password: pw } : {
+    full_name: $('#osuser-fullname').value.trim(),
+    shell: $('#osuser-shell').value,
+    groups,
+    sudo: $('#osuser-sudo').checked,
+    no_password_sudo: $('#osuser-nopw').checked,
+    ...(pw ? { password: pw } : {}),
+  };
+  if (!osEditing) {
+    body.username = $('#osuser-username').value.trim();
+    body.public_keys = $('#osuser-pubkeys').value;
+    body.generate_key = $('#osuser-genkey').checked;
+    if (!pw && !body.generate_key && !body.public_keys.trim()) {
+      return formMsg(msg, 'Give the user a password, an SSH key, or both — otherwise nobody can log in as them', 'err');
+    }
+  }
+
+  busy(btn, true, osEditing ? 'Saving…' : 'Creating…');
+  try {
+    const r = await api(osEditing ? `/servers/${currentServerId}/users/${encodeURIComponent(osEditing.name)}` : `/servers/${currentServerId}/users`,
+      { method: osEditing ? 'PUT' : 'POST', body });
+    $('#modal-osuser').classList.add('hidden');
+    toast(osEditing ? (r.changed?.length ? `${osEditing.name}: ${r.changed.join(', ')} changed` : 'Nothing to change')
+      : r.reusedHome ? `${r.username} was added. ${r.reusedHome} was left from an earlier user — its files are kept, its old SSH keys were disabled.`
+        : `${r.username} was added`);
+    if (r.key) showPrivateKey(osEditing?.name || r.username, r.key);
+    loadServerUsers();
+  } catch (err) {
+    formMsg(msg, err.message, 'err');
+  }
+  busy(btn, false);
+});
+
+/* ssh keys */
+
+function openOsKeys(u) {
+  osKeysFor = u;
+  $('#osukeys-title').textContent = `SSH keys of ${u.name}`;
+  $('#osukeys-sub').innerHTML = `The keys in <code>${esc(u.home)}/.ssh/authorized_keys</code> — each one can log in as <b>${esc(u.name)}</b> without a password.`;
+  $('#osukeys-list').innerHTML = u.keys.length
+    ? `<div class="osu-keys">${u.keys.map((k) => `
+        <div class="osu-key">
+          <span class="osu-key-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg></span>
+          <div class="osu-key-main">${k.invalid ? '<b>A line that is not a valid key</b>' : `<b>${esc(k.comment || 'no label')}</b>
+            <div class="muted small"><code>${esc(k.type)}</code> ${k.bits ? `· ${k.bits} bits` : ''} · <code>${esc(k.fingerprint)}</code></div>`}</div>
+          ${!k.invalid ? ifCan('delete', `<button type="button" class="btn tiny danger" data-osukey-remove="${esc(k.fingerprint)}">Remove</button>`) : ''}
+        </div>`).join('')}</div>`
+    : '<div class="card"><p class="muted small" style="margin:0">No SSH keys yet — this user can only log in with a password.</p></div>';
+  const f = $('#form-osuser-key');
+  f.reset();
+  f.hidden = !canDo('create');
+  $('#osukey-msg').classList.add('hidden');
+  syncOsKeyMode();
+  $('#modal-osuser-keys').classList.remove('hidden');
+}
+
+function syncOsKeyMode() {
+  const paste = $('#form-osuser-key').mode.value === 'paste';
+  $('#osukey-paste-field').hidden = !paste;
+  $('#osukey-comment-field').hidden = paste;
+  $('#btn-osukey-save').textContent = paste ? 'Add the key' : 'Generate the key';
+}
+$('#osukey-mode').addEventListener('change', syncOsKeyMode);
+
+$('#form-osuser-key').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = osKeysFor;
+  const paste = e.target.mode.value === 'paste';
+  const btn = $('#btn-osukey-save');
+  const body = paste ? { public_keys: $('#osukey-pubkeys').value } : { generate_key: true, key_comment: $('#osukey-comment').value.trim() };
+  if (paste && !body.public_keys.trim()) return formMsg($('#osukey-msg'), 'Paste the public key first', 'err');
+  busy(btn, true, paste ? 'Adding…' : 'Generating…');
+  try {
+    const r = await api(`/servers/${currentServerId}/users/${encodeURIComponent(u.name)}/keys`, { method: 'POST', body });
+    $('#modal-osuser-keys').classList.add('hidden');
+    toast(paste ? 'The key was added' : 'A new key was generated');
+    if (r.key) showPrivateKey(u.name, r.key);
+    await loadServerUsers();
+  } catch (err) {
+    formMsg($('#osukey-msg'), err.message, 'err');
+  }
+  busy(btn, false);
+});
+
+$('#osukeys-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-osukey-remove]');
+  if (!b) return;
+  const u = osKeysFor;
+  const k = u.keys.find((x) => x.fingerprint === b.dataset.osukeyRemove);
+  const warnSelf = u.isLogin ? '\n\nThe panel logs in as this user — if this is the key the panel uses, it will lose access to the server.' : '';
+  if (!await askConfirm(`Remove the key "${k?.comment || k?.fingerprint}" from ${u.name}?\n\nAnyone using it can no longer log in as ${u.name}.${warnSelf}`)) return;
+  busy(b, true, 'Removing…');
+  try {
+    await api(`/servers/${currentServerId}/users/${encodeURIComponent(u.name)}/keys`, { method: 'DELETE', body: { fingerprint: k.fingerprint } });
+    toast('The key was removed');
+    await loadServerUsers();
+    const fresh = osUser(u.name);
+    if (fresh) openOsKeys(fresh);
+  } catch (err) {
+    toast(err.message, 'err');
+    busy(b, false);
+  }
+});
+
+let osPrivate = null;
+function showPrivateKey(user, key) {
+  osPrivate = { user, ...key };
+  const host = currentServer?.host || 'server';
+  $('#osupriv-how').innerHTML = `Save it as <code>~/.ssh/${esc(user)}_${esc(host.replace(/[^\w.-]/g, '_'))}</code>, run <code>chmod 600</code> on it, then connect with
+    <code>ssh -i ~/.ssh/${esc(user)}_${esc(host.replace(/[^\w.-]/g, '_'))} ${esc(user)}@${esc(host)}</code>`;
+  $('#osupriv-key').textContent = key.privateKey;
+  $('#modal-osuser-privkey').classList.remove('hidden');
+}
+$('#btn-osupriv-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(osPrivate.privateKey); toast('Private key copied'); } catch { toast('Select the key and copy it by hand', 'err'); }
+});
+$('#btn-osupriv-download').addEventListener('click', () => {
+  const blob = new Blob([osPrivate.privateKey], { type: 'application/x-pem-file' });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(blob),
+    download: `${osPrivate.user}_${String(currentServer?.host || 'server').replace(/[^\w.-]/g, '_')}`,
+  });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+/* the row buttons */
+
+async function osUserAction(btn) {
+  const what = btn.dataset.osu;
+  if (what === 'reload') return loadServerUsers();
+  if (what === 'add') return openOsUserModal();
+  const u = osUser(btn.dataset.name);
+  if (!u) { toast('That user is no longer there — refreshing', 'err'); return loadServerUsers(); }
+  if (what === 'edit') return openOsUserModal(u);
+  if (what === 'password') return openOsUserModal(u, { passwordOnly: true });
+  if (what === 'keys') return openOsKeys(u);
+
+  if (what === 'lock' || what === 'unlock') {
+    const lock = what === 'lock';
+    if (lock && !await askConfirm(`Lock ${u.name}?\n\nPassword and SSH key logins are refused and the account is expired until you unlock it. Files and running jobs stay as they are.`, { ok: 'Lock' })) return;
+    busy(btn, true, lock ? 'Locking…' : 'Unlocking…');
+    try {
+      await api(`/servers/${currentServerId}/users/${encodeURIComponent(u.name)}`, { method: 'PUT', body: { locked: lock } });
+      toast(`${u.name} is ${lock ? 'locked' : 'unlocked'}`);
+    } catch (err) { toast(err.message, 'err'); }
+    return loadServerUsers();
+  }
+
+  if (what === 'delete') {
+    const choice = await askChoice(
+      `Delete the user ${u.name}?\n\nTheir processes are stopped and the account is removed${u.sudo ? ', along with their sudo rights' : ''}. `
+      + `You can keep their home folder ${u.home} or delete it with everything in it.`,
+      [
+        { label: 'Delete with home folder', value: 'home', kind: 'danger' },
+        { label: 'Delete, keep files', value: 'keep', kind: 'danger solid', main: true },
+      ],
+      { tone: 'danger' }
+    );
+    if (!choice) return;
+    busy(btn, true, 'Deleting…');
+    try {
+      await api(`/servers/${currentServerId}/users/${encodeURIComponent(u.name)}${choice === 'home' ? '?remove_home=1' : ''}`, { method: 'DELETE' });
+      toast(`${u.name} was deleted${choice === 'home' ? ' with the home folder' : ''}`);
+    } catch (err) { toast(err.message, 'err'); }
+    return loadServerUsers();
+  }
+  return undefined;
+}
+
+$('#view-server-detail').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-osu]');
+  if (btn) osUserAction(btn);
+});
+$('#view-server-detail').addEventListener('change', (e) => {
+  if (!e.target.matches('[data-osu-system]')) return;
+  osShowSystem = e.target.checked;
+  renderServerUsers();
 });
 
 /* ------------------------------------------------------- the nginx tab */

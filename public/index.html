@@ -274,6 +274,32 @@
         </div>
       </div>
     </div>
+
+    <div class="showcase-row" id="server-users">
+      <div class="showcase-copy">
+        <span class="eyebrow">Server users</span>
+        <h2>Ubuntu users &amp; SSH keys, <span class="gradient-text">without the terminal</span></h2>
+        <p class="section-lead">Give a developer, a CI job or a client their own login on a server — with a password, an SSH key or both — and take it away again in one click. No <code>useradd</code>, no editing <code>authorized_keys</code> by hand.</p>
+        <ul class="tick-list">
+          <li><b>Add, edit and delete users</b> — full name, password, login shell and groups like <code>docker</code> or <code>www-data</code>.</li>
+          <li><b>New SSH key in one click</b> — a fresh key pair is made on the server and its private key shown to you once to download; or paste your own public key.</li>
+          <li><b>Sudo when you mean it</b> — make a user an administrator, with or without a password prompt, and switch it off again.</li>
+          <li><b>Lock instead of delete</b> — shut a login out and let it back in later, files untouched.</li>
+          <li><b>Permission checked first</b> — only admins and editors can open it, and only when the panel's SSH login can become root. Anyone else sees <i>“You are not permitted”</i>.</li>
+          <li><b>Hard to lock yourself out</b> — root and the panel's own login are never deleted or locked; system accounts are read-only.</li>
+        </ul>
+      </div>
+      <div class="showcase-visual" aria-hidden="true">
+        <div class="env-demo usr-demo">
+          <div class="env-demo-head"><div><b>prod-web-01 · Users</b><small>4 users · 2 administrators · 3 SSH keys</small></div><span class="env-demo-lock">✓ permitted</span></div>
+          <div class="usr-row"><span class="usr-av root">R</span><div><b>root</b><small>UID 0 · panel login</small></div><span class="usr-tag warn">sudo</span><span class="usr-tag ok">🔑 1</span></div>
+          <div class="usr-row"><span class="usr-av">D</span><div><b>deploy</b><small>Deploy bot · docker</small></div><span class="usr-tag warn">sudo · no password</span><span class="usr-tag ok">🔑 1</span></div>
+          <div class="usr-row"><span class="usr-av">A</span><div><b>asha</b><small>Asha Patel · www-data</small></div><span class="usr-tag ok">password</span><span class="usr-tag ok">🔑 1</span></div>
+          <div class="usr-row off"><span class="usr-av">F</span><div><b>freelancer</b><small>Contract ended</small></div><span class="usr-tag err">locked</span></div>
+          <div class="usr-key"><span>🔑</span><div><b>New key for deploy</b><small><code>ssh-ed25519</code> · SHA256:Jp4Gz59…ePZoc · shown once</small></div><span class="usr-dl">Download</span></div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section class="landing-section" id="features">
@@ -300,6 +326,7 @@
               <li><b>systemd services</b><span>Start, stop, restart and enable any unit, read its journal, or write a new service from a form.</span></li>
               <li><b>File manager</b><span>A Windows-style explorer: sizes, upload, download, edit, rename, copy, extract and permissions.</span></li>
               <li><b>Cron jobs</b><span>See, add, edit and remove scheduled jobs with a readable schedule.</span></li>
+              <li><b>Ubuntu users &amp; SSH keys</b><span>Add, edit, lock or delete logins, set passwords and sudo, and generate new SSH keys — permission checked first.</span></li>
               <li><b>Nginx sites &amp; SSL</b><span>Sites and upstreams with a syntax check, and free Let's Encrypt certificates.</span></li>
             </ul>
           </div>
@@ -421,7 +448,7 @@
           <li><b>CI runners in minutes</b><span>GitHub Actions or GitLab runners kept alive under systemd.</span></li>
           <li><b>Activity log</b><span>Every deploy, domain, service and permission change.</span></li>
           <li><b>Git sign-in without tokens</b><span>Connect GitHub or GitLab with a sign-in popup.</span></li>
-          <li><b>Light &amp; dark themes</b><span>Follows your system, or the one you pick.</span></li>
+          <li><b>Light &amp; dark themes</b><span>Dark by default, one click to switch.</span></li>
         </ul>
         <div class="uc-visual ft-roles" aria-hidden="true"><span class="r1">admin</span><span class="r2">editor</span><span class="r3">viewer</span></div>
       </article>
@@ -1003,6 +1030,10 @@
       <div class="actions">
         <button class="btn" id="btn-detail-test">Test connection</button>
         <button class="btn" id="btn-detail-edit" data-needs="edit">Edit server</button>
+        <button class="btn danger" id="btn-detail-reboot" data-needs="edit" title="Restart this server">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+          Reboot
+        </button>
         <button class="btn" id="btn-add-service" data-needs="create">+ Add service</button>
         <button class="btn primary" id="btn-detail-refresh">Fetch system details</button>
       </div>
@@ -1261,9 +1292,18 @@
       </div>
       <label id="field-password">Password<input name="password" type="password" autocomplete="off" /></label>
       <div id="field-key" class="hidden">
-        <label>Private key (full PEM / OpenSSH block)
-          <textarea name="private_key" rows="6" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----"></textarea>
+        <div class="key-import">
+          <span class="key-import-label">Private key <span class="muted small">(full PEM / OpenSSH block)</span></span>
+          <button type="button" class="btn tiny" id="btn-key-import">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+            Import key file
+          </button>
+          <input type="file" id="key-import-file" hidden />
+        </div>
+        <label class="key-drop" id="key-drop">
+          <textarea name="private_key" rows="6" aria-label="Private key" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----&#10;&#10;Paste it here, drop the file on this box, or use Import key file (id_ed25519, id_rsa, .pem)"></textarea>
         </label>
+        <p class="muted small key-import-note" id="key-import-note" hidden></p>
         <label>Key passphrase <span class="muted small">(optional)</span><input name="passphrase" type="password" autocomplete="off" /></label>
       </div>
       <label>Sudo password <span class="muted small">(optional — only if this user needs one for sudo)</span>
@@ -2028,6 +2068,98 @@
         <button type="submit" class="btn primary" id="btn-cron-save">Add the job</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------ ubuntu user -->
+<div class="modal-backdrop hidden" id="modal-osuser">
+  <div class="modal" style="max-width:680px">
+    <h2 id="osuser-title">Add a server user</h2>
+    <p class="muted small" id="osuser-intro">An Ubuntu account on this server, with its own home folder under <code>/home</code>.</p>
+
+    <form id="form-osuser" autocomplete="off">
+      <div class="row" id="osuser-names">
+        <label>Username<input name="username" id="osuser-username" required maxlength="32" spellcheck="false" autocapitalize="off" placeholder="deploy" pattern="[a-z_][a-z0-9_\-]{0,31}" /></label>
+        <label>Full name <span class="muted small">(optional)</span><input name="full_name" id="osuser-fullname" maxlength="80" placeholder="Deploy bot" /></label>
+      </div>
+
+      <div class="osu-block">
+        <div class="osu-block-head"><b>Password</b><span class="muted small" id="osuser-pw-note">Used for console login and sudo. Leave empty for key-only login.</span></div>
+        <div class="row">
+          <label>Password
+            <span class="osu-pw"><input name="password" id="osuser-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+              <button type="button" class="btn tiny ghost" data-osu-pw="show" title="Show / hide">Show</button></span>
+          </label>
+          <label>Confirm password<input name="password2" id="osuser-password2" type="password" autocomplete="new-password" /></label>
+        </div>
+        <div class="inline-tools"><button type="button" class="btn tiny" data-osu-pw="generate">Generate a strong password</button><span class="muted small" id="osuser-pw-strength"></span></div>
+      </div>
+
+      <div class="osu-block" id="osuser-keys-block">
+        <div class="osu-block-head"><b>SSH keys</b><span class="muted small">Log in without a password.</span></div>
+        <label class="check"><input type="checkbox" name="generate_key" id="osuser-genkey" /> <span>Generate a new key pair — the private key is shown to you <b>once</b> to download</span></label>
+        <label>Or paste public keys <span class="muted small">(one per line — <code>ssh-ed25519 AAAA… you@laptop</code>)</span>
+          <textarea name="public_keys" id="osuser-pubkeys" rows="3" spellcheck="false" placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… you@laptop"></textarea>
+        </label>
+      </div>
+
+      <div class="osu-block" id="osuser-access-block">
+        <div class="osu-block-head"><b>Access</b></div>
+        <label class="check"><input type="checkbox" name="sudo" id="osuser-sudo" /> <span><b>Administrator (sudo)</b> — can run commands as root</span></label>
+        <label class="check osu-sub" id="osuser-nopw-field"><input type="checkbox" name="no_password_sudo" id="osuser-nopw" /> <span>Without asking for the password (needed for automation and key-only users)</span></label>
+        <div class="row" style="margin-top:6px">
+          <label class="narrow">Login shell<select name="shell" id="osuser-shell"></select></label>
+          <label>Extra groups <span class="muted small">(tick any)</span><div class="osu-groups" id="osuser-groups"></div></label>
+        </div>
+      </div>
+
+      <div id="osuser-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" id="btn-osuser-save">Add the user</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="modal-osuser-keys">
+  <div class="modal" style="max-width:680px">
+    <h2 id="osukeys-title">SSH keys</h2>
+    <p class="muted small" id="osukeys-sub">The keys in this user's <code>~/.ssh/authorized_keys</code>.</p>
+    <div id="osukeys-list"></div>
+
+    <form id="form-osuser-key" autocomplete="off">
+      <div class="osu-block">
+        <div class="osu-block-head"><b>Add a key</b></div>
+        <div class="osu-seg" role="radiogroup" id="osukey-mode">
+          <label><input type="radio" name="mode" value="generate" checked /> <span>Generate a new key</span></label>
+          <label><input type="radio" name="mode" value="paste" /> <span>Paste a public key</span></label>
+        </div>
+        <label id="osukey-comment-field">Key label <span class="muted small">(optional)</span><input name="key_comment" id="osukey-comment" maxlength="80" placeholder="laptop, ci, deploy…" /></label>
+        <label id="osukey-paste-field" hidden>Public key
+          <textarea name="public_keys" id="osukey-pubkeys" rows="3" spellcheck="false" placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA… you@laptop"></textarea>
+        </label>
+      </div>
+      <div id="osukey-msg" class="msg hidden"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>Close</button>
+        <button type="submit" class="btn primary" id="btn-osukey-save">Generate the key</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="modal-osuser-privkey">
+  <div class="modal" style="max-width:680px">
+    <h2>Save this private key now</h2>
+    <div class="msg warn" style="margin-top:8px"><b>It is shown only once.</b> The panel does not keep it and it has been deleted from the server — only its public half stays in <code>authorized_keys</code>.</div>
+    <p class="muted small" id="osupriv-how"></p>
+    <pre class="log osu-priv" id="osupriv-key"></pre>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="btn-osupriv-copy">Copy</button>
+      <button type="button" class="btn" id="btn-osupriv-download">Download</button>
+      <button type="button" class="btn primary" data-close>I have saved it</button>
+    </div>
   </div>
 </div>
 
