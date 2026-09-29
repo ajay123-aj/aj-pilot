@@ -19,7 +19,21 @@ let cached = { mtime: 0, html: '' };
 function template() {
   const { mtimeMs } = fs.statSync(INDEX);
   if (mtimeMs !== cached.mtime) cached = { mtime: mtimeMs, html: fs.readFileSync(INDEX, 'utf8') };
-  return cached.html;
+  return versionAssets(cached.html);
+}
+
+/**
+ * /app.js → /app.js?v=<modified time>. A proxy in front (Cloudflare's Browser
+ * Cache TTL) can tell browsers to keep these files for hours whatever this
+ * server says, so each deploy has to change the address to be seen at once.
+ */
+const ASSETS = ['app.js', 'styles.css', 'landing.css'];
+function versionAssets(html) {
+  return ASSETS.reduce((out, name) => {
+    let v;
+    try { v = Math.round(fs.statSync(path.join(ROOT, 'public', name)).mtimeMs).toString(36); } catch { return out; }
+    return out.replaceAll(`"/${name}"`, `"/${name}?v=${v}"`);
+  }, html);
 }
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
