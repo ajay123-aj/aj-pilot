@@ -466,6 +466,22 @@ async function createSchema() {
       CONSTRAINT fk_deploy_app FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // A small program on someone's PC that lets the panel reach what that PC can reach (its VPN).
+    `CREATE TABLE IF NOT EXISTS connectors (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      org_id       INT NULL,
+      name         VARCHAR(190) NOT NULL,
+      token_hash   CHAR(64) NOT NULL,
+      hostname     VARCHAR(255),
+      platform     VARCHAR(100),
+      version      VARCHAR(40),
+      last_ip      VARCHAR(64),
+      last_seen_at DATETIME NULL,
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_connector_token (token_hash),
+      KEY idx_connectors_org (org_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     `CREATE TABLE IF NOT EXISTS activity_log (
       id         INT AUTO_INCREMENT PRIMARY KEY,
       entity     VARCHAR(50) NOT NULL,
@@ -557,8 +573,6 @@ async function addOrgScoping() {
     // A super admin can end any plan on a date (or now): after it the organisation is view-only.
     ['subscriptions', 'expires_at', 'DATETIME NULL'],
     ['installations', 'environment_id', 'INT NULL'],
-    // A server only reachable over the office VPN / a private network is reached through this one.
-    ['servers', 'jump_server_id', 'INT NULL'],
   ];
   for (const [table, column, definition] of LATER_COLUMNS) {
     if (await columnExists(table, column)) continue;

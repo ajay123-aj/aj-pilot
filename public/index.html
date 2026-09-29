@@ -923,6 +923,7 @@
 
     <!-- a client organisation (or a super admin who opened one) -->
     <button class="nav-item client-nav active" data-view="servers" title="Servers"><span class="nav-icon">🖥️</span><span class="nav-label">Servers</span></button>
+    <button class="nav-item client-nav" data-view="connectors" title="Connectors"><span class="nav-icon">🔌</span><span class="nav-label">Connectors</span></button>
     <button class="nav-item client-nav" data-view="apps" title="Apps"><span class="nav-icon">🚀</span><span class="nav-label">Apps</span></button>
     <button class="nav-item client-nav" data-view="installs" title="Installations"><span class="nav-icon">📦</span><span class="nav-label">Installations</span></button>
     <button class="nav-item client-nav" data-view="environments" title="Environments"><span class="nav-icon">🧩</span><span class="nav-label">Environments</span></button>
@@ -1042,6 +1043,40 @@
       <nav class="tab-rail" id="detail-tabs"></nav>
       <div id="detail-body" class="tab-content"></div>
     </div>
+  </section>
+
+  <!-- ------------------------------------------------------ connectors -->
+  <section id="view-connectors" class="view hidden">
+    <header class="page-head">
+      <div>
+        <h2 class="page-title">Connectors</h2>
+        <p class="muted">Reach servers that only your PC can reach — like office servers behind your VPN — exactly as if the project ran on that PC.</p>
+        <p class="muted small" id="connectors-updated">&nbsp;</p>
+      </div>
+      <button class="btn" id="btn-connectors-refresh">Refresh</button>
+    </header>
+
+    <div class="card" style="margin-bottom:18px">
+      <h3 style="margin-top:0">How it works</h3>
+      <ol class="small" style="margin:0;padding-left:18px;line-height:1.8">
+        <li>Create a connector below and download it for the PC's system (Windows, Mac or Ubuntu / Linux).</li>
+        <li>On that PC, connect your VPN, then start the downloaded file. It sets itself up (and offers to install Node.js if it is missing).</li>
+        <li>Keep its window open. Whenever the panel cannot reach a server by itself, it goes through that PC automatically — nothing to change on the servers.</li>
+      </ol>
+      <p class="muted small" style="margin:10px 0 0">The connector only makes an outgoing, encrypted connection to this panel. Nothing is opened on your PC, and deleting the connector here stops it at once.</p>
+    </div>
+
+    <div id="connector-new" class="hidden"></div>
+
+    <div class="section">
+      <div class="section-head"><h2>Your connectors</h2></div>
+      <div id="connector-list"></div>
+    </div>
+
+    <form id="form-connector" class="card row" style="align-items:flex-end;margin-top:18px">
+      <label>New connector name<input name="name" placeholder="My office laptop" required /></label>
+      <button type="submit" class="btn primary" style="flex:0 0 auto">Create connector</button>
+    </form>
   </section>
 
   <!-- ------------------------------------------------------------ apps -->
@@ -1306,12 +1341,6 @@
         <p class="muted small key-import-note" id="key-import-note" hidden></p>
         <label>Key passphrase <span class="muted small">(optional)</span><span class="pw-field"><input name="passphrase" type="password" autocomplete="off" /><button type="button" class="pw-toggle" data-secret="passphrase" aria-label="Show">Show</button></span></label>
       </div>
-      <label>Connect via jump host <span class="muted small">(optional — for servers only reachable over the office VPN)</span>
-        <select name="jump_server_id" id="server-jump">
-          <option value="">Direct — the panel connects to this host itself</option>
-        </select>
-      </label>
-      <p class="muted small" style="margin:6px 0 0">Pick a saved server that is reachable from the internet and sits inside the office network. The panel signs in to it first and goes on to this host from there, so use this host's private/VPN IP above.</p>
       <label>Sudo password <span class="muted small">(optional — only if this user needs one for sudo)</span>
         <span class="pw-field"><input name="sudo_password" type="password" autocomplete="off" /><button type="button" class="pw-toggle" data-secret="sudo_password" aria-label="Show">Show</button></span>
       </label>

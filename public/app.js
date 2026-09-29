@@ -275,6 +275,7 @@ $$('.nav-item').forEach((btn) => btn.addEventListener('click', () => {
   show(view);
   setHeading(btn.querySelector('.nav-label')?.textContent || btn.dataset.view);
   if (view === 'servers') loadServers();
+  if (view === 'connectors') loadConnectors();
   if (view === 'apps') loadApps();
   if (view === 'installs') loadInstallsView();
   if (view === 'environments') loadEnvironments();
@@ -1244,7 +1245,7 @@ function serverCard(s) {
     <div class="card-head">
       <div>
         <h3><span class="dot ${esc(s.status)}"></span> ${esc(s.name)}</h3>
-        <div class="muted small">${esc(s.username)}@${esc(s.host)}:${s.port} · ${s.auth_type === 'key' ? 'SSH key' : 'password'}${s.jumpServerName ? ` · via ${esc(s.jumpServerName)}` : ''}</div>
+        <div class="muted small">${esc(s.username)}@${esc(s.host)}:${s.port} · ${s.auth_type === 'key' ? 'SSH key' : 'password'}</div>
         <div class="muted small" data-status-note></div>
       </div>
       <span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>
@@ -1335,7 +1336,6 @@ const SERVER_TABS = [
   { key: 'users', label: 'Users', load: () => loadServerUsers() },
   { key: 'services', label: 'Services', load: () => loadServerServices() },
   { key: 'runners', label: 'Runners', load: () => loadServerRunners() },
-  { key: 'vpn', label: 'VPN', load: () => loadServerVpn() },
 ];
 
 let currentTab = 'overview';
@@ -1363,7 +1363,7 @@ async function openServer(id) {
     const s = await api(`/servers/${id}`);
     currentServer = s;
     $('#detail-name').innerHTML = `<span class="dot ${esc(s.status)}"></span> ${esc(s.name)}`;
-    $('#detail-sub').textContent = `${s.username}@${s.host}:${s.port} · ${s.auth_type === 'key' ? 'SSH key auth' : 'password auth'}${s.jumpServerName ? ` · via jump host ${s.jumpServerName}` : ''}${s.notes ? ` · ${s.notes}` : ''}`;
+    $('#detail-sub').textContent = `${s.username}@${s.host}:${s.port} · ${s.auth_type === 'key' ? 'SSH key auth' : 'password auth'}${s.notes ? ` · ${s.notes}` : ''}`;
     // Filled in properly by the status poll a moment later.
     $('#detail-status').innerHTML = `<span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>`
       + `<span class="muted small"> ${s.last_checked_at ? `updated ${esc(agoWords(s.last_checked_at))}` : 'not checked yet'}</span>`;
@@ -1392,7 +1392,6 @@ async function openServer(id) {
 const liveTabPanelId = (key) => ({
   live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel',
   cron: 'cron-panel', users: 'users-panel', services: 'services-panel', runners: 'server-runners-panel',
-  vpn: 'vpn-panel',
 }[key]);
 
 function showServerTab(key) {
@@ -2758,6 +2757,269 @@ function runnerLiveCell(x) {
     <div class="muted small">${x.live.enabled === 'enabled' ? 'would start at boot' : `${esc(x.live.enabled)} at boot`}</div>`;
 }
 
+/* -------------------------------------------------------- connectors */
+
+/*
+ * Connectors: a program on someone's PC that the panel goes through whenever it
+ * cannot reach a server itself (so through that PC's VPN). Made here; its token
+ * is shown once, baked into a one-file download for the PC's system.
+ */
+
+/** While the page is open, ask again every 5 seconds whether each connector is running. */
+const CONNECTOR_POLL_MS = 5000;
+let connectorTimer = null;
+
+function watchConnectors() {
+  clearInterval(connectorTimer);
+  connectorTimer = setInterval(() => {
+    if ($('#view-connectors').classList.contains('hidden')) {
+      clearInterval(connectorTimer);
+      connectorTimer = null;
+      return;
+    }
+    if (!document.hidden) loadConnectors({ quiet: true });
+  }, CONNECTOR_POLL_MS);
+}
+
+async function loadConnectors({ quiet = false } = {}) {
+  const box = $('#connector-list');
+  if (!quiet) {
+    box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading…</div>';
+    watchConnectors();
+  }
+  $('#form-connector').style.display = canDo('create') ? '' : 'none';
+  try {
+    const list = await api('/connectors');
+    $('#connectors-updated').innerHTML = `Last checked <b>${esc(new Date().toLocaleTimeString())}</b> · checking every ${CONNECTOR_POLL_MS / 1000}s`;
+    box.innerHTML = list.length ? list.map((c) => `
+      <div class="card" style="margin-bottom:10px">
+        <div class="card-head">
+          <div>
+            <h3><span class="dot ${c.online ? 'online' : 'offline'}"></span> ${esc(c.name)}</h3>
+            <div class="muted small">${c.online
+    ? `running on <b>${esc(c.live.hostname || 'a PC')}</b> (${esc(c.live.platform || '')}) since ${esc(agoWords(c.live.since))} · ${c.live.channels} open connection${c.live.channels === 1 ? '' : 's'}`
+    : c.last_seen_at ? `not running · last seen ${esc(agoWords(c.last_seen_at))}${c.hostname ? ` on ${esc(c.hostname)}` : ''}` : 'never started yet — download it and start it on your PC'}</div>
+          </div>
+          <span class="badge ${c.online ? 'ok' : ''}">${c.online ? 'running' : 'stopped'}</span>
+        </div>
+        <div class="card-actions">
+          ${ifCan('edit', `<button class="btn tiny" data-connector="token" data-id="${c.id}" data-name="${esc(c.name)}">Download again (new token)</button>`)}
+          ${ifCan('delete', `<button class="btn tiny danger" data-connector="delete" data-id="${c.id}" data-name="${esc(c.name)}">Delete</button>`)}
+        </div>
+      </div>`).join('')
+      : '<div class="card"><p class="muted small" style="margin:0">No connectors yet. Create one below, then start it on the PC that has the VPN.</p></div>';
+  } catch (err) {
+    // A missed poll keeps the last answer on screen; only a first load shows the error.
+    if (!quiet) box.innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+    else $('#connectors-updated').textContent = `Could not check just now (${err.message}) — trying again in ${CONNECTOR_POLL_MS / 1000}s`;
+  }
+}
+
+/* ---- the downloads: one file per system, with the connector inside ---- */
+
+const connectorSlug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'connector';
+
+/** The connector program with this panel's address and the token filled in. */
+async function connectorSource(token) {
+  const source = await (await fetch('/connector/aj-pilot-connector.mjs', { cache: 'no-store' })).text();
+  const baked = `const BAKED = ${JSON.stringify({ url: location.origin, token })}; // filled in when downloaded from the panel`;
+  return source.replace(/^const BAKED = .*$/m, baked);
+}
+
+function utf8Base64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/**
+ * Windows: a .cmd to double-click. The connector rides along base64-encoded
+ * after the last line, is unpacked to %LOCALAPPDATA%\AJPilotConnector and run
+ * with Node.js — which it offers to install with winget when it is missing.
+ */
+function windowsLauncher(name, slug, source) {
+  const title = name.replace(/[&|<>^%"]/g, '');
+  const lines = [
+    '@echo off',
+    'setlocal',
+    `title AJ Pilot Connector - ${title}`,
+    'set "SELF=%~f0"',
+    'set "APP=%LOCALAPPDATA%\\AJPilotConnector"',
+    'if not exist "%APP%" mkdir "%APP%"',
+    `set "JS=%APP%\\${slug}.mjs"`,
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=[IO.File]::ReadAllText($env:SELF); $m=\'::\'+\'CONNECTOR\'+\'::\'; $b=$t.Substring($t.LastIndexOf($m)+$m.Length) -replace \'\\s\',\'\'; [IO.File]::WriteAllBytes($env:JS,[Convert]::FromBase64String($b))"',
+    'if not exist "%JS%" (echo Could not unpack the connector. & pause & exit /b 1)',
+    'set "NODE="',
+    'for /f "delims=" %%i in (\'where node 2^>nul\') do if not defined NODE set "NODE=%%i"',
+    'if not defined NODE if exist "%ProgramFiles%\\nodejs\\node.exe" set "NODE=%ProgramFiles%\\nodejs\\node.exe"',
+    'if defined NODE goto run',
+    'echo Node.js is not installed on this PC. The connector needs Node.js 22 or newer.',
+    'echo.',
+    'choice /c YN /m "Install Node.js now"',
+    'if errorlevel 2 goto manual',
+    'winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements',
+    'if exist "%ProgramFiles%\\nodejs\\node.exe" set "NODE=%ProgramFiles%\\nodejs\\node.exe"',
+    'if defined NODE goto run',
+    ':manual',
+    'echo Install Node.js 22 or newer from https://nodejs.org, then double-click this file again.',
+    'start "" https://nodejs.org',
+    'pause',
+    'exit /b 1',
+    ':run',
+    'echo Starting the connector. Keep this window open - close it to stop.',
+    'echo.',
+    '"%NODE%" "%JS%"',
+    'echo.',
+    'echo The connector stopped.',
+    'pause',
+    'exit /b',
+    '::CONNECTOR::',
+    ...utf8Base64(source).match(/.{1,76}/g),
+    '',
+  ];
+  return lines.join('\r\n');
+}
+
+/**
+ * Mac and Ubuntu / Linux: one shell script. The connector is written out to
+ * ~/.aj-pilot-connector and run with Node.js; if Node is missing it offers
+ * Homebrew (Mac) or NodeSource (Ubuntu / Debian).
+ */
+function unixLauncher(name, slug, source) {
+  return `#!/bin/sh
+# AJ Pilot Connector — ${name.replace(/[\r\n]/g, ' ')}
+# Mac: double-click this .command file. Ubuntu / Linux: run   sh ${slug}.sh
+APP="$HOME/.aj-pilot-connector"
+mkdir -p "$APP"
+JS="$APP/${slug}.mjs"
+cat > "$JS" <<'AJ_PILOT_CONNECTOR_EOF'
+${source.replace(/\n?$/, '')}
+AJ_PILOT_CONNECTOR_EOF
+
+node_major() { "$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0; }
+find_node() {
+  NODE="$(command -v node 2>/dev/null)"
+  # A double-clicked script on a Mac does not get Homebrew's paths.
+  for p in /opt/homebrew/bin/node /usr/local/bin/node; do [ -z "$NODE" ] && [ -x "$p" ] && NODE="$p"; done
+  [ -n "$NODE" ] && [ "$(node_major "$NODE")" -ge 22 ]
+}
+
+if ! find_node; then
+  echo "The connector needs Node.js 22 or newer."
+  if [ "$(uname)" = "Darwin" ]; then
+    BREW="$(command -v brew || ls /opt/homebrew/bin/brew /usr/local/bin/brew 2>/dev/null | head -n1)"
+    if [ -n "$BREW" ]; then
+      printf "Install it now with Homebrew? [y/N] "; read a
+      case "$a" in y|Y) "$BREW" install node ;; esac
+    fi
+  elif command -v apt-get >/dev/null 2>&1; then
+    printf "Install Node.js 22 now? It needs your password (sudo). [y/N] "; read a
+    case "$a" in y|Y)
+      sudo apt-get update && sudo apt-get install -y ca-certificates curl &&
+      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs ;;
+    esac
+  fi
+  if ! find_node; then
+    echo "Install Node.js 22 or newer from https://nodejs.org, then run this again."
+    [ "$(uname)" = "Darwin" ] && open https://nodejs.org
+    printf "Press Enter to close. "; read _
+    exit 1
+  fi
+fi
+
+echo "Starting the connector. Keep this window open — close it (or press Ctrl+C) to stop."
+echo
+"$NODE" "$JS"
+printf "\\nThe connector stopped. Press Enter to close. "; read _
+`;
+}
+
+function saveFile(name, text, type = 'application/octet-stream') {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/** After creating (or re-keying) a connector: the downloads and how to start them. */
+function showConnectorDownloads(name, token) {
+  // Every file is named <connector name>-aj-pilot-connector.<extension>.
+  const slug = `${connectorSlug(name)}-aj-pilot-connector`;
+  const box = $('#connector-new');
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:18px;border-color:var(--accent)">
+      <h3 style="margin-top:0">${esc(name)} is ready — download it for the PC with the VPN</h3>
+      <p class="muted small" style="margin-top:0">The private token is inside the file and is shown only now. Lost it? Use <b>Download again</b> below.</p>
+      <div class="card-actions" style="margin:0 0 12px">
+        <button class="btn primary" data-dl="win">Windows (.cmd)</button>
+        <button class="btn" data-dl="mac">Mac (.command)</button>
+        <button class="btn" data-dl="linux">Ubuntu / Linux (.sh)</button>
+      </div>
+      <div class="small" style="line-height:1.8">
+        <b>Windows:</b> double-click <code>${esc(slug)}.cmd</code>. If Windows says it protected your PC, click <i>More info → Run anyway</i>.<br />
+        <b>Mac:</b> the first time, open Terminal and run <code>sh ~/Downloads/${esc(slug)}.command</code> (after that, double-click works once you run <code>chmod +x ~/Downloads/${esc(slug)}.command</code>).<br />
+        <b>Ubuntu / Linux:</b> open a terminal and run <code>sh ~/Downloads/${esc(slug)}.sh</code>.
+      </div>
+      <p class="muted small" style="margin:10px 0 0">Node.js 22+ is needed; the file offers to install it when it is missing. Keep the window open — close it to stop the connector.</p>
+      <details class="small" style="margin-top:8px"><summary>Advanced: the plain Node.js file or a manual command</summary>
+        <div class="card-actions" style="margin:8px 0"><button class="btn tiny" data-dl="mjs">${esc(slug)}.mjs</button></div>
+        <code style="word-break:break-all">node aj-pilot-connector.mjs --url ${esc(location.origin)} --token ${esc(token)}</code>
+      </details>
+    </div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  box.onclick = async (e) => {
+    const b = e.target.closest('[data-dl]');
+    if (!b) return;
+    try {
+      const source = await connectorSource(token);
+      const kind = b.dataset.dl;
+      if (kind === 'win') saveFile(`${slug}.cmd`, windowsLauncher(name, slug, source));
+      else if (kind === 'mac') saveFile(`${slug}.command`, unixLauncher(name, slug, source));
+      else if (kind === 'linux') saveFile(`${slug}.sh`, unixLauncher(name, slug, source), 'text/x-sh');
+      else saveFile(`${slug}.mjs`, source, 'text/javascript');
+    } catch (err) { toast(err.message, 'err'); }
+  };
+}
+
+$('#btn-connectors-refresh').addEventListener('click', () => loadConnectors());
+
+$('#form-connector').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('button[type=submit]', e.target);
+  busy(btn, true, 'Creating…');
+  try {
+    const c = await api('/connectors', { method: 'POST', body: { name: e.target.elements.name.value } });
+    e.target.reset();
+    showConnectorDownloads(c.name, c.token);
+    loadConnectors();
+  } catch (err) { toast(err.message, 'err'); }
+  busy(btn, false);
+});
+
+$('#connector-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-connector]');
+  if (!b) return;
+  const { id, name } = b.dataset;
+  if (b.dataset.connector === 'token') {
+    if (!await askConfirm(`Download ${name} again?\n\nThis makes a new token: the copy running now stops and the new download replaces it.`, { ok: 'New token' })) return;
+    try {
+      const c = await api(`/connectors/${id}/token`, { method: 'POST' });
+      showConnectorDownloads(c.name, c.token);
+      loadConnectors();
+    } catch (err) { toast(err.message, 'err'); }
+  } else if (b.dataset.connector === 'delete') {
+    if (!await askConfirm(`Delete the connector ${name}?\n\nThe copy running on the PC stops working.`, { ok: 'Delete', danger: true })) return;
+    try {
+      await api(`/connectors/${id}`, { method: 'DELETE' });
+      toast(`${name} deleted`);
+      loadConnectors();
+    } catch (err) { toast(err.message, 'err'); }
+  }
+});
+
 /* ------------------------------------------------------ server modal */
 
 const serverModal = $('#modal-server');
@@ -2766,25 +3028,10 @@ const serverForm = $('#form-server');
 /** null adds a server; a row edits that one. */
 let editingServerId = null;
 
-/** Every other saved server can carry this one's traffic; list them as jump hosts. */
-async function fillJumpHosts(server) {
-  const select = $('#server-jump');
-  select.length = 1;
-  try {
-    const servers = await api('/servers');
-    for (const s of servers) {
-      if (server && s.id === server.id) continue;
-      select.add(new Option(`${s.name} (${s.username}@${s.host})`, s.id));
-    }
-  } catch { /* the list is optional; direct still works */ }
-  select.value = server?.jump_server_id ? String(server.jump_server_id) : '';
-}
-
 function openServerModal(server = null) {
   editingServerId = server?.id ?? null;
   serverForm.reset();
   hideSecrets();
-  fillJumpHosts(server);
   $('#server-form-msg').classList.add('hidden');
   keyImportNote('');
 
@@ -2980,8 +3227,7 @@ keyDrop.addEventListener('drop', async (e) => {
 });
 
 function serverFormData() {
-  const fd = new FormData(serverForm);
-  return Object.fromEntries(fd.entries());
+  return Object.fromEntries(new FormData(serverForm).entries());
 }
 
 function formMsg(el, text, kind) {
@@ -10285,161 +10531,6 @@ $('#view-server-detail').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-cron]');
   if (btn) return cronPanelAction(btn);
   return undefined;
-});
-
-/* --------------------------------------------------------- the vpn tab */
-
-/*
- * OpenVPN profiles on this server. The point is the office VPN: connect one
- * server here (Sophos user portal → "SSL VPN configuration for other OSs"),
- * then pick it as the jump host for the office machines.
- */
-async function loadServerVpn() {
-  const box = $('#vpn-panel');
-  if (!box) return;
-  tabsLoaded.add('vpn');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Reading the VPN connections…</div>';
-  const head = '<div class="section-head"><h2>VPN</h2><div class="section-tools"><button class="btn tiny" data-vpn="reload">Refresh</button></div></div>';
-
-  try {
-    const { vpn: v } = await api(`/servers/${currentServerId}/vpn`);
-    const up = v.profiles.filter((p) => p.connected).length;
-    setTabCount('vpn', v.profiles.length ? `${up}/${v.profiles.length}` : '', v.profiles.length && up < v.profiles.length ? 'err' : '');
-
-    const profiles = v.profiles.length
-      ? v.profiles.map((p) => `
-        <div class="card" style="margin-bottom:12px">
-          <div class="card-head">
-            <div><h3><span class="dot ${p.connected ? 'online' : 'offline'}"></span> ${esc(p.name)}</h3>
-              <div class="muted small">${esc(p.remote || 'no remote')} · ${esc(p.enabled)} at boot</div></div>
-            <span class="badge ${p.connected ? 'ok' : 'err'}">${p.connected ? 'connected' : esc(p.active)}</span>
-          </div>
-          <div class="card-actions">
-            <button class="btn tiny" data-vpn="log" data-name="${esc(p.name)}">Log</button>
-            ${p.connected
-    ? `<button class="btn tiny" data-vpn="restart" data-name="${esc(p.name)}">Reconnect</button>
-               <button class="btn tiny" data-vpn="disconnect" data-name="${esc(p.name)}">Disconnect</button>`
-    : `<button class="btn tiny primary" data-vpn="connect" data-name="${esc(p.name)}">Connect</button>`}
-            ${ifCan('delete', `<button class="btn tiny danger" data-vpn="remove" data-name="${esc(p.name)}">Remove</button>`)}
-          </div>
-          <div class="row" style="margin-top:12px;align-items:flex-end">
-            <label>Office networks through this VPN <span class="muted small">(the office servers' network, e.g. 192.168.0.0/24)</span>
-              <input data-vpn-nets="${esc(p.name)}" value="${esc((p.networks || []).join(', '))}" placeholder="192.168.0.0/24" /></label>
-            <button class="btn tiny" data-vpn="networks" data-name="${esc(p.name)}" style="flex:0 0 auto">Save networks</button>
-          </div>
-          <pre class="log hidden" data-vpn-log="${esc(p.name)}"></pre>
-        </div>`).join('')
-      : '<div class="card"><p class="muted small" style="margin:0">No VPN on this server yet. Add one below.</p></div>';
-
-    box.innerHTML = `${head}
-      <div class="msg info" style="margin-top:0;margin-bottom:14px">
-        <b>Office servers behind a VPN?</b> Connect <i>this</i> server to the VPN here, then edit each office server:
-        put its private IP as Host and choose <b>${esc(currentServer?.name || 'this server')}</b> under <b>Connect via jump host</b>.
-        For Sophos, download the profile from the Sophos user portal → <i>VPN</i> → <i>SSL VPN configuration for other OSs</i> (.ovpn).
-      </div>
-      <div class="tiles" style="margin-bottom:14px">
-        ${tile('OpenVPN', v.installed ? `<span class="badge ok">${esc(v.version || 'installed')}</span>` : '<span class="badge">not installed</span>', v.installed ? '' : 'installed on first connect')}
-        ${tile('Tunnels up', String(v.interfaces.length), v.interfaces.map((i) => `${i.name} ${i.address}`).join(', ') || 'none')}
-        ${tile('Routes via VPN', String(v.routes.length), v.routes.slice(0, 3).map((r) => r.split(' ')[0]).join(', ') || 'none')}
-      </div>
-      ${section('Connections', profiles)}
-      ${section('Add a VPN connection', `
-        <form class="card" id="form-vpn">
-          <div class="row">
-            <label>Name<input name="name" value="${v.profiles.some((p) => p.name === 'office') ? '' : 'office'}" placeholder="office" required /></label>
-            <label>Profile (.ovpn)<input type="file" name="file" accept=".ovpn,.conf,text/plain" required /></label>
-          </div>
-          <div class="row">
-            <label>VPN username<input name="username" autocomplete="off" placeholder="your Sophos username" /></label>
-            <label>VPN password<input name="password" type="password" autocomplete="new-password" /></label>
-          </div>
-          <label>Office networks <span class="muted small">(optional — the network your office servers are on, e.g. 192.168.0.0/24; needed when the VPN does not route it itself)</span>
-            <input name="networks" placeholder="192.168.0.0/24" /></label>
-          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="split_tunnel" checked style="width:auto" />
-            <span>Only send office traffic through the VPN <span class="muted small">(recommended — keeps this server's own internet and panel access working)</span></span></label>
-          <div id="vpn-form-msg" class="msg hidden"></div>
-          <div class="card-actions"><button type="submit" class="btn primary">Save &amp; connect</button></div>
-        </form>`)}`;
-  } catch (err) {
-    setTabCount('vpn', '!', 'err');
-    box.innerHTML = `${head}<div class="msg err">${esc(err.message)}</div>`;
-  }
-}
-
-$('#view-server-detail').addEventListener('submit', async (e) => {
-  if (e.target.id !== 'form-vpn') return;
-  e.preventDefault();
-  const form = e.target;
-  const btn = $('button[type=submit]', form);
-  const msg = $('#vpn-form-msg');
-  const file = form.file.files[0];
-  if (!file) { formMsg(msg, 'Choose the .ovpn profile file', 'err'); return; }
-  busy(btn, true, 'Connecting…');
-  formMsg(msg, 'Installing OpenVPN if needed and connecting — this can take a minute…', 'info');
-  try {
-    await api(`/servers/${currentServerId}/vpn`, {
-      method: 'POST',
-      body: {
-        name: form.elements.name.value.trim(),
-        config: await file.text(),
-        username: form.elements.username.value,
-        password: form.elements.password.value,
-        split_tunnel: form.elements.split_tunnel.checked,
-        networks: form.elements.networks.value,
-      },
-    });
-    toast('VPN connected');
-    loadServerVpn();
-  } catch (err) {
-    formMsg(msg, err.message, 'err');
-  }
-  busy(btn, false);
-});
-
-$('#view-server-detail').addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-vpn]');
-  if (!btn) return;
-  const what = btn.dataset.vpn;
-  const name = btn.dataset.name;
-  if (what === 'reload') { loadServerVpn(); return; }
-  if (what === 'log') {
-    const pre = $(`[data-vpn-log="${CSS.escape(name)}"]`);
-    if (!pre.classList.contains('hidden')) { pre.classList.add('hidden'); return; }
-    busy(btn, true, 'Reading…');
-    try {
-      const { log } = await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}/log`);
-      pre.textContent = log || 'Nothing logged yet.';
-      pre.classList.remove('hidden');
-    } catch (err) { toast(err.message, 'err'); }
-    busy(btn, false);
-    return;
-  }
-  if (what === 'networks') {
-    busy(btn, true, 'Reconnecting…');
-    try {
-      await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}/networks`, {
-        method: 'PUT', body: { networks: $(`[data-vpn-nets="${CSS.escape(name)}"]`).value },
-      });
-      toast(`VPN ${name}: office networks saved and reconnected`);
-      loadServerVpn();
-    } catch (err) {
-      busy(btn, false);
-      toast(err.message, 'err');
-    }
-    return;
-  }
-  if (what === 'remove' && !await askConfirm(`Remove the VPN ${name}?\n\nIt disconnects now, and servers using this one as their jump host can no longer reach the office.`, { ok: 'Remove', danger: true })) return;
-  if (what === 'disconnect' && !await askConfirm(`Disconnect the VPN ${name}?\n\nServers reached through it go offline until you connect it again.`, { ok: 'Disconnect' })) return;
-  busy(btn, true, '…');
-  try {
-    if (what === 'remove') await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}`, { method: 'DELETE' });
-    else await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}/action`, { method: 'POST', body: { action: what } });
-    toast(`VPN ${name}: ${what === 'remove' ? 'removed' : `${what} done`}`);
-    loadServerVpn();
-  } catch (err) {
-    busy(btn, false);
-    toast(err.message, 'err');
-  }
 });
 
 /* ------------------------------------------------------- the users tab */

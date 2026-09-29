@@ -22,6 +22,7 @@ import { all, run, logActivity } from '../db/index.js';
 import { runWithContext } from './context.js';
 import { config } from '../config.js';
 import { connectionFromRow, withConnection, exec } from './ssh.js';
+import { liveConnectorIds, openViaConnector } from './connectorHub.js';
 
 let timer = null;
 let sweeping = false;
@@ -62,42 +63,34 @@ function tcpProbe(host, port, timeoutMs) {
 }
 
 /**
- * Servers behind a jump host cannot be dialled from here, so the fast tier asks
- * the jump host to open a channel to their SSH port instead. That costs an SSH
- * login to the jump host, so the answer is reused for a minute.
+ * A server the panel cannot reach itself may still be reachable through one of
+ * its organisation's running connectors (a PC with the VPN up). That PC is asked
+ * on every sweep, like any other server.
  */
-const JUMP_PROBE_MS = 60000;
-const jumpProbes = new Map();
+const CONNECTOR_PROBE_MS = 5000;
+const connectorProbes = new Map();
 
-async function jumpProbe(row, jumpRow) {
-  const cached = jumpProbes.get(row.id);
-  if (cached && Date.now() - cached.at < Math.max(JUMP_PROBE_MS, config.monitor.intervalMs)) return cached.result;
+async function connectorProbe(row, directError) {
+  const connectors = liveConnectorIds(row.org_id);
+  if (!connectors.length) {
+    connectorProbes.delete(row.id);
+    return { ok: false, error: directError };
+  }
+  const cached = connectorProbes.get(row.id);
+  if (cached && Date.now() - cached.at < Math.max(CONNECTOR_PROBE_MS, config.monitor.intervalMs)) return cached.result;
 
   const started = Date.now();
   const port = row.port || 22;
+  const attempts = connectors.map((id) => openViaConnector(id, row.host, port, { timeoutMs: config.monitor.sshTimeoutMs }));
   let result;
-  if (!jumpRow) {
-    result = { ok: false, error: 'Its jump host no longer exists — edit the server and pick another one.' };
-  } else {
-    try {
-      await withConnection({ ...connectionFromRow(jumpRow), readyTimeout: config.monitor.sshTimeoutMs }, (conn) => new Promise((resolve, reject) => {
-        // The jump host waits on its own TCP timeout (minutes) for an address it
-        // has no route to; that must not hold up the whole sweep.
-        const timer = setTimeout(() => reject(new Error(`Jump host ${jumpRow.name} cannot reach ${row.host}:${port} `
-          + `(no answer within ${config.monitor.sshTimeoutMs / 1000}s — is its VPN connected?).`)), config.monitor.sshTimeoutMs);
-        conn.forwardOut('127.0.0.1', 0, row.host, port, (err, stream) => {
-          clearTimeout(timer);
-          if (err) return reject(new Error(`Jump host ${jumpRow.name} cannot reach ${row.host}:${port} (${err.message}).`));
-          stream.close();
-          resolve();
-        });
-      }));
-      result = { ok: true, latencyMs: Date.now() - started };
-    } catch (err) {
-      result = { ok: false, error: /^Jump host /.test(err.message) ? err.message : `Jump host ${jumpRow.name}: ${err.message}` };
-    }
+  try {
+    await Promise.any(attempts);
+    result = { ok: true, latencyMs: Date.now() - started, via: 'connector' };
+  } catch (err) {
+    result = { ok: false, error: `${directError} Not reachable through the running connector either — is the VPN connected on that PC? (${err.errors?.[0]?.message || err.message})` };
   }
-  jumpProbes.set(row.id, { at: Date.now(), result });
+  for (const a of attempts) a.then((sock) => sock.destroy(), () => {});
+  connectorProbes.set(row.id, { at: Date.now(), result });
   return result;
 }
 
@@ -124,10 +117,10 @@ async function sshProbe(row) {
  * Probe one server and remember the answer. The row is only written when the
  * status changes — that is what keeps a five-second cadence cheap.
  */
-async function checkServer(row, byId) {
-  const probe = row.jump_server_id
-    ? await jumpProbe(row, byId.get(row.jump_server_id))
-    : await tcpProbe(row.host, row.port || 22, config.monitor.timeoutMs);
+async function checkServer(row) {
+  let probe = await tcpProbe(row.host, row.port || 22, config.monitor.timeoutMs);
+  if (probe.ok) connectorProbes.delete(row.id);
+  else probe = await connectorProbe(row, probe.error);
   const status = probe.ok ? 'online' : 'offline';
   const previous = live.get(row.id)?.status ?? row.status;
 
@@ -207,10 +200,10 @@ export async function runHealthSweep() {
   const started = Date.now();
 
   try {
-    const rows = await all('SELECT id, org_id, name, host, port, username, status, auth_type, password_enc, private_key_enc, passphrase_enc, sudo_password_enc, jump_server_id FROM servers');
-    const byId = new Map(rows.map((r) => [r.id, r]));
-    for (const id of live.keys()) if (!byId.has(id)) live.delete(id);
-    for (const id of jumpProbes.keys()) if (!byId.get(id)?.jump_server_id) jumpProbes.delete(id);
+    const rows = await all('SELECT id, org_id, name, host, port, username, status, auth_type, password_enc, private_key_enc, passphrase_enc, sudo_password_enc FROM servers');
+    const ids = new Set(rows.map((r) => r.id));
+    for (const id of live.keys()) if (!ids.has(id)) live.delete(id);
+    for (const id of connectorProbes.keys()) if (!ids.has(id)) connectorProbes.delete(id);
 
     const tally = { checked: 0, online: 0, offline: 0 };
     let next = 0;
@@ -219,7 +212,7 @@ export async function runHealthSweep() {
       while (next < rows.length) {
         const row = rows[next++];
         try {
-          const status = await checkServer(row, byId);
+          const status = await checkServer(row);
           tally.checked += 1;
           tally[status] += 1;
         } catch (err) {

@@ -1,10 +1,8 @@
+import net from 'node:net';
 import { Client } from 'ssh2';
 import { config } from '../config.js';
 import { decrypt } from './crypto.js';
-import { one } from '../db/index.js';
-
-/** How many jump hosts deep a chain may go before it is treated as a loop. */
-const MAX_JUMPS = 3;
+import { openViaConnector, liveConnectorIds } from './connectorHub.js';
 
 /** Build the ssh2 connect config from a stored server row. */
 export function connectionFromRow(row) {
@@ -15,6 +13,8 @@ export function connectionFromRow(row) {
     readyTimeout: config.ssh.connectTimeout,
     keepaliveInterval: 10000,
     tryKeyboard: true,
+    // Whose connectors may carry this connection when the panel cannot reach it itself.
+    orgId: row.org_id ?? null,
   };
   if (row.auth_type === 'key') {
     base.privateKey = decrypt(row.private_key_enc);
@@ -23,65 +23,78 @@ export function connectionFromRow(row) {
   } else {
     base.password = decrypt(row.password_enc);
   }
-  // Behind a VPN or private network: reach it through another saved server.
-  if (row.jump_server_id) base.jumpServerId = row.jump_server_id;
   return base;
 }
 
-/**
- * Open a connection, hand it to `fn`, and always close it afterwards.
+/*
+ * Reaching a server, automatically.
  *
- * A config with `jumpServerId` is reached through that server first: the panel
- * signs in to the jump host, asks it for a TCP channel to the target's SSH port,
- * and runs the real SSH session inside that channel. That is how a panel
- * running in the cloud reaches office machines that are only on the VPN.
+ * The panel always tries a server directly first. When it cannot reach it — an
+ * office machine behind a VPN, say — and one of the organisation's connectors
+ * is running, the connection goes through that PC instead (and so through its
+ * VPN). Which way worked is remembered for a while, so later connections do
+ * not wait for the direct attempt again.
  */
-export function withConnection(connectCfg, fn, depth = 0) {
-  if (connectCfg.jumpServerId) return viaJumpHost(connectCfg, fn, depth);
-  return directConnection(connectCfg, fn);
+const DIRECT_PROBE_MS = 3000;
+const ROUTE_TTL_MS = 10 * 60000;
+const routes = new Map(); // "org|host:port" → { via: 'direct' | connectorId, at }
+
+/** Can this machine open a TCP connection to host:port? */
+export function tcpReachable(host, port, timeoutMs = DIRECT_PROBE_MS) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (ok) => { socket.destroy(); resolve(ok); };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
 }
 
-async function viaJumpHost(connectCfg, fn, depth) {
-  const { jumpServerId, ...target } = connectCfg;
-  if (depth >= MAX_JUMPS) {
-    throw new Error('Too many jump hosts in a row — check the jump host settings of these servers for a loop.');
-  }
-  const jump = await one('SELECT * FROM servers WHERE id = ?', [jumpServerId]);
-  const timeoutMs = target.readyTimeout || config.ssh.connectTimeout;
-  if (!jump) throw new Error('The jump host for this server no longer exists — edit the server and pick another one.');
+/**
+ * A socket to the server through whichever running connector reaches it first,
+ * or null when the panel should dial it itself.
+ */
+export async function routeSocket({ orgId, host, port = 22, readyTimeout }) {
+  const connectors = liveConnectorIds(orgId);
+  if (!connectors.length) return null;
 
+  const key = `${orgId}|${host}:${port}`;
+  const known = routes.get(key);
+  const timeoutMs = readyTimeout || config.ssh.connectTimeout;
+  if (known && Date.now() - known.at < ROUTE_TTL_MS) {
+    if (known.via === 'direct') return null;
+    if (connectors.includes(known.via)) {
+      try { return await openViaConnector(known.via, host, port, { timeoutMs }); } catch { routes.delete(key); }
+    }
+  }
+
+  if (await tcpReachable(host, port)) {
+    routes.set(key, { via: 'direct', at: Date.now() });
+    return null;
+  }
+
+  // Every running connector at once; the first PC that can reach it wins.
+  const attempts = connectors.map((id) => openViaConnector(id, host, port, { timeoutMs }).then((sock) => ({ id, sock })));
   try {
-    return await withConnection({ ...connectionFromRow(jump), readyTimeout: target.readyTimeout }, (jumpConn) => new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const e = new Error(`Jump host ${jump.name} could not reach ${target.host}:${target.port || 22} within ${Math.round(timeoutMs / 1000)}s — `
-          + 'it has no route there. If the server is behind a VPN, check the VPN tab of the jump host is connected.');
-        e.passThrough = true;
-        reject(e);
-      }, timeoutMs);
-      jumpConn.forwardOut('127.0.0.1', 0, target.host, target.port || 22, (err, stream) => {
-        clearTimeout(timer);
-        if (err) {
-          const e = new Error(`Jump host ${jump.name} could not reach ${target.host}:${target.port || 22} — `
-            + 'check the private IP from the jump host, and that AllowTcpForwarding is enabled in its sshd_config.');
-          e.cause = err.message;
-          e.passThrough = true;
-          return reject(e);
-        }
-        directConnection({ ...target, sock: stream }, fn).then(resolve, (e) => {
-          // The target (or `fn`) failed, not the jump host: leave the message alone.
-          if (e && typeof e === 'object') e.passThrough = true;
-          reject(e);
-        });
-      });
-    }), depth + 1);
+    const winner = await Promise.any(attempts);
+    routes.set(key, { via: winner.id, at: Date.now() });
+    for (const a of attempts) a.then(({ sock }) => { if (sock !== winner.sock) sock.destroy(); }, () => {});
+    return winner.sock;
   } catch (err) {
-    if (err?.passThrough) throw err;
-    // With two logins involved, say which one failed.
-    const e = new Error(`Jump host ${jump.name}: ${err.message}`);
-    e.cause = err.cause;
+    routes.delete(key);
+    const reasons = (err.errors || []).map((e) => e.message);
+    const e = new Error(`${host}:${port} cannot be reached from the panel, nor through the running connector${connectors.length > 1 ? 's' : ''} — `
+      + `is the VPN connected on that PC? ${reasons[0] ? `(${reasons[0]})` : ''}`.trim());
     e.passThrough = true;
     throw e;
   }
+}
+
+/** Open a connection, hand it to `fn`, and always close it afterwards. */
+export async function withConnection(connectCfg, fn) {
+  const { orgId, ...cfg } = connectCfg;
+  const sock = await routeSocket(connectCfg);
+  return directConnection(sock ? { ...cfg, sock } : cfg, fn);
 }
 
 function directConnection(connectCfg, fn) {

@@ -24,6 +24,8 @@ import { docsFor } from './lib/docs.js';
 import { ensureSuperAdmin } from './lib/superAdmin.js';
 import { attachUser, requireAuth, requireOrg, guardMutations } from './lib/authGuard.js';
 import { startHealthMonitor } from './lib/healthMonitor.js';
+import { connectorsRouter } from './routes/connectors.js';
+import { attachConnectorHub } from './lib/connectorHub.js';
 
 const app = express();
 
@@ -135,6 +137,7 @@ app.use('/api/billing', billingRouter);
 // Everything below belongs to a client organisation: it has to be open, and on a plan.
 const inOrg = [requireOrg, requirePlan];
 app.use('/api/servers', inOrg, serversRouter);
+app.use('/api/connectors', inOrg, connectorsRouter);
 app.use('/api/credentials', inOrg, dbEnginesRouter);
 app.use('/api/credentials', inOrg, credentialsRouter);
 app.use('/api/runners', inOrg, runnersRouter);
@@ -164,7 +167,7 @@ async function start() {
   await importSqliteIfPresent();
   await ensureSuperAdmin().catch((err) => console.error('[super admin] could not apply SUPER_ADMIN_* from .env:', err.message));
 
-  app.listen(config.port, config.host, () => {
+  const server = app.listen(config.port, config.host, () => {
     console.log(`\n  AJ Pilot — autopilot for your servers`);
     console.log(`  → http://localhost:${config.port}`);
     console.log(`  DB: ${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}`);
@@ -173,6 +176,8 @@ async function start() {
     startAutoDeployPoller();
     console.log('');
   });
+  // Connectors on people's PCs dial in here over a WebSocket.
+  attachConnectorHub(server);
 }
 
 start();

@@ -156,26 +156,18 @@ another server already has is refused by name rather than as a database error, a
 authentication kind without supplying the password or key it needs is refused as well. Editing needs the
 **edit** permission.
 
-### Servers behind a VPN (jump host)
+### Servers reached through your PC (connectors)
 
-A server that is only reachable over an office VPN or private network can't be dialled directly from a panel
-running in the cloud. Reach it through a **jump host** instead: a machine the panel *can* reach (public IP, or a
-port forwarded on the office router) that also sits inside that network.
+When only your own PC can reach a server — its VPN is connected there, like running the project locally — run a
+**connector** on it. **Servers → Connectors → Create connector** gives you a ready-to-run download with this panel's
+address and a private token built in. Run it on that PC (Node.js 22+; on Windows double-click the `.cmd`) and connect
+the VPN. There is nothing to set per server: the panel tries every server directly first, and when it cannot reach
+one it goes through a running connector instead (remembering which way worked for ten minutes). SSH, deploys, the
+file manager and the monitor all work this way; with the connector stopped those servers show offline.
 
-1. Add the jump host as an ordinary server first and check **Test connection** works.
-2. Add (or edit) the private server, put its **private / VPN IP** in Host, and pick the jump host under
-   **Connect via jump host**.
-
-The panel signs in to the jump host, opens a channel to the private server's SSH port and runs the real SSH
-session inside it — deploys, databases, the file manager and the monitor all go through it. The jump host needs
-`AllowTcpForwarding yes` in `/etc/ssh/sshd_config` (the Ubuntu default). A server that is the jump host for
-others can't be deleted until they point elsewhere.
-
-If no office machine is reachable from outside, make one of *your* servers join the VPN instead: its **VPN**
-tab takes an OpenVPN profile (for Sophos: user portal → VPN → *SSL VPN configuration for other OSs*), your VPN
-username and password, installs OpenVPN, and keeps the tunnel up with `openvpn-client@aj-<name>` across reboots.
-Then choose that server as the jump host for the office machines. By default only the office routes go through
-the tunnel, so the server keeps its own internet connection and the panel keeps reaching it.
+The connector only makes an outgoing WebSocket connection to `/api/connectors/ws`, so nothing is opened on the PC
+(Cloudflare passes WebSockets through). `--allow 192.168.0.0/24` limits which addresses it will connect to. A new
+token disconnects the running copy.
 
 ### The server page
 
