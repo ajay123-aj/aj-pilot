@@ -33,6 +33,7 @@ import {
 } from '../lib/nginx.js';
 import { decrypt } from '../lib/crypto.js';
 import { requirePermission } from '../lib/authGuard.js';
+import { vpnState, vpnLog, saveVpn, vpnAction, removeVpn, validateVpnName } from '../lib/vpn.js';
 import {
   listDir, readFile, writeFile, uploadFile, downloadTo, makeFolder, makeFile, move, copy, remove, setPermissions, extract,
 } from '../lib/files.js';
@@ -673,6 +674,62 @@ serversRouter.get('/:id/summary', serverRoute(async (conn, row, req) => {
       },
     },
   };
+}));
+
+/* ----------------------------------------------------------------- vpn */
+
+/** OpenVPN profiles on this server — how it reaches networks like the office VPN. */
+serversRouter.get('/:id/vpn', requirePermission('edit'), serverRoute(async (conn, row) => ({
+  vpn: await vpnState(conn, row),
+})));
+
+serversRouter.get('/:id/vpn/:name/log', requirePermission('edit'), serverRoute(async (conn, row, req) => {
+  const named = validateVpnName(req.params.name);
+  if (named.error) throw new Error(named.error);
+  return { log: await vpnLog(conn, row, named.value) };
+}));
+
+/** Upload a profile (or replace one) and connect it. */
+serversRouter.post('/:id/vpn', requirePermission('edit'), async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'Server not found' });
+    const named = validateVpnName(req.body.name);
+    if (named.error) return res.status(400).json({ error: named.error });
+    if (!req.body.config) return res.status(400).json({ error: 'Choose the .ovpn profile file' });
+
+    const spec = {
+      name: named.value,
+      config: String(req.body.config),
+      username: String(req.body.username || '').trim(),
+      password: String(req.body.password || ''),
+      splitTunnel: req.body.split_tunnel !== false && req.body.split_tunnel !== 'false',
+    };
+    try {
+      const result = await withConnection(connectionFromRow(row), (conn) => saveVpn(conn, row, spec));
+      await logActivity('server', row.id, 'vpn_connected', `VPN ${spec.name} connected on ${row.name}`);
+      res.status(201).json({ ok: true, ...result });
+    } catch (err) {
+      await logActivity('server', row.id, 'vpn_failed', `VPN ${spec.name} on ${row.name}: ${err.message}`, 'error');
+      res.status(400).json({ ok: false, error: err.message, log: err.log || null });
+    }
+  } catch (err) { next(err); }
+});
+
+serversRouter.post('/:id/vpn/:name/action', requirePermission('edit'), serverRoute(async (conn, row, req) => {
+  const named = validateVpnName(req.params.name);
+  if (named.error) throw new Error(named.error);
+  const result = await vpnAction(conn, row, named.value, req.body.action);
+  await logActivity('server', row.id, `vpn_${req.body.action}`, `VPN ${named.value} on ${row.name}: ${req.body.action}`);
+  return result;
+}));
+
+serversRouter.delete('/:id/vpn/:name', requirePermission('delete'), serverRoute(async (conn, row, req) => {
+  const named = validateVpnName(req.params.name);
+  if (named.error) throw new Error(named.error);
+  const result = await removeVpn(conn, row, named.value);
+  await logActivity('server', row.id, 'vpn_removed', `Removed VPN ${named.value} from ${row.name}`);
+  return result;
 }));
 
 /* ---------------------------------------------------------------- cron */

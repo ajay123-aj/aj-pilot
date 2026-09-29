@@ -1304,6 +1304,7 @@ const SERVER_TABS = [
   { key: 'users', label: 'Users', load: () => loadServerUsers() },
   { key: 'services', label: 'Services', load: () => loadServerServices() },
   { key: 'runners', label: 'Runners', load: () => loadServerRunners() },
+  { key: 'vpn', label: 'VPN', load: () => loadServerVpn() },
 ];
 
 let currentTab = 'overview';
@@ -1360,6 +1361,7 @@ async function openServer(id) {
 const liveTabPanelId = (key) => ({
   live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel',
   cron: 'cron-panel', users: 'users-panel', services: 'services-panel', runners: 'server-runners-panel',
+  vpn: 'vpn-panel',
 }[key]);
 
 function showServerTab(key) {
@@ -10213,6 +10215,139 @@ $('#view-server-detail').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-cron]');
   if (btn) return cronPanelAction(btn);
   return undefined;
+});
+
+/* --------------------------------------------------------- the vpn tab */
+
+/*
+ * OpenVPN profiles on this server. The point is the office VPN: connect one
+ * server here (Sophos user portal → "SSL VPN configuration for other OSs"),
+ * then pick it as the jump host for the office machines.
+ */
+async function loadServerVpn() {
+  const box = $('#vpn-panel');
+  if (!box) return;
+  tabsLoaded.add('vpn');
+  box.innerHTML = '<div class="empty"><span class="spinner"></span>Reading the VPN connections…</div>';
+  const head = '<div class="section-head"><h2>VPN</h2><div class="section-tools"><button class="btn tiny" data-vpn="reload">Refresh</button></div></div>';
+
+  try {
+    const { vpn: v } = await api(`/servers/${currentServerId}/vpn`);
+    const up = v.profiles.filter((p) => p.connected).length;
+    setTabCount('vpn', v.profiles.length ? `${up}/${v.profiles.length}` : '', v.profiles.length && up < v.profiles.length ? 'err' : '');
+
+    const profiles = v.profiles.length
+      ? v.profiles.map((p) => `
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-head">
+            <div><h3><span class="dot ${p.connected ? 'online' : 'offline'}"></span> ${esc(p.name)}</h3>
+              <div class="muted small">${esc(p.remote || 'no remote')} · ${esc(p.enabled)} at boot</div></div>
+            <span class="badge ${p.connected ? 'ok' : 'err'}">${p.connected ? 'connected' : esc(p.active)}</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn tiny" data-vpn="log" data-name="${esc(p.name)}">Log</button>
+            ${p.connected
+    ? `<button class="btn tiny" data-vpn="restart" data-name="${esc(p.name)}">Reconnect</button>
+               <button class="btn tiny" data-vpn="disconnect" data-name="${esc(p.name)}">Disconnect</button>`
+    : `<button class="btn tiny primary" data-vpn="connect" data-name="${esc(p.name)}">Connect</button>`}
+            ${ifCan('delete', `<button class="btn tiny danger" data-vpn="remove" data-name="${esc(p.name)}">Remove</button>`)}
+          </div>
+          <pre class="log hidden" data-vpn-log="${esc(p.name)}"></pre>
+        </div>`).join('')
+      : '<div class="card"><p class="muted small" style="margin:0">No VPN on this server yet. Add one below.</p></div>';
+
+    box.innerHTML = `${head}
+      <div class="msg info" style="margin-top:0;margin-bottom:14px">
+        <b>Office servers behind a VPN?</b> Connect <i>this</i> server to the VPN here, then edit each office server:
+        put its private IP as Host and choose <b>${esc(currentServer?.name || 'this server')}</b> under <b>Connect via jump host</b>.
+        For Sophos, download the profile from the Sophos user portal → <i>VPN</i> → <i>SSL VPN configuration for other OSs</i> (.ovpn).
+      </div>
+      <div class="tiles" style="margin-bottom:14px">
+        ${tile('OpenVPN', v.installed ? `<span class="badge ok">${esc(v.version || 'installed')}</span>` : '<span class="badge">not installed</span>', v.installed ? '' : 'installed on first connect')}
+        ${tile('Tunnels up', String(v.interfaces.length), v.interfaces.map((i) => `${i.name} ${i.address}`).join(', ') || 'none')}
+        ${tile('Routes via VPN', String(v.routes.length), v.routes.slice(0, 3).map((r) => r.split(' ')[0]).join(', ') || 'none')}
+      </div>
+      ${section('Connections', profiles)}
+      ${section('Add a VPN connection', `
+        <form class="card" id="form-vpn">
+          <div class="row">
+            <label>Name<input name="name" value="${v.profiles.some((p) => p.name === 'office') ? '' : 'office'}" placeholder="office" required /></label>
+            <label>Profile (.ovpn)<input type="file" name="file" accept=".ovpn,.conf,text/plain" required /></label>
+          </div>
+          <div class="row">
+            <label>VPN username<input name="username" autocomplete="off" placeholder="your Sophos username" /></label>
+            <label>VPN password<input name="password" type="password" autocomplete="new-password" /></label>
+          </div>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="split_tunnel" checked style="width:auto" />
+            <span>Only send office traffic through the VPN <span class="muted small">(recommended — keeps this server's own internet and panel access working)</span></span></label>
+          <div id="vpn-form-msg" class="msg hidden"></div>
+          <div class="card-actions"><button type="submit" class="btn primary">Save &amp; connect</button></div>
+        </form>`)}`;
+  } catch (err) {
+    setTabCount('vpn', '!', 'err');
+    box.innerHTML = `${head}<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+$('#view-server-detail').addEventListener('submit', async (e) => {
+  if (e.target.id !== 'form-vpn') return;
+  e.preventDefault();
+  const form = e.target;
+  const btn = $('button[type=submit]', form);
+  const msg = $('#vpn-form-msg');
+  const file = form.file.files[0];
+  if (!file) { formMsg(msg, 'Choose the .ovpn profile file', 'err'); return; }
+  busy(btn, true, 'Connecting…');
+  formMsg(msg, 'Installing OpenVPN if needed and connecting — this can take a minute…', 'info');
+  try {
+    await api(`/servers/${currentServerId}/vpn`, {
+      method: 'POST',
+      body: {
+        name: form.elements.name.value.trim(),
+        config: await file.text(),
+        username: form.elements.username.value,
+        password: form.elements.password.value,
+        split_tunnel: form.elements.split_tunnel.checked,
+      },
+    });
+    toast('VPN connected');
+    loadServerVpn();
+  } catch (err) {
+    formMsg(msg, err.message, 'err');
+  }
+  busy(btn, false);
+});
+
+$('#view-server-detail').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-vpn]');
+  if (!btn) return;
+  const what = btn.dataset.vpn;
+  const name = btn.dataset.name;
+  if (what === 'reload') { loadServerVpn(); return; }
+  if (what === 'log') {
+    const pre = $(`[data-vpn-log="${CSS.escape(name)}"]`);
+    if (!pre.classList.contains('hidden')) { pre.classList.add('hidden'); return; }
+    busy(btn, true, 'Reading…');
+    try {
+      const { log } = await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}/log`);
+      pre.textContent = log || 'Nothing logged yet.';
+      pre.classList.remove('hidden');
+    } catch (err) { toast(err.message, 'err'); }
+    busy(btn, false);
+    return;
+  }
+  if (what === 'remove' && !await askConfirm(`Remove the VPN ${name}?\n\nIt disconnects now, and servers using this one as their jump host can no longer reach the office.`, { ok: 'Remove', danger: true })) return;
+  if (what === 'disconnect' && !await askConfirm(`Disconnect the VPN ${name}?\n\nServers reached through it go offline until you connect it again.`, { ok: 'Disconnect' })) return;
+  busy(btn, true, '…');
+  try {
+    if (what === 'remove') await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    else await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}/action`, { method: 'POST', body: { action: what } });
+    toast(`VPN ${name}: ${what === 'remove' ? 'removed' : `${what} done`}`);
+    loadServerVpn();
+  } catch (err) {
+    busy(btn, false);
+    toast(err.message, 'err');
+  }
 });
 
 /* ------------------------------------------------------- the users tab */

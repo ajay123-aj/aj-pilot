@@ -171,6 +171,12 @@ session inside it — deploys, databases, the file manager and the monitor all g
 `AllowTcpForwarding yes` in `/etc/ssh/sshd_config` (the Ubuntu default). A server that is the jump host for
 others can't be deleted until they point elsewhere.
 
+If no office machine is reachable from outside, make one of *your* servers join the VPN instead: its **VPN**
+tab takes an OpenVPN profile (for Sophos: user portal → VPN → *SSL VPN configuration for other OSs*), your VPN
+username and password, installs OpenVPN, and keeps the tunnel up with `openvpn-client@aj-<name>` across reboots.
+Then choose that server as the jump host for the office machines. By default only the office routes go through
+the tunnel, so the server keeps its own internet connection and the panel keeps reaching it.
+
 ### The server page
 
 The sidebar is fixed, so it stays put however far you scroll, and collapses to an icon rail with the «
