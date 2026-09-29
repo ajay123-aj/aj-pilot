@@ -156,6 +156,21 @@ another server already has is refused by name rather than as a database error, a
 authentication kind without supplying the password or key it needs is refused as well. Editing needs the
 **edit** permission.
 
+### Servers behind a VPN (jump host)
+
+A server that is only reachable over an office VPN or private network can't be dialled directly from a panel
+running in the cloud. Reach it through a **jump host** instead: a machine the panel *can* reach (public IP, or a
+port forwarded on the office router) that also sits inside that network.
+
+1. Add the jump host as an ordinary server first and check **Test connection** works.
+2. Add (or edit) the private server, put its **private / VPN IP** in Host, and pick the jump host under
+   **Connect via jump host**.
+
+The panel signs in to the jump host, opens a channel to the private server's SSH port and runs the real SSH
+session inside it — deploys, databases, the file manager and the monitor all go through it. The jump host needs
+`AllowTcpForwarding yes` in `/etc/ssh/sshd_config` (the Ubuntu default). A server that is the jump host for
+others can't be deleted until they point elsewhere.
+
 ### The server page
 
 The sidebar is fixed, so it stays put however far you scroll, and collapses to an icon rail with the «

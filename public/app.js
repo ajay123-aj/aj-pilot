@@ -1213,7 +1213,7 @@ function serverCard(s) {
     <div class="card-head">
       <div>
         <h3><span class="dot ${esc(s.status)}"></span> ${esc(s.name)}</h3>
-        <div class="muted small">${esc(s.username)}@${esc(s.host)}:${s.port} · ${s.auth_type === 'key' ? 'SSH key' : 'password'}</div>
+        <div class="muted small">${esc(s.username)}@${esc(s.host)}:${s.port} · ${s.auth_type === 'key' ? 'SSH key' : 'password'}${s.jumpServerName ? ` · via ${esc(s.jumpServerName)}` : ''}</div>
         <div class="muted small" data-status-note></div>
       </div>
       <span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>
@@ -1331,7 +1331,7 @@ async function openServer(id) {
     const s = await api(`/servers/${id}`);
     currentServer = s;
     $('#detail-name').innerHTML = `<span class="dot ${esc(s.status)}"></span> ${esc(s.name)}`;
-    $('#detail-sub').textContent = `${s.username}@${s.host}:${s.port} · ${s.auth_type === 'key' ? 'SSH key auth' : 'password auth'}${s.notes ? ` · ${s.notes}` : ''}`;
+    $('#detail-sub').textContent = `${s.username}@${s.host}:${s.port} · ${s.auth_type === 'key' ? 'SSH key auth' : 'password auth'}${s.jumpServerName ? ` · via jump host ${s.jumpServerName}` : ''}${s.notes ? ` · ${s.notes}` : ''}`;
     // Filled in properly by the status poll a moment later.
     $('#detail-status').innerHTML = `<span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>`
       + `<span class="muted small"> ${s.last_checked_at ? `updated ${esc(agoWords(s.last_checked_at))}` : 'not checked yet'}</span>`;
@@ -2733,9 +2733,24 @@ const serverForm = $('#form-server');
 /** null adds a server; a row edits that one. */
 let editingServerId = null;
 
+/** Every other saved server can carry this one's traffic; list them as jump hosts. */
+async function fillJumpHosts(server) {
+  const select = $('#server-jump');
+  select.length = 1;
+  try {
+    const servers = await api('/servers');
+    for (const s of servers) {
+      if (server && s.id === server.id) continue;
+      select.add(new Option(`${s.name} (${s.username}@${s.host})`, s.id));
+    }
+  } catch { /* the list is optional; direct still works */ }
+  select.value = server?.jump_server_id ? String(server.jump_server_id) : '';
+}
+
 function openServerModal(server = null) {
   editingServerId = server?.id ?? null;
   serverForm.reset();
+  fillJumpHosts(server);
   $('#server-form-msg').classList.add('hidden');
   keyImportNote('');
 

@@ -1306,6 +1306,12 @@
         <p class="muted small key-import-note" id="key-import-note" hidden></p>
         <label>Key passphrase <span class="muted small">(optional)</span><input name="passphrase" type="password" autocomplete="off" /></label>
       </div>
+      <label>Connect via jump host <span class="muted small">(optional — for servers only reachable over the office VPN)</span>
+        <select name="jump_server_id" id="server-jump">
+          <option value="">Direct — the panel connects to this host itself</option>
+        </select>
+      </label>
+      <p class="muted small" style="margin:6px 0 0">Pick a saved server that is reachable from the internet and sits inside the office network. The panel signs in to it first and goes on to this host from there, so use this host's private/VPN IP above.</p>
       <label>Sudo password <span class="muted small">(optional — only if this user needs one for sudo)</span>
         <input name="sudo_password" type="password" autocomplete="off" />
       </label>

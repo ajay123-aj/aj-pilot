@@ -1,6 +1,10 @@
 import { Client } from 'ssh2';
 import { config } from '../config.js';
 import { decrypt } from './crypto.js';
+import { one } from '../db/index.js';
+
+/** How many jump hosts deep a chain may go before it is treated as a loop. */
+const MAX_JUMPS = 3;
 
 /** Build the ssh2 connect config from a stored server row. */
 export function connectionFromRow(row) {
@@ -19,11 +23,60 @@ export function connectionFromRow(row) {
   } else {
     base.password = decrypt(row.password_enc);
   }
+  // Behind a VPN or private network: reach it through another saved server.
+  if (row.jump_server_id) base.jumpServerId = row.jump_server_id;
   return base;
 }
 
-/** Open a connection, hand it to `fn`, and always close it afterwards. */
-export function withConnection(connectCfg, fn) {
+/**
+ * Open a connection, hand it to `fn`, and always close it afterwards.
+ *
+ * A config with `jumpServerId` is reached through that server first: the panel
+ * signs in to the jump host, asks it for a TCP channel to the target's SSH port,
+ * and runs the real SSH session inside that channel. That is how a panel
+ * running in the cloud reaches office machines that are only on the VPN.
+ */
+export function withConnection(connectCfg, fn, depth = 0) {
+  if (connectCfg.jumpServerId) return viaJumpHost(connectCfg, fn, depth);
+  return directConnection(connectCfg, fn);
+}
+
+async function viaJumpHost(connectCfg, fn, depth) {
+  const { jumpServerId, ...target } = connectCfg;
+  if (depth >= MAX_JUMPS) {
+    throw new Error('Too many jump hosts in a row — check the jump host settings of these servers for a loop.');
+  }
+  const jump = await one('SELECT * FROM servers WHERE id = ?', [jumpServerId]);
+  if (!jump) throw new Error('The jump host for this server no longer exists — edit the server and pick another one.');
+
+  try {
+    return await withConnection({ ...connectionFromRow(jump), readyTimeout: target.readyTimeout }, (jumpConn) => new Promise((resolve, reject) => {
+      jumpConn.forwardOut('127.0.0.1', 0, target.host, target.port || 22, (err, stream) => {
+        if (err) {
+          const e = new Error(`Jump host ${jump.name} could not reach ${target.host}:${target.port || 22} — `
+            + 'check the private IP from the jump host, and that AllowTcpForwarding is enabled in its sshd_config.');
+          e.cause = err.message;
+          e.passThrough = true;
+          return reject(e);
+        }
+        directConnection({ ...target, sock: stream }, fn).then(resolve, (e) => {
+          // The target (or `fn`) failed, not the jump host: leave the message alone.
+          if (e && typeof e === 'object') e.passThrough = true;
+          reject(e);
+        });
+      });
+    }), depth + 1);
+  } catch (err) {
+    if (err?.passThrough) throw err;
+    // With two logins involved, say which one failed.
+    const e = new Error(`Jump host ${jump.name}: ${err.message}`);
+    e.cause = err.cause;
+    e.passThrough = true;
+    throw e;
+  }
+}
+
+function directConnection(connectCfg, fn) {
   return new Promise((resolve, reject) => {
     const conn = new Client();
     let settled = false;

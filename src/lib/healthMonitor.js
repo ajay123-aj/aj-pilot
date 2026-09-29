@@ -61,6 +61,41 @@ function tcpProbe(host, port, timeoutMs) {
   });
 }
 
+/**
+ * Servers behind a jump host cannot be dialled from here, so the fast tier asks
+ * the jump host to open a channel to their SSH port instead. That costs an SSH
+ * login to the jump host, so the answer is reused for a minute.
+ */
+const JUMP_PROBE_MS = 60000;
+const jumpProbes = new Map();
+
+async function jumpProbe(row, jumpRow) {
+  const cached = jumpProbes.get(row.id);
+  if (cached && Date.now() - cached.at < Math.max(JUMP_PROBE_MS, config.monitor.intervalMs)) return cached.result;
+
+  const started = Date.now();
+  const port = row.port || 22;
+  let result;
+  if (!jumpRow) {
+    result = { ok: false, error: 'Its jump host no longer exists — edit the server and pick another one.' };
+  } else {
+    try {
+      await withConnection({ ...connectionFromRow(jumpRow), readyTimeout: config.monitor.sshTimeoutMs }, (conn) => new Promise((resolve, reject) => {
+        conn.forwardOut('127.0.0.1', 0, row.host, port, (err, stream) => {
+          if (err) return reject(new Error(`Jump host ${jumpRow.name} cannot reach ${row.host}:${port} (${err.message}).`));
+          stream.close();
+          resolve();
+        });
+      }));
+      result = { ok: true, latencyMs: Date.now() - started };
+    } catch (err) {
+      result = { ok: false, error: /^Jump host /.test(err.message) ? err.message : `Jump host ${jumpRow.name}: ${err.message}` };
+    }
+  }
+  jumpProbes.set(row.id, { at: Date.now(), result });
+  return result;
+}
+
 function explainTcp(err, host, port) {
   const code = err?.code || '';
   if (code === 'ECONNREFUSED') return `Nothing is listening on ${host}:${port} — the host is up but sshd is not.`;
@@ -84,8 +119,10 @@ async function sshProbe(row) {
  * Probe one server and remember the answer. The row is only written when the
  * status changes — that is what keeps a five-second cadence cheap.
  */
-async function checkServer(row) {
-  const probe = await tcpProbe(row.host, row.port || 22, config.monitor.timeoutMs);
+async function checkServer(row, byId) {
+  const probe = row.jump_server_id
+    ? await jumpProbe(row, byId.get(row.jump_server_id))
+    : await tcpProbe(row.host, row.port || 22, config.monitor.timeoutMs);
   const status = probe.ok ? 'online' : 'offline';
   const previous = live.get(row.id)?.status ?? row.status;
 
@@ -165,9 +202,10 @@ export async function runHealthSweep() {
   const started = Date.now();
 
   try {
-    const rows = await all('SELECT id, org_id, name, host, port, username, status, auth_type, password_enc, private_key_enc, passphrase_enc, sudo_password_enc FROM servers');
-    const ids = new Set(rows.map((r) => r.id));
-    for (const id of live.keys()) if (!ids.has(id)) live.delete(id);
+    const rows = await all('SELECT id, org_id, name, host, port, username, status, auth_type, password_enc, private_key_enc, passphrase_enc, sudo_password_enc, jump_server_id FROM servers');
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const id of live.keys()) if (!byId.has(id)) live.delete(id);
+    for (const id of jumpProbes.keys()) if (!byId.get(id)?.jump_server_id) jumpProbes.delete(id);
 
     const tally = { checked: 0, online: 0, offline: 0 };
     let next = 0;
@@ -176,7 +214,7 @@ export async function runHealthSweep() {
       while (next < rows.length) {
         const row = rows[next++];
         try {
-          const status = await checkServer(row);
+          const status = await checkServer(row, byId);
           tally.checked += 1;
           tally[status] += 1;
         } catch (err) {

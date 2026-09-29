@@ -557,6 +557,8 @@ async function addOrgScoping() {
     // A super admin can end any plan on a date (or now): after it the organisation is view-only.
     ['subscriptions', 'expires_at', 'DATETIME NULL'],
     ['installations', 'environment_id', 'INT NULL'],
+    // A server only reachable over the office VPN / a private network is reached through this one.
+    ['servers', 'jump_server_id', 'INT NULL'],
   ];
   for (const [table, column, definition] of LATER_COLUMNS) {
     if (await columnExists(table, column)) continue;

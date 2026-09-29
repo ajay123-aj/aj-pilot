@@ -71,6 +71,7 @@ function validate(body, { partial = false } = {}) {
     sudo_password: body.sudo_password || '',
     tags: normalizeTags(body.tags),
     notes: (body.notes || '').trim(),
+    jump_server_id: body.jump_server_id ? Number(body.jump_server_id) : null,
   };
 
   if (!partial || body.name !== undefined) {
@@ -93,6 +94,27 @@ function validate(body, { partial = false } = {}) {
 
 const getRow = (id, orgId) => one('SELECT * FROM servers WHERE id = ? AND org_id = ?', [id, orgId]);
 
+/**
+ * Check a chosen jump host: it must be another server of this organisation,
+ * and following its own jump hosts must never lead back to `selfId`.
+ * Returns an error message, or null when the choice is fine.
+ */
+async function jumpHostError(jumpId, orgId, selfId = null) {
+  if (!jumpId) return null;
+  if (!Number.isInteger(jumpId)) return 'jump host is not a valid server';
+  if (selfId && jumpId === Number(selfId)) return 'a server cannot be its own jump host';
+  const seen = new Set(selfId ? [Number(selfId)] : []);
+  let id = jumpId;
+  while (id) {
+    if (seen.has(id)) return 'that jump host is itself reached through this server — pick one that is not';
+    seen.add(id);
+    const hop = await getRow(id, orgId);
+    if (!hop) return 'the chosen jump host does not exist';
+    id = hop.jump_server_id;
+  }
+  return null;
+}
+
 function markStatus(id, status, error = null) {
   return run('UPDATE servers SET status = ?, last_error = ?, last_checked_at = NOW() WHERE id = ?', [status, error, id]);
 }
@@ -111,6 +133,7 @@ serversRouter.get('/', async (req, res, next) => {
          AND server_id IN (${rows.map(() => '?').join(',')})
     `, rows.map((r) => r.id)) : [];
     const byServer = new Map(latest.map((f) => [f.server_id, f]));
+    const names = new Map(rows.map((r) => [r.id, r.name]));
 
     res.json(rows.map((row) => {
       const fact = byServer.get(row.id);
@@ -128,7 +151,7 @@ serversRouter.get('/', async (req, res, next) => {
           uptime: p.uptime?.human,
         };
       }
-      return { ...publicServer(row), summary };
+      return { ...publicServer(row), jumpServerName: names.get(row.jump_server_id) || null, summary };
     }));
   } catch (err) { next(err); }
 });
@@ -187,6 +210,8 @@ serversRouter.post('/test', async (req, res, next) => {
     }
     if (value.auth_type === 'key' && !secret.privateKey) return res.status(400).json({ error: 'private_key is required for key authentication' });
     if (value.auth_type === 'password' && !secret.password) return res.status(400).json({ error: 'password is required for password authentication' });
+    const jumpError = await jumpHostError(value.jump_server_id, req.orgId, saved?.id);
+    if (jumpError) return res.status(400).json({ error: jumpError });
 
     try {
       const result = await testConnection({
@@ -198,6 +223,7 @@ serversRouter.post('/test', async (req, res, next) => {
           : { password: secret.password }),
         readyTimeout: 15000,
         tryKeyboard: true,
+        ...(value.jump_server_id ? { jumpServerId: value.jump_server_id } : {}),
       });
       res.json({ ok: true, ...result });
     } catch (err) {
@@ -213,18 +239,20 @@ serversRouter.post('/', async (req, res, next) => {
   if (errors.length) return res.status(400).json({ error: errors.join('; ') });
 
   try {
+    const jumpError = await jumpHostError(value.jump_server_id, req.orgId);
+    if (jumpError) return res.status(400).json({ error: jumpError });
     if (await one('SELECT id FROM servers WHERE name = ? AND org_id = ?', [value.name, req.orgId])) {
       return res.status(409).json({ error: `A server named "${value.name}" already exists` });
     }
 
     const { insertId } = await run(
       `INSERT INTO servers (org_id, name, host, port, username, auth_type, password_enc, private_key_enc,
-         passphrase_enc, sudo_password_enc, tags, notes)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+         passphrase_enc, sudo_password_enc, tags, notes, jump_server_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [req.orgId, value.name, value.host, value.port, value.username, value.auth_type,
         value.auth_type === 'password' ? encrypt(value.password) : null,
         value.auth_type === 'key' ? encrypt(value.private_key) : null,
-        encrypt(value.passphrase), encrypt(value.sudo_password), value.tags, value.notes]
+        encrypt(value.passphrase), encrypt(value.sudo_password), value.tags, value.notes, value.jump_server_id]
     );
 
     await logActivity('server', insertId, 'created', `Added server ${value.name} (${value.username}@${value.host}:${value.port})`);
@@ -239,8 +267,10 @@ serversRouter.get('/:id', async (req, res, next) => {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'Server not found' });
     const fact = await one('SELECT * FROM server_facts WHERE server_id = ? ORDER BY id DESC LIMIT 1', [row.id]);
+    const jump = row.jump_server_id ? await getRow(row.jump_server_id, req.orgId) : null;
     res.json({
       ...publicServer(row),
+      jumpServerName: jump?.name || null,
       facts: fact ? { collectedAt: fact.collected_at, durationMs: fact.duration_ms, ...asJson(fact.payload) } : null,
     });
   } catch (err) { next(err); }
@@ -275,6 +305,11 @@ serversRouter.put('/:id', async (req, res, next) => {
       return res.status(409).json({ error: `Another server is already called "${value.name}"` });
     }
 
+    // An absent field keeps the current jump host; an empty one means "connect directly".
+    const jumpId = req.body.jump_server_id !== undefined ? value.jump_server_id : row.jump_server_id;
+    const jumpError = await jumpHostError(jumpId, req.orgId, row.id);
+    if (jumpError) return res.status(400).json({ error: jumpError });
+
     // Switching to key authentication needs a key, unless one is already stored.
     if (req.body.auth_type === 'key' && !value.private_key && !row.private_key_enc) {
       return res.status(400).json({ error: 'Paste the private key to switch this server to key authentication' });
@@ -285,7 +320,7 @@ serversRouter.put('/:id', async (req, res, next) => {
 
     await run(
       `UPDATE servers SET name=?, host=?, port=?, username=?, auth_type=?, password_enc=?,
-         private_key_enc=?, passphrase_enc=?, sudo_password_enc=?, tags=?, notes=? WHERE id=?`,
+         private_key_enc=?, passphrase_enc=?, sudo_password_enc=?, tags=?, notes=?, jump_server_id=? WHERE id=?`,
       [
         value.name || row.name,
         value.host || row.host,
@@ -299,6 +334,7 @@ serversRouter.put('/:id', async (req, res, next) => {
         value.sudo_password ? encrypt(value.sudo_password) : row.sudo_password_enc,
         req.body.tags !== undefined ? value.tags : row.tags,
         req.body.notes !== undefined ? value.notes : row.notes,
+        jumpId,
         row.id,
       ]
     );
@@ -314,6 +350,12 @@ serversRouter.delete('/:id', async (req, res, next) => {
   try {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'Server not found' });
+    const behind = await all('SELECT name FROM servers WHERE jump_server_id = ? AND org_id = ?', [row.id, req.orgId]);
+    if (behind.length) {
+      return res.status(409).json({
+        error: `${row.name} is the jump host for ${behind.map((b) => b.name).join(', ')}. Point them at another jump host first.`,
+      });
+    }
     await run('DELETE FROM servers WHERE id = ?', [row.id]);
     await logActivity('server', null, 'deleted', `Removed server ${row.name}`);
     res.json({ ok: true });
