@@ -1290,7 +1290,7 @@
           </select>
         </label>
       </div>
-      <label id="field-password">Password<input name="password" type="password" autocomplete="off" /></label>
+      <label id="field-password">Password<span class="pw-field"><input name="password" type="password" autocomplete="off" /><button type="button" class="pw-toggle" data-secret="password" aria-label="Show">Show</button></span></label>
       <div id="field-key" class="hidden">
         <div class="key-import">
           <span class="key-import-label">Private key <span class="muted small">(full PEM / OpenSSH block)</span></span>
@@ -1304,7 +1304,7 @@
           <textarea name="private_key" rows="6" aria-label="Private key" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;…&#10;-----END OPENSSH PRIVATE KEY-----&#10;&#10;Paste it here, drop the file on this box, or use Import key file (id_ed25519, id_rsa, .pem)"></textarea>
         </label>
         <p class="muted small key-import-note" id="key-import-note" hidden></p>
-        <label>Key passphrase <span class="muted small">(optional)</span><input name="passphrase" type="password" autocomplete="off" /></label>
+        <label>Key passphrase <span class="muted small">(optional)</span><span class="pw-field"><input name="passphrase" type="password" autocomplete="off" /><button type="button" class="pw-toggle" data-secret="passphrase" aria-label="Show">Show</button></span></label>
       </div>
       <label>Connect via jump host <span class="muted small">(optional — for servers only reachable over the office VPN)</span>
         <select name="jump_server_id" id="server-jump">
@@ -1313,7 +1313,7 @@
       </label>
       <p class="muted small" style="margin:6px 0 0">Pick a saved server that is reachable from the internet and sits inside the office network. The panel signs in to it first and goes on to this host from there, so use this host's private/VPN IP above.</p>
       <label>Sudo password <span class="muted small">(optional — only if this user needs one for sudo)</span>
-        <input name="sudo_password" type="password" autocomplete="off" />
+        <span class="pw-field"><input name="sudo_password" type="password" autocomplete="off" /><button type="button" class="pw-toggle" data-secret="sudo_password" aria-label="Show">Show</button></span>
       </label>
       <p class="muted small" style="margin:6px 0 0">Managing services and installing runners needs root. Leave this empty when you connect as root or the user has passwordless sudo.</p>
       <div class="row">

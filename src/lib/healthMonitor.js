@@ -81,7 +81,12 @@ async function jumpProbe(row, jumpRow) {
   } else {
     try {
       await withConnection({ ...connectionFromRow(jumpRow), readyTimeout: config.monitor.sshTimeoutMs }, (conn) => new Promise((resolve, reject) => {
+        // The jump host waits on its own TCP timeout (minutes) for an address it
+        // has no route to; that must not hold up the whole sweep.
+        const timer = setTimeout(() => reject(new Error(`Jump host ${jumpRow.name} cannot reach ${row.host}:${port} `
+          + `(no answer within ${config.monitor.sshTimeoutMs / 1000}s — is its VPN connected?).`)), config.monitor.sshTimeoutMs);
         conn.forwardOut('127.0.0.1', 0, row.host, port, (err, stream) => {
+          clearTimeout(timer);
           if (err) return reject(new Error(`Jump host ${jumpRow.name} cannot reach ${row.host}:${port} (${err.message}).`));
           stream.close();
           resolve();

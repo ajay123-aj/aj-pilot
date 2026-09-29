@@ -365,6 +365,23 @@ serversRouter.delete('/:id', async (req, res, next) => {
 
 /* ------------------------------------------------- connect / test saved */
 
+/**
+ * The stored password, passphrase and sudo password, for the Show button of the
+ * edit form. Only for people who may edit the server, and every look is logged.
+ */
+serversRouter.get('/:id/secrets', requirePermission('edit'), async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'Server not found' });
+    await logActivity('server', row.id, 'secrets_viewed', `Viewed the stored passwords of ${row.name}`);
+    res.json({
+      password: row.password_enc ? decrypt(row.password_enc) : '',
+      passphrase: row.passphrase_enc ? decrypt(row.passphrase_enc) : '',
+      sudo_password: row.sudo_password_enc ? decrypt(row.sudo_password_enc) : '',
+    });
+  } catch (err) { next(err); }
+});
+
 serversRouter.post('/:id/test', async (req, res, next) => {
   try {
     const row = await getRow(req.params.id, req.orgId);

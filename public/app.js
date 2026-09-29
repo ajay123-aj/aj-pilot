@@ -3,6 +3,37 @@
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+/*
+ * Server passwords, tokens and keys are not logins to this site, but a browser
+ * offers to save anything typed into an <input type="password">. So outside the
+ * panel's own sign-in forms, secret boxes become text boxes masked with CSS:
+ * still dots on screen, never a "save password?" prompt. New boxes are caught as
+ * they are rendered.
+ */
+const OWN_LOGIN_FORMS = '#form-setup, #form-login, #form-signup, #form-password';
+
+function maskSecretInputs(root = document) {
+  const inputs = root.matches?.('input[type=password]') ? [root] : $$('input[type=password]', root);
+  for (const el of inputs) {
+    if (el.closest(OWN_LOGIN_FORMS)) continue;
+    el.type = 'text';
+    el.classList.add('masked');
+    el.autocomplete = 'off';
+    el.spellcheck = false;
+    el.setAttribute('data-lpignore', 'true');
+    el.setAttribute('data-1p-ignore', '');
+  }
+}
+
+/** Show or hide what is in a masked box. */
+const isShown = (el) => !el.classList.contains('masked');
+const setShown = (el, show) => el.classList.toggle('masked', !show);
+
+maskSecretInputs();
+new MutationObserver((records) => {
+  for (const r of records) for (const n of r.addedNodes) if (n.nodeType === 1) maskSecretInputs(n);
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const bytes = (n) => {
@@ -2752,6 +2783,7 @@ async function fillJumpHosts(server) {
 function openServerModal(server = null) {
   editingServerId = server?.id ?? null;
   serverForm.reset();
+  hideSecrets();
   fillJumpHosts(server);
   $('#server-form-msg').classList.add('hidden');
   keyImportNote('');
@@ -2848,6 +2880,44 @@ function watchReboot(id, btn) {
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => {
   b.closest('.modal-backdrop').classList.add('hidden');
 }));
+
+/*
+ * Show / Hide on the password, passphrase and sudo boxes. While editing, the
+ * boxes start empty ("unchanged"), so the first Show fetches what is stored.
+ */
+let storedSecrets = null;
+
+function hideSecrets() {
+  storedSecrets = null;
+  $$('[data-secret]', serverForm).forEach((b) => {
+    setShown(serverForm[b.dataset.secret], false);
+    b.textContent = 'Show';
+  });
+}
+
+serverForm.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-secret]');
+  if (!btn) return;
+  e.preventDefault();
+  const input = serverForm[btn.dataset.secret];
+  if (isShown(input)) {
+    setShown(input, false);
+    btn.textContent = 'Show';
+    return;
+  }
+  if (editingServerId && !input.value) {
+    try {
+      storedSecrets ??= await api(`/servers/${editingServerId}/secrets`);
+      input.value = storedSecrets[btn.dataset.secret] || '';
+      if (!input.value) toast('Nothing is stored for this one', 'err');
+    } catch (err) {
+      toast(err.message, 'err');
+      return;
+    }
+  }
+  setShown(input, true);
+  btn.textContent = 'Hide';
+});
 
 serverForm.auth_type.addEventListener('change', (e) => {
   const isKey = e.target.value === 'key';
@@ -4406,7 +4476,7 @@ async function userAction(action, { user, host, db }) {
       onOpen(form) {
         $('#my-gen-pass').addEventListener('click', () => {
           const bytesArr = crypto.getRandomValues(new Uint8Array(18));
-          form.password.type = 'text';
+          setShown(form.password, true);
           form.password.value = btoa(String.fromCharCode(...bytesArr)).replace(/[+/=]/g, '').slice(0, 20);
         });
         const sync = () => { $('#my-user-privs').hidden = !form.database.value; };
@@ -10496,8 +10566,8 @@ function openOsUserModal(u = null, { passwordOnly = false } = {}) {
   f.reset();
   $('#osuser-msg').classList.add('hidden');
   $('#osuser-pw-strength').textContent = '';
-  $('#osuser-password').type = 'password';
-  $('#osuser-password2').type = 'password';
+  setShown($('#osuser-password'), false);
+  setShown($('#osuser-password2'), false);
   $('#osuser-title').textContent = !u ? 'Add a server user' : passwordOnly ? `Change the password of ${u.name}` : `Edit ${u.name}`;
   $('#osuser-intro').innerHTML = !u
     ? 'An Ubuntu account on this server, with its own home folder under <code>/home</code>.'
@@ -10544,13 +10614,13 @@ $('#form-osuser').addEventListener('click', async (e) => {
   const pw = $('#osuser-password');
   const pw2 = $('#osuser-password2');
   if (b.dataset.osuPw === 'show') {
-    const show = pw.type === 'password';
-    pw.type = show ? 'text' : 'password';
-    pw2.type = pw.type;
+    const show = !isShown(pw);
+    setShown(pw, show);
+    setShown(pw2, show);
     b.textContent = show ? 'Hide' : 'Show';
   } else {
     const v = strongPassword();
-    pw.value = v; pw2.value = v; pw.type = 'text'; pw2.type = 'text';
+    pw.value = v; pw2.value = v; setShown(pw, true); setShown(pw2, true);
     $('[data-osu-pw="show"]').textContent = 'Hide';
     try { await navigator.clipboard.writeText(v); $('#osuser-pw-strength').textContent = 'Generated and copied — keep it somewhere safe.'; } catch { $('#osuser-pw-strength').textContent = 'Generated — copy it somewhere safe.'; }
   }

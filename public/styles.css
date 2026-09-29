@@ -1950,3 +1950,6 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 .doc-chapters time { flex: none; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; color: var(--accent); }
 .docs-has-video { font-size: 10px; color: var(--accent); vertical-align: 1px; margin-left: 2px; }
 .docs-card .docs-has-video { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); }
+
+/* Secret boxes that are not a login to this site: dots via CSS, so browsers never offer to save them. */
+input.masked { -webkit-text-security: disc; text-security: disc; }

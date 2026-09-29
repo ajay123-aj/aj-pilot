@@ -47,11 +47,19 @@ async function viaJumpHost(connectCfg, fn, depth) {
     throw new Error('Too many jump hosts in a row — check the jump host settings of these servers for a loop.');
   }
   const jump = await one('SELECT * FROM servers WHERE id = ?', [jumpServerId]);
+  const timeoutMs = target.readyTimeout || config.ssh.connectTimeout;
   if (!jump) throw new Error('The jump host for this server no longer exists — edit the server and pick another one.');
 
   try {
     return await withConnection({ ...connectionFromRow(jump), readyTimeout: target.readyTimeout }, (jumpConn) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const e = new Error(`Jump host ${jump.name} could not reach ${target.host}:${target.port || 22} within ${Math.round(timeoutMs / 1000)}s — `
+          + 'it has no route there. If the server is behind a VPN, check the VPN tab of the jump host is connected.');
+        e.passThrough = true;
+        reject(e);
+      }, timeoutMs);
       jumpConn.forwardOut('127.0.0.1', 0, target.host, target.port || 22, (err, stream) => {
+        clearTimeout(timer);
         if (err) {
           const e = new Error(`Jump host ${jump.name} could not reach ${target.host}:${target.port || 22} — `
             + 'check the private IP from the jump host, and that AllowTcpForwarding is enabled in its sshd_config.');
