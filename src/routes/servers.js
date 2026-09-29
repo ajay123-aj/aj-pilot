@@ -33,7 +33,7 @@ import {
 } from '../lib/nginx.js';
 import { decrypt } from '../lib/crypto.js';
 import { requirePermission } from '../lib/authGuard.js';
-import { vpnState, vpnLog, saveVpn, vpnAction, removeVpn, validateVpnName } from '../lib/vpn.js';
+import { vpnState, vpnLog, saveVpn, vpnAction, removeVpn, validateVpnName, parseNetworks, setVpnNetworks } from '../lib/vpn.js';
 import {
   listDir, readFile, writeFile, uploadFile, downloadTo, makeFolder, makeFile, move, copy, remove, setPermissions, extract,
 } from '../lib/files.js';
@@ -714,6 +714,8 @@ serversRouter.post('/:id/vpn', requirePermission('edit'), async (req, res, next)
     const named = validateVpnName(req.body.name);
     if (named.error) return res.status(400).json({ error: named.error });
     if (!req.body.config) return res.status(400).json({ error: 'Choose the .ovpn profile file' });
+    const nets = parseNetworks(req.body.networks);
+    if (nets.error) return res.status(400).json({ error: nets.error });
 
     const spec = {
       name: named.value,
@@ -721,6 +723,7 @@ serversRouter.post('/:id/vpn', requirePermission('edit'), async (req, res, next)
       username: String(req.body.username || '').trim(),
       password: String(req.body.password || ''),
       splitTunnel: req.body.split_tunnel !== false && req.body.split_tunnel !== 'false',
+      networks: nets.value,
     };
     try {
       const result = await withConnection(connectionFromRow(row), (conn) => saveVpn(conn, row, spec));
@@ -732,6 +735,17 @@ serversRouter.post('/:id/vpn', requirePermission('edit'), async (req, res, next)
     }
   } catch (err) { next(err); }
 });
+
+/** Change which office networks go through an existing profile, and reconnect. */
+serversRouter.put('/:id/vpn/:name/networks', requirePermission('edit'), serverRoute(async (conn, row, req) => {
+  const named = validateVpnName(req.params.name);
+  if (named.error) throw new Error(named.error);
+  const nets = parseNetworks(req.body.networks);
+  if (nets.error) throw new Error(nets.error);
+  const result = await setVpnNetworks(conn, row, named.value, nets.value);
+  await logActivity('server', row.id, 'vpn_networks', `VPN ${named.value} on ${row.name}: office networks ${nets.value.map((n) => n.cidr).join(', ') || 'none'}`);
+  return result;
+}));
 
 serversRouter.post('/:id/vpn/:name/action', requirePermission('edit'), serverRoute(async (conn, row, req) => {
   const named = validateVpnName(req.params.name);

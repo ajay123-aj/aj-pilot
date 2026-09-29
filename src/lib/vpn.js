@@ -28,6 +28,61 @@ export function validateVpnName(name) {
   return { value: clean };
 }
 
+const ROUTES_BEGIN = '# aj-pilot office networks';
+const ROUTES_END = '# end aj-pilot office networks';
+
+/**
+ * "192.168.0.0/24, 10.0.0.0/16" → [{ network, mask, cidr }]. These are the
+ * office networks sent through the tunnel even when the VPN server only
+ * pushes a route to one address (often just its own router).
+ */
+export function parseNetworks(input) {
+  const items = (Array.isArray(input) ? input : String(input || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
+  const toIp = (n) => [24, 16, 8, 0].map((sh) => (n >>> sh) & 255).join('.');
+  const out = [];
+  for (const item of items) {
+    const m = item.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/);
+    const octets = m ? m.slice(1, 5).map(Number) : [];
+    const bits = m ? Number(m[5] ?? 32) : NaN;
+    if (!m || octets.some((o) => o > 255) || !(bits >= 8 && bits <= 32)) {
+      return { error: `"${item.slice(0, 40)}" is not a network — write it like 192.168.0.0/24` };
+    }
+    const maskNum = (0xffffffff << (32 - bits)) >>> 0;
+    const ipNum = octets.reduce((a, o) => ((a << 8) | o) >>> 0, 0);
+    const network = toIp((ipNum & maskNum) >>> 0);
+    out.push({ network, mask: toIp(maskNum), cidr: `${network}/${bits}` });
+  }
+  return { value: out };
+}
+
+const routeBlock = (networks) => [ROUTES_BEGIN, ...networks.map((n) => `route ${n.network} ${n.mask}`), ROUTES_END].join('\n');
+
+const ipToNum = (ip) => ip.split('.').reduce((a, o) => ((a << 8) | Number(o)) >>> 0, 0);
+const inNetwork = (ip, n) => ((ipToNum(ip) & ipToNum(n.mask)) >>> 0) === ipToNum(n.network);
+
+/**
+ * Sending the server's own network through the tunnel would cut it off from
+ * the panel (and everything else on that network), so refuse it.
+ */
+async function assertNotLocal(conn, row, networks) {
+  if (!networks.length) return;
+  const r = await rootExec(conn, row, "ip -4 -o addr show scope global | awk '$2 !~ /^(tun|tap)/ {split($4,a,\"/\"); print a[1]}'", { timeout: 15000 });
+  for (const ip of r.stdout.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const hit = networks.find((n) => inNetwork(ip, n));
+    if (hit) {
+      throw new Error(`${hit.cidr} contains this server's own address ${ip} — sending it through the VPN would cut the server off. `
+        + 'Enter only the office network (for example 192.168.0.0/24).');
+    }
+  }
+}
+
+/** "192.168.0.0/255.255.255.0" → "192.168.0.0/24" */
+function maskToCidr(pair) {
+  const [net, mask] = pair.split('/');
+  const bits = String(mask || '').split('.').reduce((a, o) => a + ((Number(o) >>> 0).toString(2).match(/1/g) || []).length, 0);
+  return `${net}/${bits}`;
+}
+
 /**
  * Make an uploaded .ovpn file run unattended:
  *  - credentials come from a root-only file instead of a prompt,
@@ -35,7 +90,7 @@ export function validateVpnName(name) {
  *    its own internet (and the panel keeps reaching it) while office routes still apply,
  *  - an old `cipher` line keeps working with OpenVPN 2.6, which negotiates ciphers.
  */
-export function prepareConfig(raw, { name, hasAuth, splitTunnel }) {
+export function prepareConfig(raw, { name, hasAuth, splitTunnel, networks = [] }) {
   const text = String(raw || '').replace(/\r\n/g, '\n');
   if (!/^\s*(client|remote)\b/m.test(text)) {
     return { error: 'That does not look like an OpenVPN client profile (.ovpn) — it has no "client" or "remote" line' };
@@ -52,6 +107,7 @@ export function prepareConfig(raw, { name, hasAuth, splitTunnel }) {
     extra.push(`data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:${cipher}`);
     extra.push(`data-ciphers-fallback ${cipher}`);
   }
+  if (networks.length) extra.push(routeBlock(networks));
   return { value: `${lines.join('\n').trimEnd()}\n${extra.join('\n')}\n` };
 }
 
@@ -64,7 +120,8 @@ for f in ${DIR}/${PREFIX}*.conf; do
   n="$(basename "$f" .conf)"
   u="openvpn-client@$n"
   remote="$(awk '$1=="remote"{print $2":"$3; exit}' "$f")"
-  printf 'profile\\t%s\\t%s\\t%s\\t%s\\n' "\${n#${PREFIX}}" "$(systemctl is-active "$u" 2>/dev/null)" "$(systemctl is-enabled "$u" 2>/dev/null)" "$remote"
+  nets="$(awk -v b=${q(ROUTES_BEGIN)} -v e=${q(ROUTES_END)} '$0==b{on=1;next} $0==e{on=0} on && $1=="route"{printf "%s/%s ", $2, $3}' "$f")"
+  printf 'profile\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "\${n#${PREFIX}}" "$(systemctl is-active "$u" 2>/dev/null)" "$(systemctl is-enabled "$u" 2>/dev/null)" "$remote" "$nets"
 done
 ip -4 -o addr show 2>/dev/null | awk '$2 ~ /^tun|^tap/ {print "iface\\t"$2"\\t"$4}'
 ip -4 route show 2>/dev/null | awk '/ dev (tun|tap)/ {print "route\\t"$0}'
@@ -78,7 +135,8 @@ ip -4 route show 2>/dev/null | awk '/ dev (tun|tap)/ {print "route\\t"$0}'
       state.installed = Boolean(v);
       state.version = v || null;
     } else if (kind === 'profile') {
-      state.profiles.push({ name: f[0], active: f[1] || 'inactive', enabled: f[2] || 'disabled', remote: f[3] || '', connected: f[1] === 'active' });
+      state.profiles.push({ name: f[0], active: f[1] || 'inactive', enabled: f[2] || 'disabled', remote: f[3] || '', connected: f[1] === 'active',
+        networks: (f[4] || '').trim().split(/\s+/).filter(Boolean).map(maskToCidr) });
     } else if (kind === 'iface') {
       state.interfaces.push({ name: f[0], address: f[1] });
     } else if (kind === 'route') {
@@ -98,9 +156,10 @@ export async function vpnLog(conn, row, name, lines = 60) {
  * Install OpenVPN if needed, write the profile (and credentials), start it now
  * and at every boot, then wait for OpenVPN to say the tunnel is up.
  */
-export async function saveVpn(conn, row, { name, config, username, password, splitTunnel = true }) {
+export async function saveVpn(conn, row, { name, config, username, password, splitTunnel = true, networks = [] }) {
   const hasAuth = Boolean(username);
-  const prepared = prepareConfig(config, { name, hasAuth, splitTunnel });
+  const prepared = prepareConfig(config, { name, hasAuth, splitTunnel, networks });
+  await assertNotLocal(conn, row, networks);
   if (prepared.error) throw new Error(prepared.error);
   if (/^\s*auth-user-pass\b/m.test(config) && !hasAuth) {
     throw new Error('This profile signs in with a username and password — enter your VPN username and password');
@@ -120,7 +179,15 @@ echo ${q(b64(prepared.value))} | base64 -d > ${DIR}/${PREFIX}${name}.conf
 ${hasAuth ? `printf '%s\\n%s\\n' ${q(username)} ${q(password || '')} > ${DIR}/${PREFIX}${name}.auth` : `rm -f ${DIR}/${PREFIX}${name}.auth`}
 chmod 600 ${DIR}/${PREFIX}${name}.*
 systemctl enable ${unit} >/dev/null 2>&1
-since="$(date '+%Y-%m-%d %H:%M:%S')"
+${restartAndWait(unit)}
+`;
+  const r = assertOk(await rootExec(conn, row, script, { timeout: 240000 }), 'Setting up the VPN');
+  return connectResult(r.stdout);
+}
+
+/** Restart a profile's unit and wait (up to 25s) for OpenVPN to say whether it came up. */
+function restartAndWait(unit) {
+  return `since="$(date '+%Y-%m-%d %H:%M:%S')"
 systemctl restart ${unit}
 for i in $(seq 1 25); do
   if journalctl -u ${unit} --since "$since" --no-pager 2>/dev/null | grep -q 'Initialization Sequence Completed'; then echo "@@UP"; break; fi
@@ -128,10 +195,10 @@ for i in $(seq 1 25); do
   sleep 1
 done
 echo "@@LOG"
-journalctl -u ${unit} --since "$since" --no-pager -o cat 2>/dev/null | tail -n 40
-`;
-  const r = assertOk(await rootExec(conn, row, script, { timeout: 240000 }), 'Setting up the VPN');
-  const out = r.stdout;
+journalctl -u ${unit} --since "$since" --no-pager -o cat 2>/dev/null | tail -n 40`;
+}
+
+function connectResult(out) {
   const log = out.split('@@LOG').pop().trim();
   if (out.includes('@@UP')) return { connected: true, log };
 
@@ -143,6 +210,28 @@ journalctl -u ${unit} --since "$since" --no-pager -o cat 2>/dev/null | tail -n 4
   e.cause = log;
   e.log = log;
   throw e;
+}
+
+/**
+ * Replace the office networks of an existing profile and reconnect it, so the
+ * .ovpn file does not have to be uploaded again.
+ */
+export async function setVpnNetworks(conn, row, name, networks) {
+  const unit = `openvpn-client@${PREFIX}${name}`;
+  const f = `${DIR}/${PREFIX}${name}.conf`;
+  await assertNotLocal(conn, row, networks);
+  const block = networks.length ? `echo ${q(b64(`${routeBlock(networks)}\n`))} | base64 -d >> ${f}.new` : '';
+  const script = `
+set -e
+test -f ${f} || { echo "No VPN profile called ${name}" >&2; exit 1; }
+umask 077
+awk -v b=${q(ROUTES_BEGIN)} -v e=${q(ROUTES_END)} '$0==b{skip=1;next} $0==e{skip=0;next} !skip' ${f} > ${f}.new
+${block}
+mv ${f}.new ${f}
+${restartAndWait(unit)}
+`;
+  const r = assertOk(await rootExec(conn, row, script, { timeout: 60000 }), 'Updating the office networks');
+  return connectResult(r.stdout);
 }
 
 export async function vpnAction(conn, row, name, action) {

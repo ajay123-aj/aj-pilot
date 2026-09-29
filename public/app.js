@@ -10322,6 +10322,11 @@ async function loadServerVpn() {
     : `<button class="btn tiny primary" data-vpn="connect" data-name="${esc(p.name)}">Connect</button>`}
             ${ifCan('delete', `<button class="btn tiny danger" data-vpn="remove" data-name="${esc(p.name)}">Remove</button>`)}
           </div>
+          <div class="row" style="margin-top:12px;align-items:flex-end">
+            <label>Office networks through this VPN <span class="muted small">(the office servers' network, e.g. 192.168.0.0/24)</span>
+              <input data-vpn-nets="${esc(p.name)}" value="${esc((p.networks || []).join(', '))}" placeholder="192.168.0.0/24" /></label>
+            <button class="btn tiny" data-vpn="networks" data-name="${esc(p.name)}" style="flex:0 0 auto">Save networks</button>
+          </div>
           <pre class="log hidden" data-vpn-log="${esc(p.name)}"></pre>
         </div>`).join('')
       : '<div class="card"><p class="muted small" style="margin:0">No VPN on this server yet. Add one below.</p></div>';
@@ -10348,6 +10353,8 @@ async function loadServerVpn() {
             <label>VPN username<input name="username" autocomplete="off" placeholder="your Sophos username" /></label>
             <label>VPN password<input name="password" type="password" autocomplete="new-password" /></label>
           </div>
+          <label>Office networks <span class="muted small">(optional — the network your office servers are on, e.g. 192.168.0.0/24; needed when the VPN does not route it itself)</span>
+            <input name="networks" placeholder="192.168.0.0/24" /></label>
           <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="split_tunnel" checked style="width:auto" />
             <span>Only send office traffic through the VPN <span class="muted small">(recommended — keeps this server's own internet and panel access working)</span></span></label>
           <div id="vpn-form-msg" class="msg hidden"></div>
@@ -10378,6 +10385,7 @@ $('#view-server-detail').addEventListener('submit', async (e) => {
         username: form.elements.username.value,
         password: form.elements.password.value,
         split_tunnel: form.elements.split_tunnel.checked,
+        networks: form.elements.networks.value,
       },
     });
     toast('VPN connected');
@@ -10404,6 +10412,20 @@ $('#view-server-detail').addEventListener('click', async (e) => {
       pre.classList.remove('hidden');
     } catch (err) { toast(err.message, 'err'); }
     busy(btn, false);
+    return;
+  }
+  if (what === 'networks') {
+    busy(btn, true, 'Reconnecting…');
+    try {
+      await api(`/servers/${currentServerId}/vpn/${encodeURIComponent(name)}/networks`, {
+        method: 'PUT', body: { networks: $(`[data-vpn-nets="${CSS.escape(name)}"]`).value },
+      });
+      toast(`VPN ${name}: office networks saved and reconnected`);
+      loadServerVpn();
+    } catch (err) {
+      busy(btn, false);
+      toast(err.message, 'err');
+    }
     return;
   }
   if (what === 'remove' && !await askConfirm(`Remove the VPN ${name}?\n\nIt disconnects now, and servers using this one as their jump host can no longer reach the office.`, { ok: 'Remove', danger: true })) return;
