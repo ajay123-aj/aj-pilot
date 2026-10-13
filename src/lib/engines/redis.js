@@ -20,9 +20,13 @@ const ACCESS = {
 /* ------------------------------------------------------------ connecting */
 
 async function withRedis(cfg, fn, database) {
-  return withTunnel(cfg.server, cfg.host, cfg.port, async ({ host, port }) => {
+  return withTunnel(cfg.server, cfg.host, cfg.port, async ({ host, port, servername }) => {
     const client = createClient({
-      socket: { host, port, connectTimeout: 12000, reconnectStrategy: false, tls: cfg.tls || undefined, rejectUnauthorized: cfg.tls ? false : undefined },
+      socket: {
+        host, port, connectTimeout: 12000, reconnectStrategy: false, tls: cfg.tls || undefined, rejectUnauthorized: cfg.tls ? false : undefined,
+        // `host` may be the resolved IP, so the hostname goes along for SNI.
+        ...(cfg.tls && servername ? { servername } : {}),
+      },
       username: cfg.user || undefined,
       password: cfg.password || undefined,
       database: Number(database ?? cfg.database ?? 0) || 0,
@@ -48,15 +52,16 @@ function friendly(err) {
   const msg = String(err?.message || err);
   const map = [
     [/WRONGPASS|invalid username-password|NOAUTH/i, 'Authentication failed — check the username and password (leave the username empty for the "default" user).'],
-    [/ECONNREFUSED/i, 'Connection refused — Redis is not listening on that host and port.'],
-    [/timeout|ETIMEDOUT/i, 'Timed out reaching Redis. It may listen on localhost only — tie this connection to a server so the panel tunnels over SSH.'],
+    // Refused and timed out read the same (and the raw error is dropped), so
+    // the test form is no use for probing which ports are open.
+    [/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|timeout|ETIMEDOUT/i, 'Could not reach Redis on that host and port. It may listen on localhost only — tie this connection to a server so the panel tunnels over SSH.', true],
     [/ENOTFOUND|EAI_AGAIN/i, 'Host not found — the hostname could not be resolved.'],
     [/NOPERM/i, `This Redis user is not allowed to do that: ${msg}`],
   ];
-  for (const [re, nice] of map) {
+  for (const [re, nice, hideCause] of map) {
     if (re.test(msg)) {
       const e = new Error(nice);
-      e.cause = msg;
+      if (!hideCause) e.cause = msg;
       return e;
     }
   }
@@ -538,3 +543,43 @@ export async function query(cfg, { text: line, database }) {
     };
   }, index);
 }
+
+/** A few cheap numbers for the connection's card, read every few seconds. */
+export async function pulse(cfg) {
+  return withRedis(cfg, async (cmd) => {
+    const info = parseInfo(await cmd('INFO'));
+    const conf = pairs(await maybe(cmd('CONFIG', 'GET', 'maxclients')));
+    const sv = info.server || {};
+    const mem = info.memory || {};
+    const st = info.stats || {};
+    const cl = info.clients || {};
+    const rep = info.replication || {};
+    const keys = Object.values(info.keyspace || {}).reduce((n, v) => n + parseKeyspace(v).keys, 0);
+    const hits = Number(st.keyspace_hits || 0);
+    const misses = Number(st.keyspace_misses || 0);
+    const used = Number(mem.used_memory || 0);
+    const limit = Number(mem.maxmemory || 0);
+    // Without a maxmemory, the machine's RAM is the real ceiling.
+    const max = limit || Number(mem.total_system_memory || 0);
+    return {
+      version: `Redis ${sv.redis_version}`,
+      uptimeSec: Number(sv.uptime_in_seconds || 0),
+      role: rep.role || null,
+      counter: Number(st.total_commands_processed || 0),
+      counterUnit: 'ops/s',
+      connections: { used: Number(cl.connected_clients || 0), max: Number(conf?.maxclients || 0) },
+      memory: max ? { label: limit ? 'Memory' : 'Memory of RAM', used, max, usedBytes: used, maxBytes: max } : null,
+      hitRate: hits + misses ? Math.round((hits / (hits + misses)) * 1000) / 10 : null,
+      // Everything lives in memory; there is no "size on disk" worth showing.
+      storageBytes: null,
+      facts: [
+        ['Keys', keys],
+        ['Evicted', Number(st.evicted_keys || 0)],
+        ['Blocked', Number(cl.blocked_clients || 0)],
+      ],
+    };
+  });
+}
+
+/* Shared with the key manager (redisKeys.js). */
+export { withRedis, dbIndex };

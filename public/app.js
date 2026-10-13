@@ -62,12 +62,38 @@ async function api(path, options = {}) {
     // An ended plan is handled there too: the panel shows only the renew page until it is renewed.
     if (res.status === 402 && data.needsPlan) planRequired();
     const err = new Error(data.error || `Request failed (${res.status})`);
+    offerHostKeyReset(path, err.message);
     // Long output — an install log, a journal — travels alongside the message.
     err.detail = data.detail || null;
     err.body = data;
     throw err;
   }
   return data;
+}
+
+/**
+ * A server whose SSH host key no longer matches the one first seen is refused
+ * (it could be someone in the middle). If it was rebuilt on purpose, someone who
+ * can edit may trust the new key — once, after saying so.
+ */
+let hostKeyAsked = null;
+function offerHostKeyReset(path, message) {
+  const id = path.match(/^\/servers\/(\d+)\//)?.[1];
+  if (!id || !/host key has changed/i.test(message) || !canDo('edit') || hostKeyAsked === id) return;
+  hostKeyAsked = id;
+  setTimeout(async () => {
+    const ok = window.confirm('This server\'s SSH host key has changed since the panel first connected.\n\n'
+      + 'That is expected only if you rebuilt or reinstalled the server. Otherwise someone may be intercepting the connection.\n\n'
+      + 'Trust the new key on the next connection?');
+    if (!ok) return;
+    try {
+      await api(`/servers/${id}/host-key/reset`, { method: 'POST' });
+      toast('Host key reset — the next connection trusts the server\'s current key');
+      hostKeyAsked = null;
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }, 0);
 }
 
 let toastTimer;
@@ -260,7 +286,102 @@ function show(view) {
   const navView = view === 'mysql-detail' || view === 'db-detail' ? 'databases' : view === 'app-detail' ? 'apps' : view;
   $$('.nav-item').forEach((b) => b.classList.toggle('active',
     b.dataset.view === navView && (!b.dataset.pftab || pfNavIs(b, pf.tab))));
+  syncRoute();
 }
+
+/*
+ * The address bar follows the page: #/servers/12/files, #/apps/7, #/docs/cron-jobs…
+ * so a refresh, the back button and a bookmark all land where you were.
+ * Every page still opens through its own open*() function; the router only
+ * writes the address down afterwards, and on the way back calls that function.
+ */
+
+let restoringRoute = false;
+let currentDhId = null;
+
+/** The address for whatever is on screen right now. */
+function routeFor() {
+  const view = $('.view:not(.hidden)')?.id?.replace(/^view-/, '');
+  const id = encodeURIComponent;
+  switch (view) {
+    case undefined: return null;
+    case 'server-detail': return currentServerId ? `/servers/${id(currentServerId)}/${currentTab}` : '/servers';
+    case 'app-detail': return detailsAppId ? `/apps/${id(detailsAppId)}` : '/apps';
+    case 'mysql-detail': return currentMysqlId ? `/databases/mysql/${id(currentMysqlId)}` : '/databases';
+    case 'db-detail': return currentEngineId ? `/databases/${id(currentEngineId)}` : '/databases';
+    case 'git-detail': return currentGitId ? `/accounts/git/${id(currentGitId)}` : '/accounts/git';
+    case 'cf-detail': return currentCfId ? `/accounts/cloudflare/${id(currentCfId)}` : '/accounts/cloudflare';
+    case 'dh-detail': return currentDhId ? `/accounts/dockerhub/${id(currentDhId)}` : '/accounts/dockerhub';
+    case 'accounts': return `/accounts/${accountsTab}`;
+    case 'settings': return `/settings/${settingsTab}`;
+    // One organisation or one lead are opened from a list; the address keeps the list.
+    case 'platform': return `/platform/${{ org: 'orgs', lead: 'leads' }[pf.tab] || pf.tab}`;
+    case 'docs': return `/docs/${id(docsState.slug || '')}`.replace(/\/$/, '');
+    default: return `/${view}`;
+  }
+}
+
+/** Write the current page into the address bar — a new history entry unless we are replaying one. */
+function syncRoute() {
+  if (!session.user) return;
+  const path = routeFor();
+  if (!path || location.hash === `#${path}`) return;
+  history[restoringRoute ? 'replaceState' : 'pushState'](null, '', `#${path}`);
+}
+
+const LIST_VIEWS = ['servers', 'connectors', 'apps', 'installs', 'environments', 'databases', 'activity', 'billing'];
+const DIGITS = /^\d+$/;
+
+/** Open the page an address names. Returns false when it names nothing we know. */
+async function openRoute(hash = location.hash) {
+  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  const [a, b, c] = parts;
+  if (!a) return false;
+  const superOnPlatform = session.user?.role === 'super_admin' && !session.user?.orgId;
+
+  restoringRoute = true;
+  try {
+    if (a === 'platform') {
+      if (!superOnPlatform) return false;
+      openPlatform({ org: 'orgs', lead: 'leads' }[b] || b || 'dashboard');
+      return true;
+    }
+    if (a === 'docs') { await openDocs(b); return true; }
+    if (a === 'settings') { openSettings(b); return true; }
+    if (a === 'activity') { show('activity'); setHeading('Activity'); loadActivity(); return true; }
+    // Everything else lives inside an organisation.
+    if (superOnPlatform) return false;
+    if (a === 'billing') { await openBilling(); return true; }
+    if (a === 'servers' && DIGITS.test(b || '')) {
+      if (c) currentTab = c;
+      await openServer(Number(b));
+      if (c) showServerTab(c);
+      return true;
+    }
+    if (a === 'apps' && DIGITS.test(b || '')) { await openAppDetails(Number(b), 'overview'); return true; }
+    if (a === 'databases' && b === 'mysql' && DIGITS.test(c || '')) { await openMysql(Number(c), { reset: true }); return true; }
+    if (a === 'databases' && DIGITS.test(b || '')) { await openEngine(Number(b)); return true; }
+    if (a === 'accounts') {
+      const opener = { git: openGit, cloudflare: openCloudflare, dockerhub: openDockerHub }[b];
+      if (opener && DIGITS.test(c || '')) { await opener(Number(c)); return true; }
+      openAccounts(ACCOUNT_TABS.some((t) => t.key === b) ? b : accountsTab);
+      return true;
+    }
+    if (LIST_VIEWS.includes(a)) {
+      $(`.nav-item.client-nav[data-view="${a}"]`)?.click();
+      return true;
+    }
+    return false;
+  } finally {
+    restoringRoute = false;
+  }
+}
+
+// Back and forward replay the address; a bad or forbidden one just falls back to the start page.
+window.addEventListener('popstate', () => {
+  if (!session.user || !location.hash.startsWith('#/')) return;
+  openRoute().then((ok) => { if (!ok) history.replaceState(null, '', `#${routeFor() || '/'}`); });
+});
 
 $$('.nav-item').forEach((btn) => btn.addEventListener('click', () => {
   const view = btn.dataset.view;
@@ -963,6 +1084,7 @@ $('#form-login').addEventListener('submit', async (e) => {
 
 $('#btn-signout').addEventListener('click', async () => {
   try { await api('/auth/logout', { method: 'POST' }); } catch { /* the cookie is going either way */ }
+  history.replaceState(null, '', location.pathname);
   $$('.view').forEach((v) => v.classList.add('hidden'));
   showLanding(false);
   toast('Signed out');
@@ -1032,6 +1154,7 @@ function openProfile({ mustAddPhone = false } = {}) {
   $('#profile-org').textContent = session.user?.organisation?.name || 'this organisation';
   form.name.value = session.user?.name || '';
   form.email.value = session.user?.email || '';
+  $('#profile-current-wrap').classList.add('hidden');
   form.phone.value = session.user?.phone || '';
   const required = PHONE_ROLES.includes(session.user?.role);
   form.phone.required = required;
@@ -1047,6 +1170,13 @@ function openProfile({ mustAddPhone = false } = {}) {
 }
 
 $('#btn-edit-profile').addEventListener('click', () => openProfile());
+
+// A new sign-in email needs the current password; the field shows up only then.
+$('#form-profile').email.addEventListener('input', (e) => {
+  const changed = e.target.value.trim().toLowerCase() !== String(session.user?.email || '').toLowerCase();
+  $('#profile-current-wrap').classList.toggle('hidden', !changed);
+  e.target.form.current.required = changed;
+});
 
 $('#form-profile').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1146,6 +1276,9 @@ async function pollServerStatuses() {
   if (onDetail) {
     const mine = r.servers.find((s) => String(s.id) === String(currentServerId));
     const el = $('#detail-status');
+    // The dot by the name follows the same answer as the badge, not the value the page was opened with.
+    const dot = $('#detail-name .dot');
+    if (dot && mine) dot.className = `dot ${mine.status}`;
     if (el) {
       el.innerHTML = mine
         ? `<span class="badge ${statusTone(mine.status)}">${esc(mine.status)}</span> ${statusNote(mine)}`
@@ -1238,6 +1371,73 @@ function parseWhen(when) {
   return Number.isNaN(at) ? null : at;
 }
 
+/*
+ * How full a server is, at a glance: green while there is room, amber when it
+ * is time to look, red when something is about to break. Disks fill up for
+ * good, so storage warns earlier than memory or CPU, which come and go.
+ */
+const USAGE_LEVELS = {
+  cpu: { warn: 80, crit: 100 },
+  memory: { warn: 80, crit: 92 },
+  disk: { warn: 75, crit: 90 },
+  conn: { warn: 75, crit: 90 },
+  // A cache hit rate is the other way round: low is the problem.
+  hit: { warn: 95, crit: 85, low: true },
+};
+const USAGE_WORDS = { ok: 'Healthy', warn: 'Warning', err: 'Critical' };
+
+function resourceTone(kind, pctValue) {
+  const l = USAGE_LEVELS[kind];
+  if (l.low) return pctValue < l.crit ? 'err' : pctValue < l.warn ? 'warn' : 'ok';
+  return pctValue >= l.crit ? 'err' : pctValue >= l.warn ? 'warn' : 'ok';
+}
+
+/** "32 / 80 GB": the unit once, on the total. */
+const usedOf = (used, total) => {
+  const t = bytes(total);
+  const unit = t.split(' ')[1] || '';
+  const u = bytes(used);
+  return u.endsWith(` ${unit}`) ? `${u.slice(0, -unit.length - 1)} / ${t}` : `${u} / ${t}`;
+};
+
+/**
+ * One small meter: the name and a coloured percentage, a thin bar, and the
+ * sizes underneath. The longer story — what is free, where the limits are — is
+ * in the tooltip.
+ */
+function usageCell(kind, label, pctValue, sub, about) {
+  if (pctValue === null || pctValue === undefined || Number.isNaN(Number(pctValue))) {
+    return `<div class="usage-cell"><div class="usage-top"><span>${label}</span><b class="muted">—</b></div><div class="meter"></div><div class="usage-sub">&nbsp;</div></div>`;
+  }
+  const p = Math.round(Number(pctValue));
+  const tone = resourceTone(kind, p);
+  const l = USAGE_LEVELS[kind];
+  const limits = l.low ? `Warning below ${l.warn}%, critical below ${l.crit}%.` : `Warning at ${l.warn}%, critical at ${l.crit}%.`;
+  const tip = `${label}: ${p}% — ${USAGE_WORDS[tone]}${about ? `. ${about}` : ''}. ${limits}`;
+  return `
+    <div class="usage-cell" title="${esc(tip)}">
+      <div class="usage-top"><span>${label}</span><b class="tone-${tone}">${tone === 'ok' ? '' : '<i aria-hidden="true">●</i> '}${p}%</b></div>
+      <div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.min(p, 100)}" aria-label="${esc(`${label} ${USAGE_WORDS[tone]}`)}"><span class="${tone}" style="width:${Math.min(Math.max(p, 2), 100)}%"></span></div>
+      <div class="usage-sub">${sub || '&nbsp;'}</div>
+    </div>`;
+}
+
+function serverUsage(sum) {
+  const d = sum.disk;
+  const asOf = sum.collectedAt ? ` (as of ${String(sum.collectedAt).replace('T', ' ').slice(0, 16)})` : '';
+  return `
+    <div class="usage">
+      ${usageCell('disk', 'Disk', sum.diskUsedPct,
+        d ? usedOf(d.usedBytes, d.sizeBytes) : '',
+        d ? `${bytes(d.availableBytes)} free on ${d.mount}${asOf}` : asOf)}
+      ${usageCell('memory', 'Memory', sum.memoryUsedPct,
+        sum.memoryUsedBytes != null && sum.memoryTotalBytes ? usedOf(sum.memoryUsedBytes, sum.memoryTotalBytes) : bytes(sum.memoryTotalBytes),
+        asOf.trim())}
+      ${usageCell('cpu', 'CPU', sum.cpuLoadPct, sum.cpuCores ? `${sum.cpuCores} vCPU` : '',
+        `load over the last minute, across all cores${asOf}`)}
+    </div>`;
+}
+
 function serverCard(s) {
   const sum = s.summary;
   return `
@@ -1254,10 +1454,9 @@ function serverCard(s) {
     ${sum ? `
       <dl class="kv">
         <dt>OS</dt><dd>${val(sum.os)}</dd>
-        <dt>CPU / RAM</dt><dd>${val(sum.cpuCores)} vCPU · ${bytes(sum.memoryTotalBytes)}</dd>
-        <dt>Memory used</dt><dd>${pct(sum.memoryUsedPct)}</dd>
         <dt>Uptime</dt><dd>${val(sum.uptime)}</dd>
-      </dl>` : `<p class="muted small" style="margin:12px 0 0">No system details collected yet.</p>`}
+      </dl>
+      ${serverUsage(sum)}` : `<p class="muted small" style="margin:12px 0 0">No system details collected yet — press <b>Fetch details</b> to see storage, memory and CPU.</p>`}
     <div data-status-error>${s.last_error ? `<div class="msg err" style="margin-top:12px">${esc(s.last_error)}</div>` : ''}</div>
     <div class="card-actions">
       <button class="btn tiny" data-action="open" data-id="${s.id}">View details</button>
@@ -1397,6 +1596,7 @@ const liveTabPanelId = (key) => ({
 function showServerTab(key) {
   const tab = SERVER_TABS.find((t) => t.key === key) || SERVER_TABS[0];
   currentTab = tab.key;
+  syncRoute();
 
   $$('#detail-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab.key));
   $$('#detail-body .tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== tab.key; });
@@ -3061,10 +3261,268 @@ function openServerModal(server = null) {
 
   // The password / key halves follow whichever authentication is selected.
   serverForm.auth_type.dispatchEvent(new Event('change'));
+  // Adding starts with "ready, or blank machine?"; editing goes straight to the form.
+  srvGuided = false;
+  srvView(server ? 'form' : 'choose');
   serverModal.classList.remove('hidden');
 }
 
 $('#btn-add-server').addEventListener('click', () => openServerModal());
+$('#btn-server-guide-back').addEventListener('click', () => srvGoTo(SERVER_GUIDE.length - 2));
+
+/* ---------------------------------------------- add server: the guided path */
+
+/*
+ * "Add server" first asks whether there is a server already. If there is, the
+ * connection form opens straight away. If not, a four-step guide turns an
+ * ordinary PC or laptop into one: install Ubuntu Server, turn on SSH, keep it
+ * running around the clock, then connect — the same form, as the last step.
+ */
+
+/** A command with a Copy button. */
+const guideCmd = (text, note = '') => `
+  <div class="cmd">
+    <pre><code>${esc(text)}</code></pre>
+    <button type="button" class="btn tiny cmd-copy" data-copy-cmd>Copy</button>
+  </div>${note ? `<p class="muted small cmd-note">${note}</p>` : ''}`;
+
+const guideTip = (kind, html) => `<div class="guide-tip ${kind}">${html}</div>`;
+
+const SERVER_GUIDE = [
+  {
+    key: 'install',
+    title: 'Install Ubuntu',
+    body: () => `
+      <h3>Install Ubuntu Server on the machine</h3>
+      <p class="muted">The machine becomes a dedicated server: no desktop, just what the panel needs. About 20 minutes.</p>
+
+      <div class="guide-grid">
+        <div class="guide-box">
+          <b>You need</b>
+          <ul>
+            <li>A 64-bit PC, laptop or mini-PC — <b>2 GB RAM</b> minimum, 4 GB+ better</li>
+            <li><b>25 GB</b> of disk or more (an SSD makes a big difference)</li>
+            <li>A USB stick of <b>4 GB+</b> (it will be wiped)</li>
+            <li>A network cable to your router — far steadier than Wi-Fi</li>
+            <li>Another computer to prepare the USB stick</li>
+          </ul>
+        </div>
+        <div class="guide-box">
+          <b>Good to know</b>
+          <ul>
+            <li>Installing <b>erases the whole disk</b> you choose — copy off anything you want to keep first.</li>
+            <li>Use the <b>LTS</b> version: 5 years of security updates.</li>
+            <li>A screen and keyboard are only needed during setup.</li>
+          </ul>
+        </div>
+      </div>
+
+      <ol class="guide-steps">
+        <li>
+          <b>Download Ubuntu Server LTS</b>
+          <p>From <a href="https://ubuntu.com/download/server" target="_blank" rel="noopener">ubuntu.com/download/server</a> — the "Server" edition, not "Desktop".</p>
+        </li>
+        <li>
+          <b>Write it to the USB stick</b>
+          <p>With <a href="https://etcher.balena.io" target="_blank" rel="noopener">balenaEtcher</a> (Windows, Mac, Linux) or <a href="https://rufus.ie" target="_blank" rel="noopener">Rufus</a> (Windows): pick the downloaded <code>.iso</code>, pick the stick, Flash.</p>
+        </li>
+        <li>
+          <b>Start the machine from the USB stick</b>
+          <p>Plug it in, power on and tap the boot-menu key straight away:
+            <span class="keys"><kbd>F12</kbd> Dell, Lenovo, Acer</span>
+            <span class="keys"><kbd>F9</kbd> / <kbd>Esc</kbd> HP</span>
+            <span class="keys"><kbd>F8</kbd> / <kbd>Esc</kbd> ASUS</span>
+            <span class="keys"><kbd>F11</kbd> MSI</span>
+            — then choose the USB stick.</p>
+          ${guideTip('info', 'Does not start from USB? In the BIOS (usually <kbd>F2</kbd> or <kbd>Del</kbd> at power-on) turn off <b>Secure Boot</b> and try again.')}
+        </li>
+        <li>
+          <b>Go through the installer</b>
+          <ul>
+            <li><b>Network:</b> leave the cable plugged in — it gets an address by itself. Note it down (e.g. <code>192.168.1.50</code>).</li>
+            <li><b>Storage:</b> "Use an entire disk".</li>
+            <li><b>Profile:</b> your name, a server name (e.g. <code>home-server</code>), a <b>username</b> and <b>password</b> — you will sign in with these from the panel.</li>
+            <li><b>SSH:</b> tick <b>"Install OpenSSH server"</b>. This is the one that matters most.</li>
+            <li>Skip the extra "featured snaps", let it finish, then <b>Reboot now</b> and pull out the USB stick.</li>
+          </ul>
+        </li>
+      </ol>
+      ${guideTip('ok', 'When it restarts and shows a <code>login:</code> prompt, Ubuntu Server is installed. Sign in with the username and password you chose.')}`,
+  },
+  {
+    key: 'ssh',
+    title: 'Turn on SSH',
+    body: () => `
+      <h3>Turn on SSH and find the server's address</h3>
+      <p class="muted">SSH is how the panel signs in to the server. Type these at the server's own keyboard (or anywhere you can already reach it).</p>
+
+      <ol class="guide-steps">
+        <li>
+          <b>Make sure the SSH server is installed and running</b>
+          <p>Skip this if you ticked "Install OpenSSH server" — running it again does no harm.</p>
+          ${guideCmd('sudo apt update && sudo apt install -y openssh-server\nsudo systemctl enable --now ssh')}
+          ${guideCmd('systemctl status ssh --no-pager', 'Look for <b>active (running)</b> in green.')}
+        </li>
+        <li>
+          <b>Let SSH through the firewall</b>
+          ${guideCmd('sudo ufw allow OpenSSH\nsudo ufw --force enable')}
+        </li>
+        <li>
+          <b>Find the server's IP address</b>
+          ${guideCmd('hostname -I', 'The first address is the one you want — something like <code>192.168.1.50</code>.')}
+        </li>
+        <li>
+          <b>Keep that address from changing</b>
+          <p>Home routers hand out addresses that can change after a restart. In your router's settings (usually <code>192.168.1.1</code> or <code>192.168.0.1</code>), find <b>DHCP reservation</b> / <b>Address reservation</b> / <b>Static lease</b> and reserve the current address for this machine.</p>
+        </li>
+        <li>
+          <b>Try it from another computer</b>
+          ${guideCmd('ssh your-username@192.168.1.50', 'Use your username and address. Answer <b>yes</b> the first time, then type the password. If you get a prompt on the server, SSH works.')}
+        </li>
+      </ol>
+      ${guideTip('info', 'The panel has to be able to reach this address. If the panel runs somewhere else (in the cloud, at another site), add a <b>Connector</b> on a PC in this network first — see <b>Connectors</b> in the menu — and the panel reaches the server through it.')}`,
+  },
+  {
+    key: 'always-on',
+    title: 'Keep it running',
+    body: () => `
+      <h3>Make it a 24/7 server</h3>
+      <p class="muted">A PC or laptop is set up to save power — sleep, suspend when the lid closes, stay off after a power cut. A server must do none of that. Run these on the server (over SSH is fine now).</p>
+
+      <div class="guide-section">
+        <h4>Never sleep, suspend or hibernate</h4>
+        ${guideCmd('sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target', 'Even if something asks it to sleep, it won\'t.')}
+      </div>
+
+      <div class="guide-section">
+        <h4>Laptop: keep running with the lid closed</h4>
+        ${guideCmd(`sudo mkdir -p /etc/systemd/logind.conf.d
+printf '[Login]\\nHandleLidSwitch=ignore\\nHandleLidSwitchExternalPower=ignore\\nHandleLidSwitchDocked=ignore\\nIdleAction=ignore\\n' | sudo tee /etc/systemd/logind.conf.d/server.conf
+sudo systemctl restart systemd-logind`, 'Closing the lid now does nothing — the laptop keeps serving. Not a laptop? Harmless to run anyway.')}
+      </div>
+
+      <div class="guide-section">
+        <h4>Turn the screen off, not the computer</h4>
+        ${guideCmd(`grep -q consoleblank /etc/default/grub || sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&consoleblank=60 /' /etc/default/grub
+sudo update-grub`, 'After a restart the screen goes dark after 60 seconds of no typing. The machine itself keeps running; press a key to wake the screen.')}
+      </div>
+
+      <div class="guide-section">
+        <h4>Switch back on by itself after a power cut</h4>
+        <p>In the BIOS (<kbd>F2</kbd> or <kbd>Del</kbd> at power-on) look under <i>Power</i> or <i>Advanced</i> for <b>Restore on AC power loss</b>, <b>AC power recovery</b> or <b>After power failure</b>, and set it to <b>Power On</b>.</p>
+        ${guideTip('info', '<b>Laptop?</b> Keep it plugged in — the battery works as a built-in UPS. If the BIOS or the maker\'s tool offers a <b>battery charge limit</b> (60–80%), turn it on: a battery kept at 100% all day wears out and can swell.')}
+      </div>
+
+      <div class="guide-section">
+        <h4>Install security updates automatically</h4>
+        ${guideCmd('sudo apt install -y unattended-upgrades\nsudo dpkg-reconfigure -f noninteractive unattended-upgrades')}
+      </div>
+
+      <div class="guide-section">
+        <h4>Set the right time zone</h4>
+        ${guideCmd('sudo timedatectl set-timezone Asia/Kolkata\ntimedatectl', 'Use your own zone — <code>timedatectl list-timezones</code> lists them. Logs and scheduled jobs use this time.')}
+      </div>
+
+      <div class="guide-section">
+        <h4>On Wi-Fi? Stop it dozing off</h4>
+        ${guideCmd('iw dev', 'Shows the Wi-Fi name, e.g. <code>wlp2s0</code>. Then:')}
+        ${guideCmd('sudo iw dev wlp2s0 set power_save off', 'A cable is still the better choice — Wi-Fi power saving is the most common reason a home server "disappears".')}
+      </div>
+
+      <div class="guide-section">
+        <h4>Last check: restart it</h4>
+        ${guideCmd('sudo reboot', 'Close the lid if it\'s a laptop. Wait a minute, then SSH in again from another computer. If that works, it will survive a restart on its own.')}
+      </div>
+
+      ${guideTip('ok', 'Place it somewhere with air around it — on a hard surface, not a bed or a closed cupboard. Heat is what kills old laptops running all day.')}`,
+  },
+  { key: 'connect', title: 'Connect', body: null },
+];
+
+let srvGuideStep = 0;
+let srvGuided = false;
+
+/** Which screen of the add-server dialog shows: the choice, a guide step, or the form. */
+function srvView(view) {
+  $('#srv-choose').hidden = view !== 'choose';
+  $('#srv-guide').hidden = view !== 'guide';
+  $('#srv-stepper').hidden = !srvGuided || view === 'choose';
+  serverForm.hidden = view !== 'form';
+  $('#server-modal-box').classList.toggle('modal-wide', view === 'guide' || view === 'choose');
+  $('#server-modal-hint').hidden = view === 'guide';
+  $('#btn-server-guide-back')?.classList.toggle('hidden', !(srvGuided && view === 'form'));
+}
+
+function srvRenderStepper() {
+  $('#srv-stepper').innerHTML = SERVER_GUIDE.map((s, i) => `
+    <li class="${i < srvGuideStep ? 'done' : i === srvGuideStep ? 'current' : ''}">
+      <button type="button" data-srv-step="${i}" ${i === srvGuideStep ? 'aria-current="step"' : ''}>
+        <span class="step-dot">${i < srvGuideStep ? '✓' : i + 1}</span>
+        <span class="step-label">${esc(s.title)}</span>
+      </button>
+    </li>`).join('');
+}
+
+function srvGoTo(i) {
+  srvGuideStep = Math.max(0, Math.min(SERVER_GUIDE.length - 1, i));
+  srvRenderStepper();
+  const step = SERVER_GUIDE[srvGuideStep];
+  if (!step.body) {
+    // The last step is the connection form itself.
+    srvView('form');
+    $('#server-modal-title').textContent = 'Connect your new server';
+    serverForm.name.focus();
+    return;
+  }
+  $('#server-modal-title').textContent = 'Turn a machine into a server';
+  $('#srv-guide-body').innerHTML = step.body();
+  $('#srv-guide-pos').textContent = `Step ${srvGuideStep + 1} of ${SERVER_GUIDE.length}`;
+  $('#srv-guide-back').textContent = srvGuideStep === 0 ? '← Options' : '← Back';
+  $('#srv-guide-next').textContent = srvGuideStep === SERVER_GUIDE.length - 2 ? 'Done — connect it →' : 'Next →';
+  srvView('guide');
+  $('#srv-guide-body').scrollTop = 0;
+}
+
+$('#srv-choose').addEventListener('click', (e) => {
+  const opt = e.target.closest('[data-srv-path]');
+  if (!opt) return;
+  if (opt.dataset.srvPath === 'ready') {
+    srvGuided = false;
+    $('#server-modal-title').textContent = 'Add server';
+    srvView('form');
+    serverForm.name.focus();
+  } else {
+    srvGuided = true;
+    srvGoTo(0);
+  }
+});
+
+$('#srv-stepper').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-srv-step]');
+  if (b) srvGoTo(Number(b.dataset.srvStep));
+});
+$('#srv-guide-next').addEventListener('click', () => srvGoTo(srvGuideStep + 1));
+$('#srv-guide-back').addEventListener('click', () => {
+  if (srvGuideStep === 0) {
+    srvGuided = false;
+    $('#server-modal-title').textContent = 'Add server';
+    return srvView('choose');
+  }
+  srvGoTo(srvGuideStep - 1);
+});
+
+// Copy a command exactly as shown.
+$('#srv-guide').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-copy-cmd]');
+  if (!btn) return;
+  try {
+    await navigator.clipboard.writeText(btn.parentElement.querySelector('code').textContent);
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  } catch {
+    toast('Could not copy — select the command and copy it', 'err');
+  }
+});
 
 /** Edit from the server's own page, where the row is already loaded. */
 $('#btn-detail-edit').addEventListener('click', () => {
@@ -3359,12 +3817,14 @@ let chosenProvider = null;
 
 function gitStep(step) {
   $('#git-step-provider').classList.toggle('hidden', step !== 'provider');
+  $('#git-step-manual').classList.toggle('hidden', step !== 'manual');
   $('#git-step-setup').classList.toggle('hidden', step !== 'setup');
   $('#git-step-waiting').classList.toggle('hidden', step !== 'waiting');
   $('#git-modal-close-row').classList.toggle('hidden', step !== 'provider');
 }
 
 async function openGitWizard() {
+  setGitMode(gitMode);
   gitStep('provider');
   $('#git-setup-msg').classList.add('hidden');
   gitModal.classList.remove('hidden');
@@ -3374,9 +3834,179 @@ async function openGitWizard() {
 }
 
 $('#btn-add-git-account').addEventListener('click', openGitWizard);
-$('#link-manual-token').addEventListener('click', () => {
-  gitModal.classList.add('hidden');
-  openCredModal('git');
+/*
+ * Two ways in: sign in on the provider's site (OAuth), or paste an access
+ * token by hand — for self-hosted servers, for providers whose browser sign-in
+ * is not set up, and for people who would rather choose the token's scopes.
+ */
+let gitMode = 'oauth';
+
+function setGitMode(mode) {
+  gitMode = mode === 'token' ? 'token' : 'oauth';
+  $$('[data-git-mode]').forEach((b) => {
+    const on = b.dataset.gitMode === gitMode;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  $('#git-mode-intro').textContent = gitMode === 'token'
+    ? 'Pick the provider, create an access token there and paste it here. Works for self-hosted GitHub Enterprise and GitLab too.'
+    : 'Where does your code live? You will sign in on their site and choose your account there.';
+  $$('#git-step-provider .provider small').forEach((s) => { s.textContent = s.dataset[gitMode]; });
+}
+
+$$('[data-git-mode]').forEach((b) => b.addEventListener('click', () => setGitMode(b.dataset.gitMode)));
+
+/** What each provider's token needs, and where it is made. */
+const GIT_TOKEN_GUIDE = {
+  github: {
+    cloud: 'github.com', self: 'GitHub Enterprise Server', selfPlaceholder: 'https://github.example.com',
+    api: (web) => (web ? `${web}/api/v3` : 'https://api.github.com'),
+    tokenUrl: (web) => `${web || 'https://github.com'}/settings/tokens/new?description=AJ%20Pilot&scopes=repo,read:org,read:user,admin:repo_hook`,
+    scopes: [['repo'], ['read:org'], ['read:user'], ['admin:repo_hook', 'lets auto deploy add webhooks']],
+    scopeLabel: 'Classic token with these scopes (the link ticks them for you)',
+    placeholder: 'ghp_… or github_pat_…',
+  },
+  gitlab: {
+    cloud: 'gitlab.com', self: 'Self-managed GitLab', selfPlaceholder: 'https://gitlab.example.com',
+    api: (web) => `${web || 'https://gitlab.com'}/api/v4`,
+    tokenUrl: (web) => `${web || 'https://gitlab.com'}/-/user_settings/personal_access_tokens?name=AJ%20Pilot&scopes=read_api,read_repository,read_user`,
+    scopes: [['read_api'], ['read_repository'], ['read_user'], ['api', 'lets auto deploy add webhooks']],
+    scopeLabel: 'Personal access token with these scopes (the link ticks the required ones)',
+    placeholder: 'glpat-…',
+  },
+  bitbucket: {
+    api: () => 'https://api.bitbucket.org/2.0',
+    tokenUrl: (web, type) => (type === 'access' ? 'https://bitbucket.org/account/workspaces/' : 'https://id.atlassian.com/manage-profile/security/api-tokens'),
+    scopes: (type) => (type === 'access'
+      ? [['Repositories: Read'], ['Pull requests: Read'], ['Webhooks: Read and write', 'for auto deploy']]
+      : [['read:user:bitbucket'], ['read:workspace:bitbucket'], ['read:repository:bitbucket'], ['read:pullrequest:bitbucket'], ['write:webhook:bitbucket', 'for auto deploy']]),
+    scopeLabel: (type) => (type === 'access'
+      ? 'In the workspace, project or repository: Settings → Access tokens, with'
+      : 'Choose “Create API token with scopes” → Bitbucket, and tick'),
+    placeholder: (type) => (type === 'access' ? 'ATCTT…' : 'ATATT…'),
+  },
+};
+
+const gm = $('#git-step-manual');
+let gmKind = 'github';
+
+/** The server address typed in for a self-hosted install, or '' for the public service. */
+function gmServerUrl() {
+  if (gmKind === 'bitbucket' || gm.hosting.value !== 'self') return '';
+  return gm.serverUrl.value.trim().replace(/\/+$/, '');
+}
+
+function gmRefresh() {
+  const g = GIT_TOKEN_GUIDE[gmKind];
+  const bitbucket = gmKind === 'bitbucket';
+  const bbType = gm.bbType.value;
+  const self = !bitbucket && gm.hosting.value === 'self';
+
+  $('#gm-host-group').classList.toggle('hidden', bitbucket);
+  $('#gm-bb-group').classList.toggle('hidden', !bitbucket);
+  $('#gm-url-field').classList.toggle('hidden', !self);
+  gm.serverUrl.required = self;
+  $('#gm-email-field').classList.toggle('hidden', !bitbucket || bbType !== 'api');
+  gm.authUser.required = bitbucket && bbType === 'api';
+  if (!bitbucket) {
+    $('#gm-cloud-label').textContent = g.cloud;
+    $('#gm-self-label').textContent = g.self;
+    gm.serverUrl.placeholder = g.selfPlaceholder;
+  }
+
+  const scopes = typeof g.scopes === 'function' ? g.scopes(bbType) : g.scopes;
+  $('#gm-scope-label').textContent = typeof g.scopeLabel === 'function' ? g.scopeLabel(bbType) : g.scopeLabel;
+  $('#gm-scopes').innerHTML = scopes.map(([s, note]) =>
+    `<span class="chip"${note ? ` title="Optional — ${esc(note)}"` : ''}><code>${esc(s)}</code>${note ? ' <span class="muted small">optional</span>' : ''}</span>`).join('');
+  gm.secret.placeholder = typeof g.placeholder === 'function' ? g.placeholder(bbType) : g.placeholder;
+  // A self-hosted server needs its address before the token page can be opened there.
+  $('#gm-open-token').disabled = self && !/^https:\/\/[^/\s]+/.test(gmServerUrl());
+  $('#gm-result').classList.add('hidden');
+}
+
+function openGitManual(kind) {
+  gmKind = GIT_TOKEN_GUIDE[kind] ? kind : 'github';
+  gm.reset();
+  $('#gm-msg').classList.add('hidden');
+  $('#gm-title').textContent = `Connect ${gitLabel(gmKind)} with a token`;
+  $('#gm-icon').innerHTML = $(`#git-step-provider [data-pick="${gmKind}"] svg`)?.outerHTML || '';
+  gm.name.placeholder = `my-${gmKind}`;
+  gmRefresh();
+  gitStep('manual');
+  gm.name.focus();
+}
+
+gm.addEventListener('change', gmRefresh);
+gm.serverUrl.addEventListener('input', gmRefresh);
+$('#gm-change').addEventListener('click', () => gitStep('provider'));
+$('#gm-back').addEventListener('click', () => gitStep('provider'));
+$('#gm-open-token').addEventListener('click', () => {
+  window.open(GIT_TOKEN_GUIDE[gmKind].tokenUrl(gmServerUrl(), gm.bbType.value), '_blank', 'noopener');
+});
+
+/** The body the credentials API takes for a git account. */
+function gmBody() {
+  const web = gmServerUrl();
+  return {
+    provider: 'git',
+    kind: gmKind,
+    name: gm.name.value.trim(),
+    secret: gm.secret.value.trim(),
+    // Only a self-hosted server sends its own addresses; otherwise the provider's defaults apply.
+    ...(web ? { webUrl: web, apiUrl: GIT_TOKEN_GUIDE[gmKind].api(web) } : {}),
+    ...(gmKind === 'bitbucket' && gm.bbType.value === 'api' ? { authUser: gm.authUser.value.trim() } : {}),
+  };
+}
+
+/** Check the token with the provider and show who it belongs to. Returns the account, or null. */
+async function gmAuthenticate(btn) {
+  if (!gm.reportValidity()) return null;
+  if (gm.hosting.value === 'self' && gmKind !== 'bitbucket' && !/^https:\/\/[^/\s]+/.test(gmServerUrl())) {
+    formMsg($('#gm-msg'), 'The server address must start with https://', 'err');
+    return null;
+  }
+  $('#gm-msg').classList.add('hidden');
+  busy(btn, true, 'Checking…');
+  try {
+    const { account: a } = await api('/credentials/test-git', { method: 'POST', body: gmBody() });
+    const detail = a.scopes?.length ? ` · scopes: ${a.scopes.map(esc).join(', ')}` : a.tokenStyle ? ` · ${esc(a.tokenStyle)}` : '';
+    $('#gm-result').innerHTML = `<div class="gm-account">
+        ${a.avatarUrl ? `<img src="${esc(a.avatarUrl)}" alt="" width="36" height="36">` : ''}
+        <div><b>${esc(a.login)}</b>${a.name ? ` <span class="muted">· ${esc(a.name)}</span>` : ''}
+          <div class="muted small">${esc(a.accountType || '')}${detail}</div></div>
+        <span class="badge ok" style="margin-left:auto">valid</span>
+      </div>`;
+    $('#gm-result').classList.remove('hidden');
+    return a;
+  } catch (err) {
+    $('#gm-result').classList.add('hidden');
+    formMsg($('#gm-msg'), err.message, 'err');
+    return null;
+  } finally {
+    busy(btn, false);
+  }
+}
+
+$('#gm-test').addEventListener('click', (e) => gmAuthenticate(e.currentTarget));
+
+// Connect checks the token first, so a wrong one is never saved.
+gm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('#gm-save');
+  const account = await gmAuthenticate(btn);
+  if (!account) return;
+  busy(btn, true, 'Connecting…');
+  try {
+    const body = gmBody();
+    if (!body.name) body.name = `${account.login}@${gmKind}`;
+    const created = await api('/credentials', { method: 'POST', body });
+    gitModal.classList.add('hidden');
+    toast(`Connected ${gitLabel(gmKind)} as ${account.login}`);
+    openGit(created.id);
+  } catch (err) {
+    formMsg($('#gm-msg'), err.message, 'err');
+  }
+  busy(btn, false);
 });
 
 /** Choosing a provider goes straight to sign-in, or to setup the first time. */
@@ -3384,6 +4014,7 @@ $('#git-step-provider').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-pick]');
   if (!btn) return;
   const kind = btn.dataset.pick;
+  if (gitMode === 'token') return openGitManual(kind);
   // Ask again: what the wizard read when it opened may be out of date (keys added to or removed from .env since).
   try { oauthInfo = await api('/git/oauth/providers'); } catch { /* go with what we have */ }
   chosenProvider = oauthInfo.providers.find((p) => p.kind === kind) || { kind, label: gitLabel(kind) };
@@ -3479,7 +4110,7 @@ async function loadGitList() {
   try {
     const list = await api('/credentials?provider=git');
     if (!list.length) {
-      box.innerHTML = '<div class="empty">No git accounts yet. Click <b>+ Add git account</b>, pick GitHub, GitLab or Bitbucket, and sign in there.</div>';
+      box.innerHTML = '<div class="empty">No git accounts yet. Click <b>+ Add git account</b>, pick GitHub, GitLab or Bitbucket, and sign in there or paste an access token.</div>';
       return;
     }
     box.innerHTML = list.map((c) => {
@@ -3987,14 +4618,50 @@ const DB_ENGINES = {
 const DB_PROVIDERS = Object.keys(DB_ENGINES);
 let dbFilter = 'all';
 
+/*
+ * Each engine's mark: a small tile in its own colour, so a list of
+ * connections reads at a glance. Drawn inline — no images to load.
+ */
+const DB_LOGOS = {
+  // A database cylinder with a wave across it.
+  mysql: {
+    color: '#00758f',
+    svg: '<ellipse cx="12" cy="5.5" rx="7" ry="2.6"/><path d="M5 5.5v13c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-13"/><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/><path d="M8.5 9.6c1.2-.9 2.4.9 3.6 0s2.4.9 3.4 0" stroke="#f29111"/>',
+  },
+  // A cylinder with a trunk-like curl — the elephant, simply.
+  postgres: {
+    color: '#336791',
+    svg: '<ellipse cx="11" cy="5.5" rx="6.5" ry="2.5"/><path d="M4.5 5.5v12.5c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5V5.5"/><path d="M17.5 9c2 0 2.6 1.6 2.6 3.2 0 2-1 3.3-2.6 3.3"/><circle cx="8.6" cy="11" r=".9" fill="currentColor" stroke="none"/>',
+  },
+  // The leaf.
+  mongodb: {
+    color: '#47a248',
+    svg: '<path d="M12 2.5c3.6 4 5.2 7.4 5.2 10.4 0 3.6-2.4 6-5.2 7-2.8-1-5.2-3.4-5.2-7 0-3 1.6-6.4 5.2-10.4Z"/><path d="M12 6v15.5"/>',
+  },
+  // Three stacked layers.
+  redis: {
+    color: '#dc382d',
+    svg: '<path d="M12 4 20.5 7.6 12 11.2 3.5 7.6Z"/><path d="M3.5 12 12 15.6 20.5 12"/><path d="M3.5 16.4 12 20 20.5 16.4"/>',
+  },
+};
+
+/** The engine's tile: `size` in px. */
+function dbLogo(provider, size = 40) {
+  const l = DB_LOGOS[provider];
+  if (!l) return `<span class="db-logo" style="--logo:var(--muted);width:${size}px;height:${size}px">${esc(DB_ENGINES[provider]?.icon || '🗄️')}</span>`;
+  const glyph = Math.round(size * 0.58);
+  return `<span class="db-logo" style="--logo:${l.color};width:${size}px;height:${size}px" aria-hidden="true">`
+    + `<svg viewBox="0 0 24 24" width="${glyph}" height="${glyph}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${l.svg}</svg></span>`;
+}
+
 async function loadMysqlList() {
   const box = $('#mysql-list');
   box.innerHTML = '<div class="empty">Loading…</div>';
   try {
     const all = await api(`/credentials?provider=${DB_PROVIDERS.join(',')}`);
     const counts = Object.fromEntries(DB_PROVIDERS.map((p) => [p, all.filter((c) => c.provider === p).length]));
-    $('#db-engine-filter').innerHTML = [['all', 'All', all.length], ...DB_PROVIDERS.map((p) => [p, `${DB_ENGINES[p].icon} ${DB_ENGINES[p].label}`, counts[p]])]
-      .map(([key, text, n]) => `<button class="btn tiny ${dbFilter === key ? 'primary' : ''}" data-db-filter="${key}">${esc(text)} <span class="muted">${n}</span></button>`).join('');
+    $('#db-engine-filter').innerHTML = [['all', 'All', all.length], ...DB_PROVIDERS.map((p) => [p, DB_ENGINES[p].label, counts[p]])]
+      .map(([key, text, n]) => `<button class="btn tiny db-filter-btn ${dbFilter === key ? 'primary' : ''}" data-db-filter="${key}">${key === 'all' ? '' : dbLogo(key, 18)}${esc(text)} <span class="muted">${n}</span></button>`).join('');
 
     const list = dbFilter === 'all' ? all : all.filter((c) => c.provider === dbFilter);
     if (!list.length) {
@@ -4006,18 +4673,20 @@ async function loadMysqlList() {
       return `
       <div class="card">
         <div class="card-head">
-          <div>
-            <h3>${eng.icon} ${esc(c.name)}</h3>
-            <div class="muted small">${eng.label} · ${c.username ? `${esc(c.username)}@` : ''}${esc(c.extra.host)}:${esc(c.extra.port)}${c.extra.database ? ` · ${esc(c.extra.database)}` : ''}</div>
+          <div class="db-title">
+            ${dbLogo(c.provider)}
+            <div class="db-title-text">
+              <h3>${esc(c.name)}</h3>
+              <div class="db-engine-name" style="--logo:${DB_LOGOS[c.provider]?.color || 'var(--muted)'}">${esc(eng.label)}</div>
+              <div class="muted small db-host">${c.username ? `${esc(c.username)}@` : ''}${esc(c.extra.host)}:${esc(c.extra.port)}${c.extra.database ? ` · ${esc(c.extra.database)}` : ''}</div>
+            </div>
           </div>
-          <span class="badge ${c.status === 'valid' ? 'ok' : c.status === 'invalid' ? 'err' : ''}">${esc(c.status)}</span>
+          <span class="badge" data-pulse-badge>checking…</span>
         </div>
-        <dl class="kv">
-          <dt>Connection</dt><dd>${c.server ? `tunnelled via <b>${esc(c.server.name)}</b> <span class="muted small">(${esc(c.server.host)})</span>` : 'direct'}${c.extra.tls ? ' · TLS' : ''}</dd>
-          <dt>Password</dt><dd>${c.secretHint ? `<code>${esc(c.secretHint)}</code>` : '<span class="muted">none</span>'}</dd>
-          <dt>Last checked</dt><dd>${val(c.verified_at)}</dd>
-        </dl>
-        ${c.last_error ? `<div class="msg err" style="margin-top:10px">${esc(c.last_error)}</div>` : ''}
+        <div class="muted small db-conn-line">${c.server ? `via <b>${esc(c.server.name)}</b>` : 'direct'}${c.extra.tls ? ' · TLS' : ''} · password ${c.secretHint ? `<code>${esc(c.secretHint)}</code>` : 'none'}</div>
+        <div class="db-pulse" data-pulse="${c.id}" data-provider="${c.provider}">
+          <div class="db-pulse-line muted small"><span class="spinner"></span> Reading live statistics…</div>
+        </div>
         <div class="card-actions">
           <button class="btn tiny" data-my-action="open" data-id="${c.id}" data-provider="${c.provider}">Open</button>
           <button class="btn tiny" data-my-action="verify" data-id="${c.id}">Test</button>
@@ -4026,10 +4695,102 @@ async function loadMysqlList() {
         </div>
       </div>`;
     }).join('');
+    // Numbers straight away, then every few seconds while the page is open.
+    pollDbPulse();
   } catch (err) {
     box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
   }
 }
+
+/* ---------------------------------------------- database cards: live numbers */
+
+/*
+ * Every database card carries its engine's own vital signs — connections,
+ * memory, storage, throughput — read by the panel every five seconds and
+ * patched into the card in place, so nothing jumps while you read it.
+ */
+const DB_PULSE_MS = 5000;
+let dbPulseBusy = false;
+
+/** "3d 4h", "5h 12m", "42m" — enough to tell a fresh restart from a long run. */
+function shortUptime(sec) {
+  const s = Number(sec) || 0;
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
+const fmtNum = (n) => (n === null || n === undefined || n === '' ? '—'
+  : typeof n === 'number' ? n.toLocaleString(undefined, { maximumFractionDigits: 1 }) : esc(n));
+
+function dbPulseHtml(p) {
+  if (!p.ok) {
+    return `<div class="db-pulse-line"><span class="dot offline"></span> <b>Unreachable</b> <span class="muted small">· ${fmtNum(p.latencyMs)}ms</span></div>
+      <div class="msg err small db-pulse-err">${esc(p.error)}</div>`;
+  }
+  const cells = [];
+  const c = p.connections || {};
+  cells.push(c.max
+    ? usageCell('conn', 'Connections', (c.used / c.max) * 100, `${fmtNum(c.used)} / ${fmtNum(c.max)}`, 'open client connections against the configured limit')
+    : `<div class="usage-cell"><div class="usage-top"><span>Connections</span><b>${fmtNum(c.used)}</b></div><div class="meter"></div><div class="usage-sub">no limit reported</div></div>`);
+  if (p.memory) {
+    cells.push(usageCell('memory', p.memory.label, (p.memory.used / p.memory.max) * 100,
+      p.memory.usedBytes != null ? usedOf(p.memory.usedBytes, p.memory.maxBytes) : '', `${p.memory.label} in use`));
+  } else if (p.hitRate !== null && p.hitRate !== undefined) {
+    cells.push(usageCell('hit', 'Cache hit', p.hitRate, 'from memory, not disk', 'share of reads served from memory — higher is better'));
+  }
+  if (p.hostDisk) {
+    const d = p.hostDisk;
+    cells.push(usageCell('disk', 'Host disk', d.usedPct, usedOf(d.usedBytes, d.sizeBytes),
+      `${bytes(d.availableBytes)} free on ${d.mount} of the server it runs on (as of its last “Fetch details”)`));
+  } else if (p.storageBytes !== null && p.storageBytes !== undefined) {
+    cells.push(`<div class="usage-cell" title="Data and indexes on disk"><div class="usage-top"><span>Data</span><b>${bytes(p.storageBytes)}</b></div><div class="meter"></div><div class="usage-sub">on disk</div></div>`);
+  }
+
+  const facts = [
+    p.rate !== null && p.rate !== undefined ? `<b>${fmtNum(p.rate)}</b> ${esc(p.counterUnit)}` : `<span class="muted">${esc(p.counterUnit)} after next read</span>`,
+    p.hostDisk && p.storageBytes != null ? `Data <b>${bytes(p.storageBytes)}</b>` : '',
+    p.memory && p.hitRate != null ? `Hit rate <b class="tone-${resourceTone('hit', p.hitRate)}">${fmtNum(p.hitRate)}%</b>` : '',
+    ...(p.facts || []).map(([label, value]) => `${esc(label)} <b>${fmtNum(value)}</b>`),
+  ].filter(Boolean);
+
+  return `
+    <div class="db-pulse-line">
+      <span class="dot online"></span> <b>${esc(p.version)}</b>
+      <span class="muted small">· up ${shortUptime(p.uptimeSec)}${p.role ? ` · ${esc(p.role)}` : ''} · ${fmtNum(p.latencyMs)}ms</span>
+    </div>
+    <div class="usage usage-db">${cells.join('')}</div>
+    <div class="db-facts">${facts.map((f) => `<span>${f}</span>`).join('')}</div>`;
+}
+
+async function pollDbPulse() {
+  const onList = !$('#view-databases').classList.contains('hidden') && $('#mysql-list [data-pulse]');
+  if (!onList || dbPulseBusy) return;
+  dbPulseBusy = true;
+  try {
+    const r = await api('/credentials/pulse');
+    for (const p of r.connections) {
+      const box = $(`#mysql-list [data-pulse="${p.id}"]`);
+      if (!box) continue;
+      box.innerHTML = dbPulseHtml(p);
+      const badge = $('[data-pulse-badge]', box.closest('.card'));
+      if (badge) {
+        badge.className = `badge ${p.ok ? 'ok' : 'err'}`;
+        badge.textContent = p.ok ? 'online' : 'offline';
+      }
+    }
+    const head = $('#db-list-updated');
+    if (head) head.innerHTML = `Last updated <b>${esc(clockTime(r.at))}</b> · checking every ${r.everySeconds}s`;
+  } catch {
+    const head = $('#db-list-updated');
+    if (head) head.innerHTML = '<span class="badge warn">not updating</span> the panel could not be reached';
+  } finally {
+    dbPulseBusy = false;
+  }
+}
+
+setInterval(pollDbPulse, DB_PULSE_MS);
 
 $('#db-engine-filter').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-db-filter]');
@@ -4115,7 +4876,7 @@ async function openMysql(id, { reset = false } = {}) {
 
   try {
     const cred = await api(`/credentials/${id}`);
-    $('#mysql-name').textContent = cred.name;
+    $('#mysql-name').innerHTML = `<span class="db-title">${dbLogo('mysql', 34)}<span>${esc(cred.name)}</span></span>`;
     $('#mysql-sub').textContent = `${cred.username}@${cred.extra.host}:${cred.extra.port}`
       + (cred.server ? ` · tunnelled via ${cred.server.name} (${cred.server.host})` : ' · direct connection');
   } catch (err) {
@@ -4876,6 +5637,7 @@ $('#mysql-body').addEventListener('click', async (e) => {
  */
 const ENGINE_TABS = [
   { key: 'overview', label: 'Overview', load: () => loadEngineOverview() },
+  { key: 'keys', label: 'Keys', only: 'redis', load: () => loadRedisKeys() },
   { key: 'databases', label: 'Databases', load: () => loadEngineDatabases() },
   { key: 'users', label: 'Users', load: () => loadEngineUsers() },
   { key: 'config', label: 'Configuration', load: () => loadEngineConfig() },
@@ -4885,6 +5647,9 @@ let currentEngineId = null;
 let engineTab = 'overview';
 /** What each tab last read, plus which tabs have been read. */
 let eng = { loaded: new Set() };
+
+/** The tabs this connection's engine has: Redis alone gets a key manager. */
+const engineTabs = () => ENGINE_TABS.filter((t) => !t.only || t.only === eng.cred?.provider);
 
 const engApi = (path, body = {}, method = 'POST') => api(`/credentials/${currentEngineId}/db${path}`, { method, body });
 const engPanel = (key) => $(`#db-panel-${key}`);
@@ -4942,14 +5707,18 @@ async function openEngine(id) {
   currentEngineId = id;
   eng = { loaded: new Set() };
   show('db-detail');
-
-  $('#db-tabs').innerHTML = ENGINE_TABS.map((t) => `<button class="tab ${t.key === engineTab ? 'active' : ''}" data-eng-tab="${t.key}"><span>${esc(t.label)}</span><span class="tab-count" id="eng-count-${t.key}"></span></button>`).join('');
-  $('#db-body').innerHTML = ENGINE_TABS.map((t) => `<div class="tab-panel" data-panel="${t.key}" id="db-panel-${t.key}" ${t.key === engineTab ? '' : 'hidden'}></div>`).join('');
+  $('#db-tabs').innerHTML = '';
+  $('#db-body').innerHTML = '<div class="empty"><span class="spinner"></span>Opening…</div>';
 
   try {
     eng.cred = await api(`/credentials/${id}`);
+    // The tabs depend on the engine, so they are drawn once it is known.
+    const tabs = engineTabs();
+    if (!tabs.some((t) => t.key === engineTab)) engineTab = 'overview';
+    $('#db-tabs').innerHTML = tabs.map((t) => `<button class="tab ${t.key === engineTab ? 'active' : ''}" data-eng-tab="${t.key}"><span>${esc(t.label)}</span><span class="tab-count" id="eng-count-${t.key}"></span></button>`).join('');
+    $('#db-body').innerHTML = tabs.map((t) => `<div class="tab-panel" data-panel="${t.key}" id="db-panel-${t.key}" ${t.key === engineTab ? '' : 'hidden'}></div>`).join('');
     const e = DB_ENGINES[eng.cred.provider];
-    $('#db-name').textContent = `${e.icon} ${eng.cred.name}`;
+    $('#db-name').innerHTML = `<span class="db-title">${dbLogo(eng.cred.provider, 34)}<span>${esc(eng.cred.name)}</span></span>`;
     $('#db-sub').textContent = `${e.label} · ${eng.cred.username ? `${eng.cred.username}@` : ''}${eng.cred.extra.host}:${eng.cred.extra.port}`
       + (eng.cred.server ? ` · tunnelled via ${eng.cred.server.name} (${eng.cred.server.host})` : ' · direct connection')
       + (eng.cred.extra.tls ? ' · TLS' : '');
@@ -4961,7 +5730,7 @@ async function openEngine(id) {
 }
 
 function showEngineTab(key) {
-  const tab = ENGINE_TABS.find((t) => t.key === key) || ENGINE_TABS[0];
+  const tab = engineTabs().find((t) => t.key === key) || ENGINE_TABS[0];
   engineTab = tab.key;
   $$('#db-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.engTab === tab.key));
   $$('#db-body > .tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== tab.key; });
@@ -4984,8 +5753,520 @@ $('#btn-db-back').addEventListener('click', () => { show('databases'); loadMysql
 $('#btn-db-edit').addEventListener('click', () => editMysqlConnection(currentEngineId));
 $('#btn-db-refresh').addEventListener('click', () => {
   eng = { loaded: new Set([engineTab]), cred: eng.cred, queryHelp: eng.queryHelp };
-  ENGINE_TABS.find((t) => t.key === engineTab).load();
+  engineTabs().find((t) => t.key === engineTab).load();
 });
+
+/* keys (Redis only) */
+
+/*
+ * A key browser: search on the left (SCAN, a page at a time), the chosen key
+ * on the right with an editor for its type. Viewers can look; changing needs
+ * "edit", adding "create", deleting "delete" — the server checks again.
+ */
+const RK_TYPES = { string: 'String', hash: 'Hash', list: 'List', set: 'Set', zset: 'Sorted set', stream: 'Stream' };
+let rk = null;
+
+const rkApi = (path, body, method = 'POST') => api(`/credentials/${currentEngineId}/redis${path}`, { method, body });
+const rkTtl = (t) => (t < 0 ? 'no expiry' : t < 120 ? `${t}s` : t < 7200 ? `${Math.round(t / 60)}m` : t < 172800 ? `${Math.round(t / 3600)}h` : `${Math.round(t / 86400)}d`);
+const rkBox = () => engPanel('keys');
+
+async function loadRedisKeys() {
+  rk = { db: rk?.db || 'db0', pattern: '', type: '', keys: [], cursor: '0', done: true, dbSize: 0, selected: new Set(), open: null, dbs: [] };
+  rkBox().innerHTML = `
+    <div class="rk">
+      <form class="rk-toolbar" id="rk-search">
+        <select id="rk-db" aria-label="Database"></select>
+        <input id="rk-pattern" type="search" placeholder="Search keys — user:*, session, cache:??" autocomplete="off" spellcheck="false" />
+        <select id="rk-type" aria-label="Type"><option value="">All types</option>${Object.entries(RK_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+        <button class="btn" type="submit">Search</button>
+        ${ifCan('create', '<button class="btn primary" type="button" data-rk="new">+ New key</button>')}
+      </form>
+      <div class="rk-split">
+        <div class="rk-list">
+          <div class="rk-list-head">
+            <label class="rk-check"><input type="checkbox" id="rk-all" aria-label="Select all shown" /></label>
+            <span id="rk-count" class="muted small">Searching…</span>
+            ${ifCan('delete', '<button class="btn tiny danger" type="button" data-rk="delete-selected" disabled>Delete selected</button>')}
+          </div>
+          <div class="rk-rows" id="rk-rows"></div>
+          <button class="btn tiny rk-more hidden" type="button" data-rk="more">Load more</button>
+        </div>
+        <div class="rk-detail" id="rk-detail"><div class="empty">Pick a key to see and change its value.</div></div>
+      </div>
+    </div>`;
+  try {
+    const d = await engApi('/databases');
+    rk.dbs = d.rows.map((r) => ({ name: r.name, keys: Number(String(r.cells[1]).replace(/\D/g, '')) || 0 }));
+  } catch { rk.dbs = Array.from({ length: 16 }, (_, i) => ({ name: `db${i}`, keys: null })); }
+  // Start on the first database that has anything in it.
+  if (!rk.dbs.some((d) => d.name === rk.db && d.keys)) rk.db = rk.dbs.find((d) => d.keys)?.name || 'db0';
+  $('#rk-db').innerHTML = rk.dbs.map((d) => `<option value="${d.name}" ${d.name === rk.db ? 'selected' : ''}>${d.name}${d.keys !== null ? ` (${d.keys.toLocaleString()})` : ''}</option>`).join('');
+  rkSearch();
+}
+
+async function rkSearch({ more = false } = {}) {
+  if (!more) {
+    rk.keys = [];
+    rk.cursor = '0';
+    rk.selected.clear();
+    $('#rk-rows').innerHTML = '<div class="empty"><span class="spinner"></span>Searching…</div>';
+  }
+  const btn = $('[data-rk="more"]', rkBox());
+  if (more) busy(btn, true, 'Loading…');
+  try {
+    const r = await rkApi('/scan', { database: rk.db, pattern: rk.pattern, type: rk.type, cursor: rk.cursor });
+    const seen = new Set(rk.keys.map((k) => k.key));
+    rk.keys.push(...r.keys.filter((k) => !seen.has(k.key)));
+    rk.cursor = r.cursor;
+    rk.done = r.done;
+    rk.dbSize = r.dbSize;
+    setEngCount('keys', r.dbSize.toLocaleString());
+    rkRenderList();
+  } catch (err) {
+    $('#rk-rows').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+  if (more) busy(btn, false);
+}
+
+function rkRenderList() {
+  const rows = $('#rk-rows');
+  if (!rk.keys.length) {
+    rows.innerHTML = `<div class="empty">${rk.done ? (rk.pattern || rk.type ? 'No keys match.' : 'This database is empty.') : 'Nothing yet — load more to keep scanning.'}</div>`;
+  } else {
+    rows.innerHTML = rk.keys.map((k, i) => `
+      <div class="rk-row ${rk.open?.key === k.key ? 'active' : ''}" data-rk-open="${i}">
+        <label class="rk-check" data-stop><input type="checkbox" data-rk-pick="${i}" ${rk.selected.has(k.key) ? 'checked' : ''} aria-label="Select ${esc(k.key)}" /></label>
+        <span class="rk-type t-${esc(k.type)}">${esc(RK_TYPES[k.type] || k.type)}</span>
+        <span class="rk-key" title="${esc(k.key)}">${esc(k.key)}</span>
+        <span class="rk-meta">${k.ttl >= 0 ? `<span title="expires in ${k.ttl}s">⏱ ${rkTtl(k.ttl)}</span>` : ''}${k.mem != null ? `<span>${bytes(k.mem)}</span>` : ''}</span>
+      </div>`).join('');
+  }
+  $('#rk-count').textContent = `${rk.keys.length.toLocaleString()} shown · ${rk.dbSize.toLocaleString()} keys in ${rk.db}${rk.done ? '' : ' · more to scan'}`;
+  $('[data-rk="more"]', rkBox()).classList.toggle('hidden', rk.done);
+  rkSyncSelection();
+}
+
+function rkSyncSelection() {
+  const del = $('[data-rk="delete-selected"]', rkBox());
+  if (del) {
+    del.disabled = !rk.selected.size;
+    del.textContent = rk.selected.size ? `Delete selected (${rk.selected.size})` : 'Delete selected';
+  }
+  const all = $('#rk-all');
+  if (all) all.checked = rk.keys.length > 0 && rk.keys.every((k) => rk.selected.has(k.key));
+}
+
+/* one key */
+
+async function rkOpen(key, { more = false, match } = {}) {
+  const detail = $('#rk-detail');
+  const prev = rk.open && rk.open.key === key ? rk.open : null;
+  if (!more) detail.innerHTML = '<div class="empty"><span class="spinner"></span>Reading…</div>';
+  const filter = match !== undefined ? match : (prev?.match || '');
+  try {
+    const body = { database: rk.db, key, match: filter };
+    if (more && prev) {
+      if (['list', 'zset'].includes(prev.type) && !filter) body.offset = Number(prev.cursor);
+      else if (prev.type === 'stream') body.after = prev.cursor;
+      else body.cursor = prev.cursor;
+    }
+    const d = await rkApi('/key', body);
+    d.match = filter;
+    // "Load more" adds the next page to what is already shown.
+    if (more && prev) {
+      for (const f of ['fields', 'items', 'members', 'entries']) if (d[f]) d[f] = [...(prev[f] || []), ...d[f]];
+    }
+    rk.open = d;
+    rkRenderKey();
+    $$('#rk-rows .rk-row').forEach((r) => r.classList.toggle('active', rk.keys[r.dataset.rkOpen]?.key === key));
+  } catch (err) {
+    if (!more) rk.open = null;
+    detail.innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+function rkRenderKey() {
+  const d = rk.open;
+  const editable = canDo('edit');
+  const chips = [
+    `<span class="rk-type t-${esc(d.type)}">${esc(RK_TYPES[d.type] || d.type)}</span>`,
+    `<span class="chip">⏱ ${d.ttl < 0 ? 'no expiry' : `expires in ${rkTtl(d.ttl)}`}</span>`,
+    d.size !== undefined ? `<span class="chip">${d.type === 'string' ? bytes(d.size) : `${Number(d.size).toLocaleString()} ${d.size === 1 ? 'element' : 'elements'}`}</span>` : '',
+    d.mem != null ? `<span class="chip">${bytes(d.mem)} in memory</span>` : '',
+    d.encoding ? `<span class="chip muted">${esc(d.encoding)}</span>` : '',
+  ].join('');
+
+  $('#rk-detail').innerHTML = `
+    <div class="rk-head">
+      <div class="rk-name mono">${esc(d.key)}</div>
+      <div class="rk-actions">
+        <button class="btn tiny" data-rk="refresh" title="Read it again">↻</button>
+        ${ifCan('edit', '<button class="btn tiny" data-rk="rename">Rename</button><button class="btn tiny" data-rk="ttl">Expiry</button>')}
+        ${ifCan('delete', '<button class="btn tiny danger" data-rk="delete">Delete</button>')}
+      </div>
+    </div>
+    <div class="chips rk-chips">${chips}</div>
+    <div id="rk-inline"></div>
+    <div class="rk-value">${rkValueHtml(d, editable)}</div>`;
+}
+
+const rkFilterBar = (d, label) => `
+  <form class="rk-filter" data-rk-form="filter">
+    <input name="match" type="search" value="${esc(d.match || '')}" placeholder="Filter ${label} — text or glob" autocomplete="off" />
+    <button class="btn tiny" type="submit">Filter</button>
+  </form>`;
+
+const rkMore = (d) => (d.cursor && d.cursor !== '0' ? '<button class="btn tiny rk-more" data-rk="value-more">Load more</button>' : '');
+
+function rkValueHtml(d, editable) {
+  if (d.unsupported) return `<div class="msg">This is a <b>${esc(d.type)}</b> value (a module type). Use the query page to read it.</div>`;
+
+  if (d.type === 'string') {
+    let pretty = null;
+    try { const j = JSON.parse(d.value); if (j && typeof j === 'object') pretty = JSON.stringify(j, null, 2); } catch { /* not JSON */ }
+    const canEdit = editable && !d.truncated;
+    return `
+      ${d.truncated ? `<div class="msg small">Showing the first ${bytes(d.value.length)} of ${bytes(d.size)} — too large to edit here.</div>` : ''}
+      <form data-rk-form="string">
+        <textarea name="value" class="mono rk-text" rows="12" spellcheck="false" ${canEdit ? '' : 'readonly'}>${esc(d.value)}</textarea>
+        <div class="rk-bar">
+          ${pretty ? '<button class="btn tiny" type="button" data-rk="pretty">Format JSON</button>' : ''}
+          <button class="btn tiny" type="button" data-rk="copy">Copy</button>
+          ${canEdit ? '<button class="btn tiny primary" type="submit">Save value</button>' : ''}
+        </div>
+      </form>`;
+  }
+
+  const addForm = (inner, label = 'Add') => (editable ? `<form class="rk-add" data-rk-form="add">${inner}<button class="btn tiny primary" type="submit">${label}</button></form>` : '');
+  const actions = (i, { edit = true } = {}) => `<td class="rk-cell-actions">
+      ${edit && editable ? `<button class="btn tiny" data-rk-edit="${i}">Edit</button>` : ''}
+      ${editable ? `<button class="btn tiny danger" data-rk-remove="${i}" title="Remove">✕</button>` : ''}</td>`;
+  const val = (v) => `<td class="rk-val mono">${esc(v)}</td>`;
+
+  if (d.type === 'hash') {
+    return `${rkFilterBar(d, 'fields')}
+      <div id="rk-editor"></div>
+      <table class="rk-table"><thead><tr><th>Field</th><th>Value</th><th></th></tr></thead><tbody>
+        ${d.fields.map((f, i) => `<tr><td class="mono rk-field">${esc(f.field)}</td>${val(f.value)}${actions(i)}</tr>`).join('') || '<tr><td colspan="3" class="muted">No fields match.</td></tr>'}
+      </tbody></table>${rkMore(d)}
+      ${addForm('<input name="field" placeholder="New field" required /><input name="value" placeholder="Value" />', 'Add field')}`;
+  }
+  if (d.type === 'list') {
+    return `<div id="rk-editor"></div>
+      <table class="rk-table"><thead><tr><th class="num">#</th><th>Value</th><th></th></tr></thead><tbody>
+        ${d.items.map((it, i) => `<tr><td class="num muted">${it.index}</td>${val(it.value)}${actions(i)}</tr>`).join('') || '<tr><td colspan="3" class="muted">The list is empty.</td></tr>'}
+      </tbody></table>${rkMore(d)}
+      ${editable ? `<form class="rk-add" data-rk-form="add"><input name="value" placeholder="New item" required />
+        <button class="btn tiny" type="submit" name="op" value="lpush">Add to start</button>
+        <button class="btn tiny primary" type="submit" name="op" value="rpush">Add to end</button></form>` : ''}`;
+  }
+  if (d.type === 'set') {
+    return `${rkFilterBar(d, 'members')}
+      <div id="rk-editor"></div>
+      <table class="rk-table"><thead><tr><th>Member</th><th></th></tr></thead><tbody>
+        ${d.members.map((m, i) => `<tr>${val(m)}${actions(i)}</tr>`).join('') || '<tr><td colspan="2" class="muted">No members match.</td></tr>'}
+      </tbody></table>${rkMore(d)}
+      ${addForm('<input name="value" placeholder="New member" required />', 'Add member')}`;
+  }
+  if (d.type === 'zset') {
+    return `${rkFilterBar(d, 'members')}
+      <div id="rk-editor"></div>
+      <table class="rk-table"><thead><tr>${d.match ? '' : '<th class="num">Rank</th>'}<th>Member</th><th class="num">Score</th><th></th></tr></thead><tbody>
+        ${d.members.map((m, i) => `<tr>${d.match ? '' : `<td class="num muted">${m.rank}</td>`}${val(m.member)}<td class="num mono">${esc(m.score)}</td>${actions(i)}</tr>`).join('') || '<tr><td colspan="4" class="muted">No members match.</td></tr>'}
+      </tbody></table>${rkMore(d)}
+      ${addForm('<input name="value" placeholder="Member" required /><input name="score" type="number" step="any" placeholder="Score" required class="rk-score" />', 'Add member')}`;
+  }
+  if (d.type === 'stream') {
+    return `<table class="rk-table"><thead><tr><th>ID</th><th>Fields</th><th></th></tr></thead><tbody>
+        ${d.entries.map((e, i) => `<tr><td class="mono small">${esc(e.id)}</td><td class="rk-val mono">${Object.entries(e.fields).map(([f, v]) => `<div><b>${esc(f)}</b> = ${esc(v)}</div>`).join('')}</td>${actions(i, { edit: false })}</tr>`).join('') || '<tr><td colspan="3" class="muted">No entries.</td></tr>'}
+      </tbody></table>${rkMore(d)}
+      ${addForm('<textarea name="value" rows="2" class="mono" placeholder="field=value, one per line" required></textarea>', 'Add entry')}`;
+  }
+  return '';
+}
+
+/** The small editor that opens above a hash / list / set / sorted-set table. */
+function rkShowEditor(i) {
+  const d = rk.open;
+  const box = $('#rk-editor');
+  let inner = '';
+  if (d.type === 'hash') {
+    const f = d.fields[i];
+    inner = `<label>Field<input name="field" value="${esc(f.field)}" required /></label>
+      <label>Value<textarea name="value" rows="4" class="mono">${esc(f.value)}</textarea></label>`;
+  } else if (d.type === 'list') {
+    inner = `<label>Item #${d.items[i].index}<textarea name="value" rows="4" class="mono">${esc(d.items[i].value)}</textarea></label>`;
+  } else if (d.type === 'set') {
+    inner = `<label>Member<textarea name="value" rows="3" class="mono">${esc(d.members[i])}</textarea></label>`;
+  } else if (d.type === 'zset') {
+    const m = d.members[i];
+    inner = `<label>Member<textarea name="value" rows="3" class="mono">${esc(m.member)}</textarea></label>
+      <label>Score<input name="score" type="number" step="any" value="${esc(m.score)}" required /></label>`;
+  }
+  box.innerHTML = `<form class="rk-editor" data-rk-form="edit" data-i="${i}">${inner}
+    <div class="rk-bar"><button class="btn tiny ghost" type="button" data-rk="cancel-edit">Cancel</button><button class="btn tiny primary" type="submit">Save</button></div></form>`;
+  $('textarea, input', box)?.focus();
+}
+
+async function rkChange(body, message) {
+  await rkApi('/key', { database: rk.db, key: rk.open.key, ...body }, 'PUT');
+  toast(message);
+}
+
+/** After a change: the key again, and its row in the list. */
+async function rkReload(key = rk.open?.key) {
+  await rkOpen(key);
+  // The key's own read already has its type, expiry and size: the list row is updated from that.
+  const i = rk.keys.findIndex((k) => k.key === key);
+  if (i < 0) return;
+  if (rk.open?.key === key) rk.keys[i] = { key, type: rk.open.type, ttl: rk.open.ttl, mem: rk.open.mem };
+  else rk.keys.splice(i, 1); // it is gone — removing its last element removes the key
+  rkRenderList();
+}
+
+/* events */
+
+function rkInline(html) {
+  $('#rk-inline').innerHTML = html;
+  $('#rk-inline input')?.focus();
+}
+
+async function rkNewKeyForm() {
+  $('#rk-detail').innerHTML = `
+    <h3 class="rk-new-title">New key in ${esc(rk.db)}</h3>
+    <form class="rk-new" data-rk-form="new">
+      <div class="row">
+        <label>Type<select name="type">${Object.entries(RK_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+        <label>Expire after <span class="muted small">(seconds, optional)</span><input name="ttl" type="number" min="1" placeholder="never" /></label>
+      </div>
+      <label>Key name<input name="key" class="mono" required placeholder="user:42:profile" autocomplete="off" spellcheck="false" /></label>
+      <label data-new-for="hash stream">Field<input name="field" placeholder="name" /></label>
+      <label data-new-for="zset">Score<input name="score" type="number" step="any" placeholder="0" /></label>
+      <label><span data-new-label>Value</span><textarea name="value" rows="6" class="mono" spellcheck="false"></textarea></label>
+      <div class="rk-bar"><button class="btn ghost" type="button" data-rk="cancel-new">Cancel</button><button class="btn primary" type="submit">Create key</button></div>
+    </form>`;
+  const form = $('[data-rk-form="new"]');
+  const sync = () => {
+    const t = form.type.value;
+    $$('[data-new-for]', form).forEach((el) => { el.hidden = !el.dataset.newFor.split(' ').includes(t); });
+    form.field.required = ['hash', 'stream'].includes(t);
+    form.score.required = t === 'zset';
+    $('[data-new-label]', form).textContent = { list: 'First item', set: 'First member', zset: 'First member' }[t] || 'Value';
+  };
+  form.type.addEventListener('change', sync);
+  sync();
+  form.key.focus();
+}
+
+function rkBindEvents(panel) {
+  panel.addEventListener('submit', async (e) => {
+    const form = e.target;
+    e.preventDefault();
+    const btn = e.submitter || $('button[type=submit]', form);
+    const f = Object.fromEntries(new FormData(form).entries());
+    try {
+      if (form.id === 'rk-search') {
+        rk.db = $('#rk-db').value;
+        rk.pattern = $('#rk-pattern').value.trim();
+        rk.type = $('#rk-type').value;
+        return rkSearch();
+      }
+      const kind = form.dataset.rkForm;
+      if (kind === 'filter') return rkOpen(rk.open.key, { match: f.match.trim() });
+      busy(btn, true, 'Saving…');
+      const d = rk.open;
+      if (kind === 'new') {
+        const r = await rkApi('/keys', { database: rk.db, ...f }, 'POST');
+        toast(`Created ${r.key}`);
+        rk.pattern = r.key;
+        $('#rk-pattern').value = r.key;
+        await rkSearch();
+        await rkOpen(r.key);
+      } else if (kind === 'string') {
+        await rkChange({ op: 'set', value: f.value }, 'Value saved');
+        await rkReload();
+      } else if (kind === 'add') {
+        const op = { hash: 'hset', set: 'sadd', zset: 'zadd', stream: 'xadd' }[d.type] || e.submitter?.value || 'rpush';
+        const body = { op, value: f.value, field: f.field, score: f.score };
+        if (d.type === 'stream') {
+          body.fields = Object.fromEntries(f.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+            const at = l.indexOf('=');
+            return at < 0 ? [l, ''] : [l.slice(0, at).trim(), l.slice(at + 1)];
+          }));
+        }
+        if (d.type === 'hash' && d.fields.some((x) => x.field === f.field)
+          && !await askConfirm(`Field "${f.field}" already exists. Replace its value?`)) return;
+        await rkChange(body, 'Added');
+        await rkReload();
+      } else if (kind === 'edit') {
+        const i = Number(form.dataset.i);
+        if (d.type === 'hash') {
+          const old = d.fields[i].field;
+          if (f.field !== old) await rkChange({ op: 'hrename', field: old, newField: f.field }, `Renamed field to ${f.field}`);
+          await rkChange({ op: 'hset', field: f.field, value: f.value }, 'Field saved');
+        } else if (d.type === 'list') {
+          await rkChange({ op: 'lset', index: d.items[i].index, value: f.value }, 'Item saved');
+        } else if (d.type === 'set') {
+          await rkChange({ op: 'sreplace', member: d.members[i], value: f.value }, 'Member saved');
+        } else if (d.type === 'zset') {
+          await rkChange({ op: 'zadd', member: d.members[i].member, value: f.value, score: f.score }, 'Member saved');
+        }
+        await rkReload();
+      } else if (kind === 'rename') {
+        await rkChange({ op: 'rename', newKey: f.newKey.trim() }, `Renamed to ${f.newKey.trim()}`);
+        const i = rk.keys.findIndex((k) => k.key === d.key);
+        if (i >= 0) rk.keys[i] = { ...rk.keys[i], key: f.newKey.trim() };
+        rkRenderList();
+        await rkOpen(f.newKey.trim());
+      } else if (kind === 'ttl') {
+        // FormData leaves out the button that was pressed, so ask the event which one it was.
+        const persist = e.submitter?.name === 'persist';
+        if (!persist && !(Number(f.ttl) > 0)) { toast('Enter how many seconds until it expires, or press "No expiry"', 'err'); return; }
+        const ttl = persist ? '' : f.ttl;
+        await rkChange({ op: 'ttl', ttl }, ttl ? `Expires in ${rkTtl(Number(ttl))}` : 'Expiry removed');
+        await rkReload();
+      }
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      if (btn) busy(btn, false);
+    }
+  });
+
+  panel.addEventListener('change', (e) => {
+    if (e.target.id === 'rk-db' || e.target.id === 'rk-type') {
+      rk.db = $('#rk-db').value;
+      rk.type = $('#rk-type').value;
+      $('#rk-detail').innerHTML = '<div class="empty">Pick a key to see and change its value.</div>';
+      rk.open = null;
+      return rkSearch();
+    }
+    if (e.target.id === 'rk-all') {
+      for (const k of rk.keys) { if (e.target.checked) rk.selected.add(k.key); else rk.selected.delete(k.key); }
+      rkRenderList();
+      return;
+    }
+    const pick = e.target.closest('[data-rk-pick]');
+    if (pick) {
+      const k = rk.keys[pick.dataset.rkPick].key;
+      if (pick.checked) rk.selected.add(k); else rk.selected.delete(k);
+      rkSyncSelection();
+    }
+  });
+
+  panel.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-stop]')) return;
+    const row = e.target.closest('[data-rk-open]');
+    if (row) return rkOpen(rk.keys[row.dataset.rkOpen].key, { match: '' });
+
+    const edit = e.target.closest('[data-rk-edit]');
+    if (edit) return rkShowEditor(Number(edit.dataset.rkEdit));
+
+    const remove = e.target.closest('[data-rk-remove]');
+    if (remove) {
+      const d = rk.open;
+      const i = Number(remove.dataset.rkRemove);
+      const what = { hash: `field "${d.fields?.[i]?.field}"`, list: `item #${d.items?.[i]?.index}`, set: 'this member', zset: 'this member', stream: `entry ${d.entries?.[i]?.id}` }[d.type];
+      if (!await askConfirm(`Remove ${what} from ${d.key}?`, { danger: true, ok: 'Remove' })) return;
+      try {
+        const body = {
+          hash: { op: 'hdel', field: d.fields?.[i]?.field },
+          list: { op: 'lremove', index: d.items?.[i]?.index },
+          set: { op: 'srem', member: d.members?.[i] },
+          zset: { op: 'zrem', member: d.members?.[i]?.member },
+          stream: { op: 'xdel', id: d.entries?.[i]?.id },
+        }[d.type];
+        await rkChange(body, 'Removed');
+        // Removing the last element removes the key itself.
+        try { await rkReload(); } catch { /* gone */ }
+      } catch (err) { toast(err.message, 'err'); }
+      return;
+    }
+
+    const btn = e.target.closest('[data-rk]');
+    if (!btn) return;
+    const action = btn.dataset.rk;
+    const d = rk.open;
+
+    if (action === 'more') return rkSearch({ more: true });
+    if (action === 'value-more') { busy(btn, true, 'Loading…'); return rkOpen(d.key, { more: true }); }
+    if (action === 'new') return rkNewKeyForm();
+    if (action === 'cancel-new') { $('#rk-detail').innerHTML = '<div class="empty">Pick a key to see and change its value.</div>'; return; }
+    if (action === 'cancel-edit') { $('#rk-editor').innerHTML = ''; return; }
+    if (action === 'refresh') return rkReload();
+    if (action === 'copy') {
+      try { await navigator.clipboard.writeText($('.rk-text').value); toast('Copied'); } catch { toast('Could not copy — select the text and copy it', 'err'); }
+      return;
+    }
+    if (action === 'pretty') {
+      const ta = $('.rk-text');
+      try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); } catch { toast('Not valid JSON', 'err'); }
+      return;
+    }
+    if (action === 'rename') {
+      return rkInline(`<form class="rk-inline-form" data-rk-form="rename">
+        <input name="newKey" class="mono" value="${esc(d.key)}" required spellcheck="false" />
+        <button class="btn tiny ghost" type="button" data-rk="close-inline">Cancel</button>
+        <button class="btn tiny primary" type="submit">Rename</button></form>
+        <p class="muted small">Refused if a key with the new name already exists.</p>`);
+    }
+    if (action === 'ttl') {
+      return rkInline(`<form class="rk-inline-form" data-rk-form="ttl">
+        <input name="ttl" type="number" min="1" placeholder="seconds" value="${d.ttl > 0 ? d.ttl : ''}" />
+        <span class="rk-presets">${[[60, '1m'], [3600, '1h'], [86400, '1d'], [604800, '7d']].map(([s, l]) => `<button class="btn tiny" type="button" data-rk-ttl="${s}">${l}</button>`).join('')}</span>
+        <button class="btn tiny" type="submit" name="persist" value="1">No expiry</button>
+        <button class="btn tiny ghost" type="button" data-rk="close-inline">Cancel</button>
+        <button class="btn tiny primary" type="submit">Set expiry</button></form>`);
+    }
+    if (action === 'close-inline') { $('#rk-inline').innerHTML = ''; return; }
+    if (action === 'delete') {
+      if (!await askConfirm(`Delete the key "${d.key}"? This cannot be undone.`, { danger: true, ok: 'Delete key' })) return;
+      try {
+        await rkApi('/keys', { database: rk.db, keys: [d.key] }, 'DELETE');
+        toast(`Deleted ${d.key}`);
+        rk.keys = rk.keys.filter((k) => k.key !== d.key);
+        rk.selected.delete(d.key);
+        rk.dbSize = Math.max(0, rk.dbSize - 1);
+        rk.open = null;
+        $('#rk-detail').innerHTML = '<div class="empty">Key deleted. Pick another one.</div>';
+        rkRenderList();
+      } catch (err) { toast(err.message, 'err'); }
+      return;
+    }
+    if (action === 'delete-selected') {
+      const list = [...rk.selected];
+      if (!list.length) return;
+      if (!await askConfirm(`Delete ${list.length} key${list.length === 1 ? '' : 's'} from ${rk.db}? This cannot be undone.`, { danger: true, ok: `Delete ${list.length}` })) return;
+      busy(btn, true, 'Deleting…');
+      try {
+        const r = await rkApi('/keys', { database: rk.db, keys: list }, 'DELETE');
+        toast(`Deleted ${r.removed} key${r.removed === 1 ? '' : 's'}`);
+        rk.keys = rk.keys.filter((k) => !rk.selected.has(k.key));
+        if (rk.open && rk.selected.has(rk.open.key)) { rk.open = null; $('#rk-detail').innerHTML = '<div class="empty">Pick a key to see and change its value.</div>'; }
+        rk.dbSize = Math.max(0, rk.dbSize - r.removed);
+        rk.selected.clear();
+        rkRenderList();
+      } catch (err) { toast(err.message, 'err'); }
+      busy(btn, false);
+    }
+  });
+
+  // TTL presets fill the box; they do not save on their own.
+  panel.addEventListener('click', (e) => {
+    const p = e.target.closest('[data-rk-ttl]');
+    if (p) $('#rk-inline input[name="ttl"]').value = p.dataset.rkTtl;
+  });
+}
+
+// The panel is redrawn per connection, but the tab body element is new each time; bind when it appears.
+const rkObserver = new MutationObserver(() => {
+  const panel = document.getElementById('db-panel-keys');
+  if (panel && !panel.dataset.rkBound) {
+    panel.dataset.rkBound = '1';
+    rkBindEvents(panel);
+  }
+});
+rkObserver.observe($('#db-body'), { childList: true });
 
 /* overview */
 
@@ -5426,7 +6707,7 @@ $('#form-query').addEventListener('submit', async (e) => {
  * has its own tab, list and "add" button; MySQL stays under Databases.
  */
 const ACCOUNT_TABS = [
-  { key: 'git', label: 'Git', intro: 'GitHub, GitLab and Bitbucket accounts. Sign in at the provider and pick your account there — nothing is typed in by hand.', load: () => loadGitList(), add: '#btn-add-git-account' },
+  { key: 'git', label: 'Git', intro: 'GitHub, GitLab and Bitbucket accounts. Sign in at the provider, or paste an access token — including self-hosted GitHub Enterprise and GitLab.', load: () => loadGitList(), add: '#btn-add-git-account' },
   { key: 'cloudflare', label: 'Cloudflare', intro: 'Cloudflare accounts, their zones and DNS. Sign in on Cloudflare and the panel reads the account details itself.', load: () => loadCloudflareList(), add: '#btn-add-cloudflare' },
   { key: 'dockerhub', label: 'Docker Hub', intro: 'Docker Hub accounts used to pull and push images. Sign in on Docker Hub and the panel reads the account itself; tokens are stored AES-256-GCM encrypted.', load: () => loadCredentials(), add: '#btn-add-dockerhub' },
 ];
@@ -5466,6 +6747,7 @@ $('#accounts-tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-accounts-tab]');
   if (!btn) return;
   accountsTab = btn.dataset.accountsTab;
+  syncRoute();
   loadAccounts();
 });
 
@@ -6675,6 +7957,7 @@ const shortDigest = (d) => (d ? `<code class="small" title="${esc(d)}">${esc(d.r
 const hubCount = (n) => (n === null || n === undefined ? '—' : esc(Number(n).toLocaleString()));
 
 async function openDockerHub(id, namespace) {
+  currentDhId = id;
   show('dh-detail');
   setHeading('Account management');
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === 'accounts'));
@@ -11581,7 +12864,7 @@ function openSettings(tab = settingsTab) {
 async function loadSettings() {
   const box = $('#settings-body');
   const visible = SETTINGS_TABS.filter((t) => (!t.needs || canDo(t.needs)) && (!t.inOrg || session.user?.orgId));
-  if (!visible.some((t) => t.key === settingsTab)) settingsTab = 'profile';
+  if (!visible.some((t) => t.key === settingsTab)) { settingsTab = 'profile'; syncRoute(); }
 
   $('#settings-tabs').innerHTML = visible.map((t) =>
     `<button class="tab ${t.key === settingsTab ? 'active' : ''}" data-settings-tab="${t.key}"><span>${esc(t.label)}</span></button>`).join('');
@@ -11612,6 +12895,7 @@ $('#settings-tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-settings-tab]');
   if (!btn) return;
   settingsTab = btn.dataset.settingsTab;
+  syncRoute();
   loadSettings();
 });
 
@@ -12000,6 +13284,7 @@ function showPfTab(key, { reload = false } = {}) {
   // One organisation still counts as Organisations in the side menu, one lead as Leads.
   const parent = { org: 'orgs', lead: 'leads' }[tab.key] || tab.key;
   if (parent === tab.key) pf.lastTab = tab.key;
+  syncRoute();
   $$('#pf-body .tab-panel').forEach((p) => { p.hidden = p.dataset.panel !== tab.key; });
   pfChrome(tab);
   $('#pf-actions').innerHTML = `<button class="btn" data-pf="refresh">↻ Refresh</button>${PF_ACTIONS[tab.key] || ''}`;
@@ -14070,6 +15355,7 @@ function renderDocArticle() {
   const docs = docsState.docs;
   const d = docs.find((x) => x.slug === docsState.slug);
   if (!d) return;
+  syncRoute();
   const i = docs.indexOf(d);
   const prev = docs[i - 1];
   const next = docs[i + 1];
@@ -14113,8 +15399,9 @@ async function enterApp({ keepOrgPicker = false } = {}) {
   // An admin or super admin without a mobile number adds one first.
   if (session.user.needsPhone) openProfile({ mustAddPhone: true });
 
-  // A super admin on the platform starts at the platform's dashboard.
+  // A super admin on the platform starts at the platform's dashboard — or wherever the address says.
   if (session.user.role === 'super_admin' && !session.user.orgId) {
+    if (location.hash.startsWith('#/') && await openRoute()) return health();
     openPlatform('dashboard');
     return health();
   }
@@ -14123,6 +15410,7 @@ async function enterApp({ keepOrgPicker = false } = {}) {
     openBilling();
     return health();
   }
+  if (location.hash.startsWith('#/') && await openRoute()) return health();
   show('servers');
   setHeading('Servers');
   await Promise.all([health(), loadServers()]);

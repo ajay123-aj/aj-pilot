@@ -113,13 +113,31 @@ echo ok`;
 
 /* ------------------------------------------------------------- GitHub */
 
+/** The units svc.sh creates; nothing else is stopped or removed on a runner's behalf. */
+const unitPattern = `RUNNER_UNIT='^actions\\.runner\\.[A-Za-z0-9._@:-]{1,180}\\.service$'`;
+
 /**
  * GitHub's runner is a tarball, not a package: download it, register it
  * against the repo or org, then let its own svc.sh write the systemd unit.
+ *
+ * CI jobs run as the service user, and root later runs this directory's own
+ * scripts again on a reinstall. So the directory and everything in it that is
+ * code stays root-owned; the service user only gets the few things the runner
+ * writes while it runs — its work and log directories and its registration
+ * files. Anything an older install handed to the service user is thrown away
+ * and downloaded afresh before root runs any of it.
  */
 function githubInstallScript({ dir, url, token, name, labels, version, serviceUser }) {
   return `set -euo pipefail
+umask 022
 DIR=${q(dir)}
+SVC_USER=${q(serviceUser || 'root')}
+if [ "$SVC_USER" != "root" ] && ! id "$SVC_USER" >/dev/null 2>&1; then SVC_USER=root; fi
+
+# What the runner itself writes while it runs; everything else is root's.
+WRITABLE_DIRS="_work _diag"
+STATE_FILES=".runner .credentials .credentials_rsaparams"
+${unitPattern}
 
 case "$(uname -m)" in
   x86_64)        ARCH=x64 ;;
@@ -130,14 +148,39 @@ esac
 
 VERSION=${q(version)}
 mkdir -p "$DIR"
+chown root:root "$DIR"
+chmod 755 "$DIR"
 cd "$DIR"
+
+# A runner already configured here is stopped first so --replace can re-enrol it.
+# This goes through systemd rather than the directory's own svc.sh.
+OLD_UNIT="$(cat .service 2>/dev/null || true)"
+if printf '%s' "$OLD_UNIT" | grep -Eq "$RUNNER_UNIT"; then
+  systemctl stop "$OLD_UNIT" >/dev/null 2>&1 || true
+fi
+
+# Anything outside the work/log directories and registration files that root
+# did not write could have been changed by a CI job, so none of it is trusted.
+TAINTED="$(find "$DIR" -mindepth 1 \\( -path "$DIR/_work" -o -path "$DIR/_diag" \\) -prune -o \\
+  ! -path "$DIR/.runner" ! -path "$DIR/.credentials" ! -path "$DIR/.credentials_rsaparams" \\
+  ! -user root -print -quit 2>/dev/null || true)"
+if [ -n "$TAINTED" ]; then
+  echo "Files in $DIR are not owned by root (e.g. $TAINTED) — downloading the runner again."
+  find "$DIR" -mindepth 1 -maxdepth 1 ! -name _work ! -name _diag -exec rm -rf {} +
+fi
+
+# The old registration is replaced below; removing it first also means root
+# never writes through a link the service user left in its place.
+for f in $STATE_FILES; do rm -f "$DIR/$f"; done
 
 if [ ! -x ./config.sh ]; then
   echo "Downloading actions-runner $VERSION for linux-$ARCH…"
   curl -fsSL --retry 3 -o runner.tar.gz \\
     "https://github.com/actions/runner/releases/download/v$VERSION/actions-runner-linux-$ARCH-$VERSION.tar.gz"
-  tar xzf runner.tar.gz
+  # The archive's own owners and modes are not kept: the files must be root's.
+  tar xzf runner.tar.gz --no-same-owner --no-same-permissions
   rm -f runner.tar.gz
+  find "$DIR" -mindepth 1 \\( -path "$DIR/_work" -o -path "$DIR/_diag" \\) -prune -o -exec chown -h root:root {} +
 fi
 
 # Best effort: the runner needs libicu and friends to start.
@@ -146,20 +189,30 @@ if [ -x ./bin/installdependencies.sh ]; then
     echo "warning: installdependencies.sh failed — the runner may still start" >&2
 fi
 
-# A runner already configured here is stopped first so --replace can re-enrol it.
-if [ -f .runner ] && [ -x ./svc.sh ]; then ./svc.sh stop >/dev/null 2>&1 || true; fi
+# The runner cannot update itself in a directory it may not write to, so it is
+# told not to try; reinstall it from the panel to move to a newer version.
+EXTRA=()
+if [ "$SVC_USER" != "root" ]; then EXTRA+=(--disableupdate); fi
 
 export RUNNER_ALLOW_RUNASROOT=1
 ./config.sh --unattended --replace \\
   --url ${q(url)} \\
   --token ${q(token)} \\
   --name ${q(name)} \\
-  ${labels ? `--labels ${q(labels)} \\\n  ` : ''}--work _work
+  ${labels ? `--labels ${q(labels)} \\\n  ` : ''}--work _work \${EXTRA[@]+"\${EXTRA[@]}"}
 
-SVC_USER=${q(serviceUser || 'root')}
-if [ "$SVC_USER" != "root" ] && id "$SVC_USER" >/dev/null 2>&1; then
-  chown -R "$SVC_USER" "$DIR"
+if [ "$SVC_USER" != "root" ]; then
+  # Only what the runner writes is handed over — never the directory itself.
+  for d in $WRITABLE_DIRS; do
+    mkdir -p "$DIR/$d"
+    chown -h "$SVC_USER" "$DIR/$d"
+  done
+  for f in $STATE_FILES; do
+    if [ -f "$DIR/$f" ] && [ ! -L "$DIR/$f" ]; then chown -h "$SVC_USER" "$DIR/$f"; fi
+  done
   ./svc.sh install "$SVC_USER"
+  # svc.sh hands its .service note to the service user; root reads it later.
+  chown -h root:root "$DIR/.service" 2>/dev/null || true
 else
   ./svc.sh install
 fi
@@ -172,22 +225,39 @@ systemctl is-active "$UNIT" || true
 `;
 }
 
-function githubRemoveScript({ dir, token }) {
+/**
+ * Nothing in the runner directory is run as root here: the service is taken
+ * down through systemd, and the runner's own "remove" (which tells GitHub it
+ * is gone) runs as the service user it already belonged to.
+ */
+function githubRemoveScript({ dir, token, serviceUser }) {
   return `set -uo pipefail
 DIR=${q(dir)}
+SVC_USER=${q(serviceUser || 'root')}
+${unitPattern}
 [ -d "$DIR" ] || { echo "Nothing installed at $DIR"; exit 0; }
 cd "$DIR"
 
 UNIT="$(cat "$DIR/.service" 2>/dev/null || true)"
-if [ -x ./svc.sh ]; then
-  ./svc.sh stop      >/dev/null 2>&1 || true
-  ./svc.sh uninstall >/dev/null 2>&1 || true
+# Only ever a runner's own unit, whatever the .service note says.
+if printf '%s' "$UNIT" | grep -Eq "$RUNNER_UNIT"; then
+  systemctl disable --now "$UNIT" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$UNIT"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+else
+  UNIT=""
 fi
 
-export RUNNER_ALLOW_RUNASROOT=1
 if [ -x ./config.sh ]; then
-  ${token ? `./config.sh remove --token ${q(token)} >/dev/null 2>&1 || ./config.sh remove --local >/dev/null 2>&1 || true`
-    : './config.sh remove --local >/dev/null 2>&1 || true'}
+  if [ "$SVC_USER" != "root" ] && id "$SVC_USER" >/dev/null 2>&1; then
+    AS=(runuser -u "$SVC_USER" --)
+  else
+    # A runner that already ran as root: nobody else could have written its files.
+    export RUNNER_ALLOW_RUNASROOT=1
+    AS=()
+  fi
+  ${token ? `\${AS[@]+"\${AS[@]}"} ./config.sh remove --token ${q(token)} >/dev/null 2>&1 || \${AS[@]+"\${AS[@]}"} ./config.sh remove --local >/dev/null 2>&1 || true`
+    : '${AS[@]+"${AS[@]}"} ./config.sh remove --local >/dev/null 2>&1 || true'}
 fi
 
 cd /

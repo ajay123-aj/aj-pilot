@@ -1,8 +1,11 @@
+import crypto from 'node:crypto';
 import net from 'node:net';
 import { Client } from 'ssh2';
 import { config } from '../config.js';
 import { decrypt } from './crypto.js';
 import { openViaConnector, liveConnectorIds } from './connectorHub.js';
+import { safeTarget } from './netGuard.js';
+import { run } from '../db/index.js';
 
 /** Build the ssh2 connect config from a stored server row. */
 export function connectionFromRow(row) {
@@ -15,6 +18,9 @@ export function connectionFromRow(row) {
     tryKeyboard: true,
     // Whose connectors may carry this connection when the panel cannot reach it itself.
     orgId: row.org_id ?? null,
+    // Which row remembers this server's host key, and the key it remembers.
+    serverId: row.id ?? null,
+    hostKey: row.host_key ?? null,
   };
   if (row.auth_type === 'key') {
     base.privateKey = decrypt(row.private_key_enc);
@@ -54,7 +60,7 @@ export function tcpReachable(host, port, timeoutMs = DIRECT_PROBE_MS) {
  * A socket to the server through whichever running connector reaches it first,
  * or null when the panel should dial it itself.
  */
-export async function routeSocket({ orgId, host, port = 22, readyTimeout }) {
+export async function routeSocket({ orgId, host, port = 22, readyTimeout }, { connectorOnly = false } = {}) {
   const connectors = liveConnectorIds(orgId);
   if (!connectors.length) return null;
 
@@ -62,13 +68,13 @@ export async function routeSocket({ orgId, host, port = 22, readyTimeout }) {
   const known = routes.get(key);
   const timeoutMs = readyTimeout || config.ssh.connectTimeout;
   if (known && Date.now() - known.at < ROUTE_TTL_MS) {
-    if (known.via === 'direct') return null;
+    if (known.via === 'direct' && !connectorOnly) return null;
     if (connectors.includes(known.via)) {
       try { return await openViaConnector(known.via, host, port, { timeoutMs }); } catch { routes.delete(key); }
     }
   }
 
-  if (await tcpReachable(host, port)) {
+  if (!connectorOnly && await tcpReachable(host, port)) {
     routes.set(key, { via: 'direct', at: Date.now() });
     return null;
   }
@@ -90,17 +96,43 @@ export async function routeSocket({ orgId, host, port = 22, readyTimeout }) {
   }
 }
 
-/** Open a connection, hand it to `fn`, and always close it afterwards. */
+/**
+ * Open a connection, hand it to `fn`, and always close it afterwards.
+ *
+ * `guardTarget: true` is for hosts typed into a request: the panel only dials
+ * them itself when they resolve to a public address (and then dials that
+ * address, so DNS cannot change in between). A private one is still reachable,
+ * but only through one of the organisation's running connectors.
+ */
 export async function withConnection(connectCfg, fn) {
-  const { orgId, ...cfg } = connectCfg;
-  const sock = await routeSocket(connectCfg);
-  return directConnection(sock ? { ...cfg, sock } : cfg, fn);
+  const { orgId, guardTarget, serverId, hostKey, ...cfg } = connectCfg;
+  let connectorOnly = false;
+  if (guardTarget) {
+    try {
+      // A server on your own LAN is fine; the panel's loopback and cloud metadata are not.
+      cfg.host = await safeTarget(cfg.host, { allowLan: true });
+    } catch (err) {
+      if (!liveConnectorIds(orgId).length) throw err;
+      connectorOnly = true;
+    }
+  }
+  const sock = await routeSocket({ ...connectCfg, host: cfg.host }, { connectorOnly });
+  if (connectorOnly && !sock) throw new Error(`${cfg.host} cannot be reached through any running connector`);
+  return directConnection(sock ? { ...cfg, sock } : cfg, fn, { serverId, hostKey });
 }
 
-function directConnection(connectCfg, fn) {
+/** The OpenSSH-style fingerprint of a raw host key, e.g. "SHA256:abc…". */
+export const hostKeyFingerprint = (key) => `SHA256:${crypto.createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`;
+
+const HOST_KEY_CHANGED = 'The server\'s SSH host key has changed — possible man-in-the-middle. '
+  + 'If you rebuilt or reinstalled the server, reset its host key on the server page and connect again.';
+
+function directConnection(connectCfg, fn, { serverId = null, hostKey = null } = {}) {
   return new Promise((resolve, reject) => {
     const conn = new Client();
     let settled = false;
+    let seenKey = null;
+    let keyMismatch = false;
 
     const finish = (err, value) => {
       if (settled) return;
@@ -109,7 +141,26 @@ function directConnection(connectCfg, fn) {
       err ? reject(err) : resolve(value);
     };
 
+    /*
+     * Trust on first use: the first key a saved server shows is remembered, and
+     * every later connection must show the same one. Connections that are not
+     * for a saved server (a test before saving) have nothing to compare with.
+     */
+    const hostVerifier = (key) => {
+      seenKey = hostKeyFingerprint(key);
+      if (hostKey && seenKey !== hostKey) {
+        keyMismatch = true;
+        return false;
+      }
+      return true;
+    };
+
     conn.on('ready', async () => {
+      if (serverId && !hostKey && seenKey) {
+        // Only fills an empty slot, so two first connections cannot overwrite each other.
+        await run('UPDATE servers SET host_key = ? WHERE id = ? AND host_key IS NULL', [seenKey, serverId])
+          .catch(() => { /* remembered next time instead */ });
+      }
       try {
         finish(null, await fn(conn));
       } catch (err) {
@@ -122,11 +173,16 @@ function directConnection(connectCfg, fn) {
       cb(prompts.map(() => connectCfg.password || ''));
     });
 
-    conn.on('error', (err) => finish(normalizeSshError(err)));
-    conn.on('close', () => finish(new Error('SSH connection closed before completing')));
+    const keyError = () => {
+      const e = new Error(HOST_KEY_CHANGED);
+      e.hostKeyChanged = true;
+      return e;
+    };
+    conn.on('error', (err) => finish(keyMismatch ? keyError() : normalizeSshError(err)));
+    conn.on('close', () => finish(keyMismatch ? keyError() : new Error('SSH connection closed before completing')));
 
     try {
-      conn.connect(connectCfg);
+      conn.connect({ ...connectCfg, hostVerifier });
     } catch (err) {
       finish(normalizeSshError(err));
     }

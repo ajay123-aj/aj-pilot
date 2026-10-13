@@ -127,6 +127,8 @@ const READ_ONLY_POSTS = [
   /^\/credentials\/\d+\/dockerhub\/repositories(\/[^/]+\/[^/]+)?$/,
   // PostgreSQL / MongoDB / Redis reads. POST …/db/schemas and …/db/users still need "create".
   /^\/credentials\/\d+\/db\/(overview|databases|database|item|users\/list|config|query)$/,
+  // Redis keys: finding and reading only. Adding (POST …/redis/keys) still needs "create".
+  /^\/credentials\/\d+\/redis\/(scan|key)$/,
   /^\/credentials\/test-(mysql|git|cloudflare|db)$/,
   /^\/installs\/\d+\/refresh$/,
   /^\/runners\/\d+\/refresh$/,

@@ -63,7 +63,7 @@ export async function considerHead(app, head, { source, merged = null, account =
 
   let merge = merged;
   if (app.auto_deploy_trigger === 'merge' && !merge) {
-    const acc = account || await loadGitCredential(app.credential_id);
+    const acc = account || await loadGitCredential(app.credential_id, app.org_id);
     merge = await mergedRequestFor(acc.token, acc.extra, app.repo, head.sha, app.branch);
     if (!merge && head.parents >= 2) merge = { title: head.message };
     if (!merge) {
@@ -96,7 +96,7 @@ export async function considerHead(app, head, { source, merged = null, account =
 export async function checkApp(app, { source = 'check' } = {}) {
   let account;
   try {
-    account = await loadGitCredential(app.credential_id);
+    account = await loadGitCredential(app.credential_id, app.org_id);
     const head = await branchHead(account.token, account.extra, app.repo, app.branch);
     await run('UPDATE apps SET auto_checked_at = NOW(), auto_error = NULL WHERE id = ?', [app.id]);
     const result = await considerHead(app, head, { source, account });
@@ -173,10 +173,40 @@ function readDelivery(req) {
   return null;
 }
 
+const sameSecret = (a, b) => {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+/**
+ * Did the provider sign this delivery? GitHub signs the body with the secret
+ * the panel registered (the hook token), GitLab repeats the token in a header.
+ * Bitbucket cannot sign, which is fine: the body is never trusted anyway.
+ */
+function signatureProblem(req, token) {
+  if (req.get('x-gitlab-event') || req.get('x-gitlab-token')) {
+    return sameSecret(req.get('x-gitlab-token') || '', token) ? null : 'Wrong token';
+  }
+  const signature = req.get('x-hub-signature-256');
+  if (signature) {
+    if (!req.rawBody) return 'Unsigned body';
+    const expected = `sha256=${crypto.createHmac('sha256', token).update(req.rawBody).digest('hex')}`;
+    return sameSecret(signature, expected) ? null : 'Bad signature';
+  }
+  return null;
+}
+
+/* Deliveries are only a nudge to look; one app is looked at no more than every few seconds. */
+const lastNudge = new Map();
+const NUDGE_GAP_MS = 5000;
+
 /**
  * POST /api/hooks/apps/:token — public; the unguessable token in the address
- * is what proves the call comes from the repository's own webhook. GitLab also
- * repeats it in X-Gitlab-Token, which is checked when present.
+ * says which app, and the provider's signature (when it sends one) that it is
+ * really the repository calling. What the body claims — the commit, that a
+ * request was merged — is never taken on trust: the delivery only makes the
+ * panel read the branch from the provider's API, exactly as the poll does.
  */
 export async function handleAppWebhook(req, res) {
   try {
@@ -184,8 +214,8 @@ export async function handleAppWebhook(req, res) {
     if (!/^[0-9a-f]{48}$/.test(token)) return res.status(404).json({ error: 'Unknown hook' });
     const app = await one('SELECT * FROM apps WHERE webhook_token = ?', [token]);
     if (!app) return res.status(404).json({ error: 'Unknown hook' });
-    const glToken = req.get('x-gitlab-token');
-    if (glToken && glToken !== token) return res.status(403).json({ error: 'Wrong token' });
+    const problem = signatureProblem(req, token);
+    if (problem) return res.status(403).json({ error: problem });
 
     const d = readDelivery(req);
     if (d?.ping) return res.json({ ok: true, app: app.name, message: 'Webhook reached AJ Pilot' });
@@ -193,9 +223,14 @@ export async function handleAppWebhook(req, res) {
     if (!app.auto_deploy) return res.json({ ok: true, ignored: 'auto deploy is off for this app' });
     if (d.branch !== app.branch) return res.json({ ok: true, ignored: `branch ${d.branch} is not ${app.branch}` });
 
-    // Answer straight away — providers give up after ten seconds — and deploy behind it.
-    res.status(202).json({ ok: true, accepted: true, sha: d.head.sha });
-    runWithContext({ orgId: app.org_id, user: null }, () => considerHead(app, d.head, { source: 'webhook', merged: d.merged || null }))
+    const now = Date.now();
+    if (now - (lastNudge.get(app.id) || 0) < NUDGE_GAP_MS) return res.status(202).json({ ok: true, accepted: true, coalesced: true });
+    lastNudge.set(app.id, now);
+    if (lastNudge.size > 10000) lastNudge.clear();
+
+    // Answer straight away — providers give up after ten seconds — and check the branch behind it.
+    res.status(202).json({ ok: true, accepted: true });
+    runWithContext({ orgId: app.org_id, user: null }, () => checkApp(app, { source: 'webhook' }))
       .catch((err) => console.error('[auto deploy] webhook deploy failed:', err.message));
   } catch (err) {
     console.error('[auto deploy] webhook failed:', err.message);

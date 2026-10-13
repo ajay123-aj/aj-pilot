@@ -11,6 +11,7 @@ import {
   listRunners, gitSettings, gitDefaults, gitKind, runnersWebUrl,
 } from '../lib/git.js';
 import { asJson, usableGitToken } from '../lib/gitAccounts.js';
+import { safeTarget, privateTargetsAllowed } from '../lib/netGuard.js';
 import { engineFor, DATABASE_PROVIDERS } from '../lib/engines/index.js';
 import {
   authenticateCloudflare, cloudflareLabel, listDnsRecords, getZoneDetail, deleteZone, tokenCreateUrl, TOKEN_PERMISSIONS,
@@ -38,7 +39,7 @@ async function publicCredential(row) {
     secretHint = 'unreadable (master key changed?)';
   }
   const server = row.server_id
-    ? await one('SELECT id, name, host FROM servers WHERE id = ?', [row.server_id])
+    ? await one('SELECT id, name, host FROM servers WHERE id = ? AND org_id = ?', [row.server_id, row.org_id])
     : null;
   return { ...rest, extra: publicExtra(asJson(row.extra)), server: server || null, secretHint };
 }
@@ -56,13 +57,17 @@ function publicExtra(extra) {
 
 const getRow = (id, orgId) => one('SELECT * FROM credentials WHERE id = ? AND org_id = ?', [id, orgId]);
 
-/** Turn a stored mysql credential into a connection config, resolving its server for tunnelling. */
+/**
+ * Turn a stored mysql credential into a connection config, resolving its server for tunnelling.
+ * The server must belong to the same organisation as the credential (the row
+ * was itself looked up by the caller's org, so row.org_id is the caller's).
+ */
 async function mysqlConfigFrom(row) {
   if (row.provider !== 'mysql') throw new Error(`Credential "${row.name}" is not a MySQL credential`);
   const extra = asJson(row.extra);
   let server = null;
   if (row.server_id) {
-    server = await one('SELECT * FROM servers WHERE id = ?', [row.server_id]);
+    server = await one('SELECT * FROM servers WHERE id = ? AND org_id = ?', [row.server_id, row.org_id]);
     if (!server) throw new Error('The server this credential tunnels through no longer exists');
   }
   return {
@@ -116,6 +121,13 @@ credentialsRouter.post('/', async (req, res, next) => {
 
     const extra = buildExtra(provider, req.body);
     if (extra.error) return res.status(400).json({ error: extra.error });
+    if (provider === 'git') {
+      try {
+        await checkGitUrls(extra.value);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
 
     if (serverId && !await one('SELECT id FROM servers WHERE id = ? AND org_id = ?', [serverId, req.orgId])) {
       return res.status(400).json({ error: 'The selected server does not exist' });
@@ -166,6 +178,24 @@ credentialsRouter.put('/:id', async (req, res, next) => {
       return res.status(400).json({ error: 'The selected server does not exist' });
     }
 
+    // The stored password / token is kept when none is sent. Pointing the
+    // connection somewhere else while keeping it would let an editor send it to
+    // a host of their choosing (Verify connects with it), so a change of target
+    // needs the secret typed again. An unauthenticated MongoDB / Redis has none.
+    const newServerId = req.body.server_id !== undefined ? serverId : (Number(row.server_id) || null);
+    if (!req.body.secret && row.secret_enc && targetChanged(row, extra.value, newServerId)) {
+      return res.status(400).json({
+        error: 'Changing where this connection points (host, port, server, git provider or URLs) needs the password / token entered again.',
+      });
+    }
+    if (row.provider === 'git') {
+      try {
+        await checkGitUrls(extra.value);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     await run(
       'UPDATE credentials SET name = ?, username = ?, secret_enc = ?, extra = ?, server_id = ? WHERE id = ?',
       [
@@ -173,7 +203,7 @@ credentialsRouter.put('/:id', async (req, res, next) => {
         req.body.username !== undefined ? (req.body.username || '').trim() || null : row.username,
         req.body.secret ? encrypt(req.body.secret) : row.secret_enc,
         JSON.stringify(extra.value),
-        req.body.server_id !== undefined ? (Number(req.body.server_id) || null) : row.server_id,
+        newServerId,
         row.id,
       ]
     );
@@ -226,6 +256,45 @@ function buildExtra(provider, body) {
   }
 
   return { value: body.extra && typeof body.extra === 'object' ? body.extra : {} };
+}
+
+/** The parts of `extra` that decide where a database or git credential connects. */
+const TARGET_FIELDS = ['host', 'port', 'kind', 'apiUrl', 'webUrl'];
+
+/** Does saving `next` (and `nextServerId`) point the credential somewhere new? */
+function targetChanged(row, next, nextServerId) {
+  if (!DATABASE_PROVIDERS[row.provider] && row.provider !== 'git') return false;
+  // Normalise the stored copy the same way, so defaults filled in later do not count as a change.
+  const before = buildExtra(row.provider, asJson(row.extra)).value || asJson(row.extra);
+  if ((Number(row.server_id) || null) !== nextServerId) return true;
+  return TARGET_FIELDS.some((k) => String(before[k] ?? '') !== String(next[k] ?? ''));
+}
+
+/**
+ * A git account's API and web URLs can come from the form, and the panel
+ * fetches them with the token attached. A URL other than the provider's
+ * default must be https:// (plain http:// only while private targets are
+ * allowed, for a self-hosted server on the operator's own LAN), carry no
+ * user:password, and its host must not resolve to loopback, a private network
+ * or cloud metadata. The fetch itself (lib/git.js) resolves the name again, so
+ * this does not stop a DNS answer that changes in between.
+ */
+async function checkGitUrls(settings) {
+  const d = gitDefaults(gitKind(settings.kind));
+  const checks = [['API URL', settings.apiUrl, d.apiUrl], ['web URL', settings.webUrl, d.webUrl]];
+  for (const [label, value, fallback] of checks) {
+    if (!value || value === String(fallback).replace(/\/+$/, '')) continue;
+    let url;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new Error(`The git ${label} is not a valid URL`);
+    }
+    const plainHttpOk = url.protocol === 'http:' && privateTargetsAllowed();
+    if (url.protocol !== 'https:' && !plainHttpOk) throw new Error(`The git ${label} must start with https://`);
+    if (url.username || url.password) throw new Error(`The git ${label} must not contain a username or password`);
+    await safeTarget(url.hostname);
+  }
 }
 
 /**
@@ -306,6 +375,7 @@ credentialsRouter.post('/test-git', async (req, res) => {
   if (!token) return res.status(400).json({ error: 'A token is required' });
   try {
     const settings = buildExtra('git', req.body).value;
+    await checkGitUrls(settings);
     res.json({ ok: true, account: await authenticate(token, settings) });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message });
@@ -315,6 +385,8 @@ credentialsRouter.post('/test-git', async (req, res) => {
 const verifiers = {
   async git(row) {
     const extra = asJson(row.extra);
+    // Rows saved before the URL check existed are checked here too.
+    await checkGitUrls(gitSettings(extra));
     const account = await authenticate(await usableGitToken(row), extra);
     await storeGitAccount(row.id, account, extra);
     return account;
@@ -343,7 +415,9 @@ const verifiers = {
 
 async function testEngine(row) {
   const extra = asJson(row.extra);
-  const server = row.server_id ? await one('SELECT * FROM servers WHERE id = ?', [row.server_id]) : null;
+  const server = row.server_id ? await one('SELECT * FROM servers WHERE id = ? AND org_id = ?', [row.server_id, row.org_id]) : null;
+  // Without this, a server from another organisation would quietly turn into a direct connection.
+  if (row.server_id && !server) throw new Error('The server this connection tunnels through no longer exists');
   return engineFor(row.provider).test({
     host: extra.host || '127.0.0.1',
     port: Number(extra.port || DATABASE_PROVIDERS[row.provider].defaultPort),
@@ -365,6 +439,7 @@ function gitRoute(handler) {
     if (row.provider !== 'git') return res.status(400).json({ error: 'That credential is not a git account' });
     try {
       const settings = gitSettings(asJson(row.extra));
+      await checkGitUrls(settings);
       res.json({ ok: true, ...(await handler(await usableGitToken(row), settings, req, row)) });
     } catch (err) {
       await run("UPDATE credentials SET status='invalid', last_error=? WHERE id=?", [err.message, row.id]);

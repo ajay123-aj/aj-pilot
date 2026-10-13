@@ -573,6 +573,8 @@ async function addOrgScoping() {
     // A super admin can end any plan on a date (or now): after it the organisation is view-only.
     ['subscriptions', 'expires_at', 'DATETIME NULL'],
     ['installations', 'environment_id', 'INT NULL'],
+    // The SSH host key fingerprint seen on first connect (trust on first use).
+    ['servers', 'host_key', 'VARCHAR(128) NULL'],
   ];
   for (const [table, column, definition] of LATER_COLUMNS) {
     if (await columnExists(table, column)) continue;
@@ -599,6 +601,25 @@ async function addOrgScoping() {
   if (PROVIDERS.some((p) => !providerType.includes(`'${p}'`))) {
     await getPool().query(`ALTER TABLE credentials MODIFY provider ENUM(${PROVIDER_ENUM}) NOT NULL`);
     console.log('[db] Credentials can now be PostgreSQL, MongoDB and Redis connections.');
+  }
+
+  // Server names were once unique across the whole panel, which told one
+  // organisation which names another had taken. They are unique per organisation now.
+  const globalNameIndexes = await all(
+    `SELECT index_name AS name FROM information_schema.statistics
+      WHERE table_schema = DATABASE() AND table_name = 'servers' AND non_unique = 0
+      GROUP BY index_name HAVING COUNT(*) = 1 AND MAX(column_name) = 'name'`
+  );
+  for (const idx of globalNameIndexes) {
+    await getPool().query(`ALTER TABLE servers DROP INDEX \`${idx.name}\``);
+    console.log('[db] Server names are now unique per organisation.');
+  }
+  const hasOrgNameIndex = Number(await scalar(
+    `SELECT COUNT(*) FROM information_schema.statistics
+      WHERE table_schema = DATABASE() AND table_name = 'servers' AND index_name = 'uq_server_org_name'`
+  ));
+  if (!hasOrgNameIndex) {
+    await getPool().query('ALTER TABLE servers ADD UNIQUE KEY uq_server_org_name (org_id, name)');
   }
 
   // Super admins run the platform and belong to no organisation; they only open one to work in it.

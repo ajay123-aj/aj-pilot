@@ -84,6 +84,24 @@ const parseContainers = (text) => lines(text).map((line) => {
 });
 
 /**
+ * A clone URL split into the bare URL and an HTTP Basic header for the
+ * credentials it carried, so the token can be handed to git without being
+ * part of the URL. A URL without credentials (or not over HTTP) is left as it is.
+ */
+function cloneAuth(cloneUrl) {
+  try {
+    const url = new URL(cloneUrl);
+    if (!/^https?:$/.test(url.protocol) || (!url.username && !url.password)) return { url: cloneUrl, header: null };
+    const basic = Buffer.from(`${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`, 'utf8').toString('base64');
+    url.username = '';
+    url.password = '';
+    return { url: url.toString(), header: `Authorization: Basic ${basic}` };
+  } catch {
+    return { url: cloneUrl, header: null };
+  }
+}
+
+/**
  * Build and run one app.
  *
  * `cloneUrl` carries the git token, so every line of output is filtered before
@@ -91,6 +109,7 @@ const parseContainers = (text) => lines(text).map((line) => {
  */
 export async function deployApp(conn, server, spec) {
   const dir = `${APP_ROOT}/${spec.name}`;
+  const auth = cloneAuth(spec.cloneUrl);
   const image = `${spec.image}:${spec.tag}`;
   const containers = plannedContainers(spec);
 
@@ -129,8 +148,20 @@ mkdir -p "$NEW"
 
 ${step('clone', `Cloning ${spec.repo} (${spec.branch})`)}
 echo "Cloning ${spec.repo} (${spec.branch})…"
-CLONE_URL="$(echo ${b64(spec.cloneUrl)} | base64 -d)"
+CLONE_URL="$(echo ${b64(auth.url)} | base64 -d)"
+${auth.header ? `# The token travels in git's environment as an HTTP header — never in the URL or on a
+# command line, where any user of the server could read it from the process list.
+GIT_AUTH_HEADER="$(echo ${b64(auth.header)} | base64 -d)"
+if printf '%s\\n' 2.31 "$(git --version | awk '{print $3}')" | sort -V -C; then
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$GIT_AUTH_HEADER"
+else
+  # Older git has no GIT_CONFIG_COUNT; this is the variable its own "-c" uses.
+  export GIT_CONFIG_PARAMETERS="'http.extraHeader=$GIT_AUTH_HEADER'"
+fi
+unset GIT_AUTH_HEADER` : ''}
 git clone --depth 1 --single-branch --branch ${q(spec.branch)} "$CLONE_URL" "$NEW" 2>&1 | sed 's#//[^@/]*@#//***@#g'
+# Nothing after the clone needs the token, and the build must not inherit it.
+unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_PARAMETERS
 [ -d "$NEW/.git" ] || { echo "The repository could not be cloned" >&2; rm -rf "$NEW"; exit 4; }
 # The exact commit being built, for the panel to remember (auto deploy compares against it).
 # Format: ::commit::<sha>::<commit time>::<parent count>::<author>::<subject> — two parents is a merge commit.
@@ -345,6 +376,7 @@ exit $rc`;
 /** Never let a clone URL's token reach the database or the screen. */
 const scrub = (text) => String(text || '')
   .replace(/\/\/[^@\s/]*@/g, '//***@')
+  .replace(/(Authorization:\s*Basic\s+)[A-Za-z0-9+/=]+/gi, '$1***')
   .replace(/(gh[pousr]_|glpat-|dckr_pat_)[A-Za-z0-9_-]+/g, '$1***');
 
 function explainDeployFailure(spec, result, log, logs) {

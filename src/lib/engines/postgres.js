@@ -18,7 +18,7 @@ const NAME_RE = /^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/;
  * close them all afterwards.
  */
 async function withPg(cfg, fn) {
-  return withTunnel(cfg.server, cfg.host, cfg.port, async ({ host, port }) => {
+  return withTunnel(cfg.server, cfg.host, cfg.port, async ({ host, port, servername }) => {
     const clients = new Map();
     const open = async (database) => {
       const db = database || cfg.database || 'postgres';
@@ -26,7 +26,8 @@ async function withPg(cfg, fn) {
       const client = new pg.Client({
         host, port, user: cfg.user, password: cfg.password, database: db,
         connectionTimeoutMillis: 15000,
-        ssl: cfg.tls ? { rejectUnauthorized: false } : undefined,
+        // `host` may be the resolved IP, so the hostname goes along for SNI.
+        ssl: cfg.tls ? { rejectUnauthorized: false, ...(servername ? { servername } : {}) } : undefined,
         application_name: 'aj-pilot-panel',
       });
       client.on('error', () => {});
@@ -50,17 +51,18 @@ function friendly(err) {
   const msg = String(err?.message || err);
   const map = [
     [/password authentication failed|28P01/i, 'Password authentication failed — check the username and password.'],
-    [/ECONNREFUSED/i, 'Connection refused — PostgreSQL is not listening on that host and port.'],
-    [/timeout|ETIMEDOUT/i, 'Connection timed out — PostgreSQL may listen on localhost only. Tie this connection to a server so the panel tunnels over SSH.'],
+    // Refused and timed out read the same (and the raw error is dropped), so
+    // the test form is no use for probing which ports are open.
+    [/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|timeout|ETIMEDOUT/i, 'Could not reach PostgreSQL on that host and port. It may listen on localhost only — tie this connection to a server so the panel tunnels over SSH.', true],
     [/ENOTFOUND|EAI_AGAIN/i, 'Host not found — the hostname could not be resolved.'],
     [/no pg_hba\.conf entry/i, 'pg_hba.conf does not allow this connection. Add a rule for this user and host, or tunnel through the server over SSH.'],
     [/does not exist/i, msg],
     [/server does not support SSL/i, 'This server does not support TLS — turn TLS off for this connection.'],
   ];
-  for (const [re, nice] of map) {
+  for (const [re, nice, hideCause] of map) {
     if (re.test(msg)) {
       const e = new Error(nice);
-      e.cause = msg;
+      if (!hideCause) e.cause = msg;
       return e;
     }
   }
@@ -648,10 +650,34 @@ export const queryHelp = {
   databaseLabel: 'Database',
 };
 
+/**
+ * READ ONLY stops writes to tables, but not functions that act on the server
+ * itself — ending other sessions, reading files, reloading its config, running
+ * a query string given as text — and viewers can run this. Those are refused
+ * by name. Double quotes are stripped before matching, so "pg_sleep"(5) is
+ * caught too, and U&"…" identifiers (which could spell a name in escapes) are
+ * refused outright. A name inside a string literal is refused as well; that is
+ * deliberate, since several of these take SQL as a string.
+ */
+const FORBIDDEN_FUNCTIONS = /\b(pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_rotate_logfile|pg_read_file|pg_read_binary_file|pg_ls_\w+|pg_stat_file|pg_stat_reset\w*|pg_file_\w+|pg_sleep\w*|pg_promote|pg_switch_wal|pg_create_\w+|pg_drop_replication_slot|pg_replication_\w+|pg_logical_\w+|pg_advisory_\w+|pg_try_advisory_\w+|lo_\w+|loread|lowrite|dblink\w*|set_config|ts_stat|query_to_xml\w*|cursor_to_xml\w*)\b/i;
+
+function checkReadQuery(sql) {
+  if (/\bU&["']/i.test(sql)) throw new Error('Unicode-escaped identifiers and strings (U&"…") are not allowed here');
+  const flat = sql.replace(/"/g, '');
+  if (/\bCOPY\b[\s\S]*\bPROGRAM\b/i.test(flat)) throw new Error('COPY … PROGRAM is not allowed here');
+  const fn = flat.match(FORBIDDEN_FUNCTIONS);
+  if (fn) throw new Error(`${fn[1]} is not allowed in a read-only query`);
+  // EXPLAIN ANALYZE runs the statement it explains.
+  if (/^EXPLAIN\b[\s\S]*\bANALY[SZ]E\b/i.test(flat)) throw new Error('EXPLAIN ANALYZE runs the query and is not allowed here — use plain EXPLAIN');
+  // Row locks would block other sessions for as long as the query runs.
+  if (/\bFOR\s+(NO\s+KEY\s+)?(UPDATE|SHARE)\b|\bFOR\s+KEY\s+SHARE\b/i.test(flat)) throw new Error('Row locks (FOR UPDATE / FOR SHARE) are not allowed here');
+}
+
 export async function query(cfg, { text: sql, database }) {
   const trimmed = String(sql || '').trim().replace(/;\s*$/, '');
   if (!trimmed) throw new Error('A query is required');
   if (!/^(SELECT|WITH|SHOW|EXPLAIN|TABLE|VALUES)\b/i.test(trimmed)) throw new Error('Only SELECT, WITH, SHOW, EXPLAIN, TABLE and VALUES run here');
+  checkReadQuery(trimmed);
 
   return withPg(cfg, async (open) => {
     const c = await open(database || undefined);
@@ -672,5 +698,44 @@ export async function query(cfg, { text: sql, database }) {
     } finally {
       await c.query('ROLLBACK').catch(() => {});
     }
+  });
+}
+
+/** A few cheap numbers for the connection's card, read every few seconds. */
+export async function pulse(cfg, { storage = false } = {}) {
+  return withPg(cfg, async (open) => {
+    const c = await open();
+    const id = await first(c, `SELECT current_setting('server_version') AS version, current_setting('max_connections')::int AS max_conn,
+      extract(epoch FROM now() - pg_postmaster_start_time())::bigint AS uptime, pg_is_in_recovery() AS replica`);
+    const conns = await first(c, `SELECT count(*)::int AS total, count(*) FILTER (WHERE state = 'active')::int AS active,
+      count(*) FILTER (WHERE state LIKE 'idle in transaction%')::int AS idle_tx FROM pg_stat_activity WHERE backend_type = 'client backend'`);
+    const s = await first(c, `SELECT sum(xact_commit + xact_rollback)::bigint AS xacts, sum(blks_hit)::bigint AS hit,
+      sum(blks_read)::bigint AS read, sum(deadlocks)::bigint AS deadlocks FROM pg_stat_database`);
+    let storageBytes = null;
+    if (storage) {
+      try {
+        const size = await first(c, `SELECT sum(pg_database_size(datname))::bigint AS bytes FROM pg_database
+          WHERE NOT datistemplate AND has_database_privilege(datname, 'CONNECT')`);
+        storageBytes = size.bytes == null ? null : Number(size.bytes);
+      } catch { /* no size without the right to see it */ }
+    }
+    const hit = Number(s.hit || 0);
+    const total = hit + Number(s.read || 0);
+    return {
+      version: `PostgreSQL ${String(id.version).split(' ')[0]}`,
+      uptimeSec: Number(id.uptime || 0),
+      role: id.replica ? 'replica' : 'primary',
+      counter: Number(s.xacts || 0),
+      counterUnit: 'transactions/s',
+      connections: { used: conns.total, max: id.max_conn },
+      memory: null,
+      hitRate: total ? Math.round((hit / total) * 1000) / 10 : null,
+      storageBytes,
+      facts: [
+        ['Active', conns.active],
+        ['Idle in transaction', conns.idle_tx],
+        ['Deadlocks', Number(s.deadlocks || 0)],
+      ],
+    };
   });
 }

@@ -5,7 +5,7 @@ import { connectionFromRow, withConnection, testConnection, exec, rootExec } fro
 import { collectSystemInfo } from '../lib/systemInfo.js';
 import {
   listServices, describeService, controlService, createService, deleteService,
-  validateServiceSpec, validateUnit,
+  validateServiceSpec, validateUnit, maskUnitSecrets,
 } from '../lib/services.js';
 import {
   dockerState, createNetwork, removeNetwork, removeVolume, validateName,
@@ -40,11 +40,24 @@ import {
 export const serversRouter = Router();
 
 /** Strip every secret column before a row leaves the API. */
+/**
+ * The status to show: whichever is newer of the stored one and the monitor's
+ * latest probe, so the list, the server page and the status poll always agree.
+ */
+function currentStatus(row) {
+  const now = liveStatus().get(row.id);
+  if (!now || row.status === 'rebooting') return {};
+  const stored = row.last_checked_at ? new Date(row.last_checked_at).getTime() : 0;
+  if (new Date(now.checkedAt).getTime() < stored) return {};
+  return { status: now.status, last_error: now.error, last_checked_at: now.checkedAt };
+}
+
 function publicServer(row) {
   if (!row) return null;
   const { password_enc, private_key_enc, passphrase_enc, sudo_password_enc, ...rest } = row;
   return {
     ...rest,
+    ...currentStatus(row),
     tags: row.tags ? row.tags.split(',').filter(Boolean) : [],
     hasPassword: Boolean(password_enc),
     hasPrivateKey: Boolean(private_key_enc),
@@ -93,6 +106,12 @@ function validate(body, { partial = false } = {}) {
 
 const getRow = (id, orgId) => one('SELECT * FROM servers WHERE id = ? AND org_id = ?', [id, orgId]);
 
+/**
+ * The start of a command, for the activity log. Everyone in the organisation
+ * can read the log, and commands often carry a password or token further along.
+ */
+const logSnippet = (t) => (t.length > 80 ? `${t.slice(0, 80)}…` : t);
+
 function markStatus(id, status, error = null) {
   return run('UPDATE servers SET status = ?, last_error = ?, last_checked_at = NOW() WHERE id = ?', [status, error, id]);
 }
@@ -117,6 +136,8 @@ serversRouter.get('/', async (req, res, next) => {
       let summary = null;
       if (fact) {
         const p = asJson(fact.payload);
+        // The card shows the disk the system lives on: "/", or the first one when "/" is not listed.
+        const disk = p.disks?.find((d) => d.mount === '/') || p.disks?.[0] || null;
         summary = {
           collectedAt: fact.collected_at,
           os: p.os?.pretty,
@@ -124,7 +145,11 @@ serversRouter.get('/', async (req, res, next) => {
           cpuCores: p.cpu?.cores,
           memoryTotalBytes: p.memory?.totalBytes,
           memoryUsedPct: p.memory?.usedPct,
-          diskUsedPct: p.disks?.[0]?.usedPct ?? null,
+          memoryUsedBytes: p.memory?.usedBytes ?? null,
+          diskUsedPct: disk?.usedPct ?? null,
+          disk: disk ? { mount: disk.mount, sizeBytes: disk.sizeBytes, usedBytes: disk.usedBytes, availableBytes: disk.availableBytes } : null,
+          // Load over the last minute, as a share of the cores: 100% means every core busy.
+          cpuLoadPct: p.load?.one != null && p.cpu?.cores ? Math.round((p.load.one / p.cpu.cores) * 100) : null,
           uptime: p.uptime?.human,
         };
       }
@@ -152,13 +177,14 @@ serversRouter.get('/status', async (req, res, next) => {
       everySeconds: Math.round(config.monitor.intervalMs / 1000),
       servers: rows.map((row) => {
         const now = live.get(row.id);
+        const shown = { ...row, ...currentStatus(row) };
         return {
           id: row.id,
           name: row.name,
-          status: now?.status || row.status,
+          status: shown.status,
           latencyMs: now?.latencyMs ?? null,
-          lastError: now ? now.error : row.last_error,
-          checkedAt: now?.checkedAt || row.last_checked_at,
+          lastError: shown.last_error,
+          checkedAt: shown.last_checked_at,
           // Reachable is not the same as usable; the sign-in check says which.
           signIn: now?.authOk === undefined ? null : now.authOk,
           signInError: now?.authError || null,
@@ -191,6 +217,8 @@ serversRouter.post('/test', async (req, res, next) => {
     try {
       const result = await testConnection({
         host: value.host || saved?.host,
+        // The host came from the form, so the panel only dials it itself when it is public.
+        guardTarget: true,
         port: value.port,
         username: value.username || saved?.username,
         ...(value.auth_type === 'key'
@@ -203,7 +231,9 @@ serversRouter.post('/test', async (req, res, next) => {
       });
       res.json({ ok: true, ...result });
     } catch (err) {
-      res.status(400).json({ ok: false, error: err.message, detail: err.cause || null });
+      // Only the friendly message: the raw socket error would tell a caller
+      // which internal addresses and ports answer.
+      res.status(400).json({ ok: false, error: err.message });
     }
   } catch (err) { next(err); }
 });
@@ -273,7 +303,7 @@ serversRouter.put('/:id', async (req, res, next) => {
     // Server names are unique, so say which one is in the way rather than
     // letting the database raise a duplicate-key error at the browser.
     if (value.name && value.name !== row.name
-      && await one('SELECT id FROM servers WHERE name = ? AND id <> ?', [value.name, row.id])) {
+      && await one('SELECT id FROM servers WHERE name = ? AND id <> ? AND org_id = ?', [value.name, row.id, req.orgId])) {
       return res.status(409).json({ error: `Another server is already called "${value.name}"` });
     }
 
@@ -285,9 +315,11 @@ serversRouter.put('/:id', async (req, res, next) => {
       return res.status(400).json({ error: 'Enter the password to switch this server to password authentication' });
     }
 
+    // A different address is a different machine, so its host key is learnt afresh.
+    const moved = (value.host && value.host !== row.host) || (req.body.port !== undefined && value.port !== row.port);
     await run(
       `UPDATE servers SET name=?, host=?, port=?, username=?, auth_type=?, password_enc=?,
-         private_key_enc=?, passphrase_enc=?, sudo_password_enc=?, tags=?, notes=? WHERE id=?`,
+         private_key_enc=?, passphrase_enc=?, sudo_password_enc=?, tags=?, notes=?${moved ? ', host_key=NULL' : ''} WHERE id=?`,
       [
         value.name || row.name,
         value.host || row.host,
@@ -341,12 +373,26 @@ serversRouter.get('/:id/secrets', requirePermission('edit'), async (req, res, ne
   } catch (err) { next(err); }
 });
 
+/**
+ * Forget the remembered SSH host key, after the server was rebuilt or reinstalled.
+ * The next connection learns the new one.
+ */
+serversRouter.post('/:id/host-key/reset', requirePermission('edit'), async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'Server not found' });
+    await run('UPDATE servers SET host_key = NULL WHERE id = ? AND org_id = ?', [row.id, req.orgId]);
+    await logActivity('server', row.id, 'host_key_reset', `Reset the remembered SSH host key of ${row.name}`);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 serversRouter.post('/:id/test', async (req, res, next) => {
   try {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'Server not found' });
     try {
-      const result = await testConnection(connectionFromRow(row));
+      const result = await testConnection({ ...connectionFromRow(row), guardTarget: true });
       await markStatus(row.id, 'online');
       await logActivity('server', row.id, 'connected', `Connected to ${row.host} in ${result.latencyMs}ms`);
       res.json({ ok: true, ...result });
@@ -366,7 +412,7 @@ serversRouter.post('/:id/facts', async (req, res, next) => {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'Server not found' });
     try {
-      const facts = await withConnection(connectionFromRow(row), (conn) => collectSystemInfo(conn));
+      const facts = await withConnection({ ...connectionFromRow(row), guardTarget: true }, (conn) => collectSystemInfo(conn));
       await run('INSERT INTO server_facts (server_id, duration_ms, payload) VALUES (?,?,?)',
         [row.id, facts.meta.durationMs, JSON.stringify(facts)]);
       await markStatus(row.id, 'online');
@@ -419,9 +465,12 @@ serversRouter.get('/:id/services', serverRoute(async (conn, row) => {
 }));
 
 /** One unit in full, with its recent journal. */
-serversRouter.get('/:id/services/:unit', serverRoute(async (conn, row, req) => ({
-  service: await describeService(conn, row, req.params.unit),
-})));
+serversRouter.get('/:id/services/:unit', serverRoute(async (conn, row, req) => {
+  const service = await describeService(conn, row, req.params.unit);
+  // Environment= values are often passwords; only people who may change the server see them.
+  if (!can(req.user, 'edit')) service.unitFile = maskUnitSecrets(service.unitFile);
+  return { service };
+}));
 
 /** start / stop / restart / reload / enable / disable a unit. */
 serversRouter.post('/:id/services/:unit/action', async (req, res, next) => {
@@ -700,7 +749,7 @@ serversRouter.post('/:id/cron/jobs', async (req, res, next) => {
     try {
       const result = await withConnection(connectionFromRow(row), (conn) => addJob(conn, row, value));
       await logActivity('server', row.id, 'cron_job_added',
-        `Added a cron job for ${value.user} on ${row.name}: ${value.schedule} ${value.command.slice(0, 120)}`);
+        `Added a cron job for ${value.user} on ${row.name}: ${value.schedule} ${logSnippet(value.command)}`);
       res.status(201).json({ ok: true, ...result, job: value });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message, detail: err.cause || null });
@@ -726,7 +775,7 @@ serversRouter.put('/:id/cron/jobs', async (req, res, next) => {
     try {
       const result = await withConnection(connectionFromRow(row), (conn) => updateJob(conn, row, { ...value, oldLine }));
       await logActivity('server', row.id, 'cron_job_updated',
-        `Changed a cron job for ${value.user} on ${row.name}: ${value.schedule} ${value.command.slice(0, 120)}`);
+        `Changed a cron job for ${value.user} on ${row.name}: ${value.schedule} ${logSnippet(value.command)}`);
       res.json({ ok: true, ...result, job: value });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message, detail: err.cause || null });
@@ -1019,8 +1068,11 @@ serversRouter.get('/:id/stats', serverRoute(async (conn, row, req) => ({
  * forever.
  */
 const MAX_STREAMS = Number(process.env.STATS_MAX_STREAMS || 8);
+// No one organisation may hold every slot and lock the others out.
+const MAX_STREAMS_PER_ORG = Number(process.env.STATS_MAX_STREAMS_PER_ORG || 4);
 const STREAM_MINUTES = Number(process.env.STATS_STREAM_MINUTES || 15);
 let openStreams = 0;
+const streamsByOrg = new Map(); // orgId → open live views
 
 serversRouter.get('/:id/stats/stream', async (req, res, next) => {
   let row;
@@ -1030,12 +1082,14 @@ serversRouter.get('/:id/stats/stream', async (req, res, next) => {
     return next(err);
   }
   if (!row) return res.status(404).json({ error: 'Server not found' });
-  if (openStreams >= MAX_STREAMS) {
+  if (openStreams >= MAX_STREAMS || (streamsByOrg.get(req.orgId) || 0) >= MAX_STREAMS_PER_ORG) {
     return res.status(429).json({ error: 'Too many live views are open at once. Close one and try again.' });
   }
 
   // From here a slot is taken, so every path below has to give it back.
+  const orgId = req.orgId;
   openStreams += 1;
+  streamsByOrg.set(orgId, (streamsByOrg.get(orgId) || 0) + 1);
   try {
     const intervalMs = Math.max(2000, Math.min(60000, Number(req.query.every) || 5000));
 
@@ -1101,6 +1155,8 @@ serversRouter.get('/:id/stats/stream', async (req, res, next) => {
     }
   } finally {
     openStreams = Math.max(0, openStreams - 1);
+    const left = (streamsByOrg.get(orgId) || 1) - 1;
+    if (left > 0) streamsByOrg.set(orgId, left); else streamsByOrg.delete(orgId);
   }
 });
 
@@ -1136,7 +1192,11 @@ serversRouter.get('/:id/containers/:name', serverRoute(async (conn, row, req) =>
   const named = validateName(req.params.name, 'container name');
   if (named.error) throw new Error(named.error);
   await requireDocker(conn, row);
-  return { container: await containerDetails(conn, row, named.value) };
+  const container = await containerDetails(conn, row, named.value);
+  // A container's command line often carries a password (redis --requirepass, say),
+  // so only people who may change the server see it.
+  if (!can(req.user, 'edit') && container.command) container.command = '•••••• (hidden — needs edit permission)';
+  return { container };
 }));
 
 /** Remove a container that is not one of the panel's own. */
@@ -1466,7 +1526,7 @@ serversRouter.post('/:id/exec', async (req, res, next) => {
     if (!command) return res.status(400).json({ error: 'command is required' });
     try {
       const result = await withConnection(connectionFromRow(row), (conn) => exec(conn, command));
-      await logActivity('server', row.id, 'exec', command);
+      await logActivity('server', row.id, 'exec', logSnippet(command));
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });

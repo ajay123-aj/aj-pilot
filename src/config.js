@@ -76,7 +76,10 @@ export const config = {
   /** Sign-in sessions: how long a cookie lasts, and whether it is HTTPS-only. */
   auth: {
     sessionDays: Number(process.env.AUTH_SESSION_DAYS || 14),
-    secureCookie: String(process.env.AUTH_SECURE_COOKIE || '').toLowerCase() === 'true',
+    // HTTPS-only by default once SITE_URL says the site is served over HTTPS; AUTH_SECURE_COOKIE overrides.
+    secureCookie: process.env.AUTH_SECURE_COOKIE
+      ? String(process.env.AUTH_SECURE_COOKIE).toLowerCase() === 'true'
+      : String(process.env.SITE_URL || '').trim().toLowerCase().startsWith('https://'),
   },
 
   /**
@@ -92,6 +95,13 @@ export const config = {
 
   /** The public address of this site (https://deploy.example.com), for canonical links, the sitemap and link previews. */
   siteUrl: String(process.env.SITE_URL || '').trim(),
+
+  /**
+   * Set when a reverse proxy (nginx, Cloudflare) sits in front of the panel, so
+   * X-Forwarded-For / CF-Connecting-IP are believed. Off, they are ignored —
+   * otherwise any visitor could claim any address.
+   */
+  trustProxy: String(process.env.TRUST_PROXY || '').toLowerCase() === 'true',
 
   /** Where lead IP addresses are looked up: "ipwho.is" (default) or "off". */
   geoip: String(process.env.GEOIP || 'ipwho.is').trim(),

@@ -139,7 +139,7 @@ async function publicApp(row) {
 async function orgGitAccount(req, res) {
   let account;
   try {
-    account = await loadGitCredential(Number(req.body.credential_id));
+    account = await loadGitCredential(Number(req.body.credential_id), req.orgId);
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
     return null;
@@ -185,7 +185,7 @@ appsRouter.post('/inspect', async (req, res, next) => {
 
     let account;
     try {
-      account = await loadGitCredential(Number(req.body.credential_id));
+      account = await loadGitCredential(Number(req.body.credential_id), req.orgId);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
     }
@@ -384,7 +384,7 @@ appsRouter.post('/', async (req, res, next) => {
     startDeployment(insertId, { first: true });
     if (autoDeploy) {
       // The first deploy builds what is on the branch now: auto deploy starts after that commit.
-      loadGitCredential(credential.id)
+      loadGitCredential(credential.id, req.orgId)
         .then((account) => branchHead(account.token, account.extra, spec.repo, spec.branch))
         .then((head) => head?.sha && run('UPDATE apps SET auto_seen_sha = COALESCE(auto_seen_sha, ?) WHERE id = ?', [head.sha, insertId]))
         .catch(() => {});
@@ -401,7 +401,7 @@ appsRouter.post('/', async (req, res, next) => {
  * branch check still deploys every change — just not instantly.
  */
 async function registerWebhook(row, base) {
-  const account = await loadGitCredential(row.credential_id);
+  const account = await loadGitCredential(row.credential_id, row.org_id);
   if (row.webhook_id) await deleteRepoWebhook(account.token, account.extra, row.repo, row.webhook_id).catch(() => {});
   try {
     const hookId = await createRepoWebhook(account.token, account.extra, row.repo, {
@@ -420,7 +420,7 @@ async function registerWebhook(row, base) {
 async function removeWebhook(row) {
   if (!row.webhook_id) return;
   try {
-    const account = await loadGitCredential(row.credential_id);
+    const account = await loadGitCredential(row.credential_id, row.org_id);
     await deleteRepoWebhook(account.token, account.extra, row.repo, row.webhook_id);
   } catch { /* the hook may already be gone; the token going with it makes it harmless */ }
   await run('UPDATE apps SET webhook_id = NULL WHERE id = ?', [row.id]);
@@ -435,7 +435,7 @@ appsRouter.get('/:id/auto-deploy', requirePermission('edit'), async (req, res, n
     let head = null;
     let provider = null;
     try {
-      const account = await loadGitCredential(row.credential_id);
+      const account = await loadGitCredential(row.credential_id, row.org_id);
       provider = { kind: account.settings.kind, label: account.settings.label, webUrl: account.settings.webUrl };
       head = await branchHead(account.token, account.extra, row.repo, row.branch);
     } catch (err) { head = { error: err.message }; }
@@ -483,7 +483,7 @@ appsRouter.put('/:id/auto-deploy', async (req, res, next) => {
     let seen = row.auto_seen_sha;
     if (!row.deployed_sha && !seen) {
       try {
-        const account = await loadGitCredential(row.credential_id);
+        const account = await loadGitCredential(row.credential_id, row.org_id);
         seen = (await branchHead(account.token, account.extra, row.repo, row.branch))?.sha || null;
       } catch { /* the first check will say what is wrong */ }
     }
@@ -766,7 +766,7 @@ async function runDeployment(id, { first, reason = '', meta = null }) {
   note('account', 'Preparing the git account', `${reason ? `${reason}\n` : ''}Repository ${row.repo}, branch ${row.branch}`);
   let account;
   try {
-    account = await loadGitCredential(row.credential_id);
+    account = await loadGitCredential(row.credential_id, row.org_id);
   } catch (err) {
     return fail(`The git account is unusable: ${err.message}`);
   }

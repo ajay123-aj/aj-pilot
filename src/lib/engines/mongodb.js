@@ -1,5 +1,7 @@
 import { MongoClient } from 'mongodb';
+import dns from 'node:dns/promises';
 import { withTunnel } from '../tunnel.js';
+import { safeTarget } from '../netGuard.js';
 import {
   stat, kv, table, num, badge, code, small, link, field, bytes, count, uptime, percent, text,
   checkPassword, checkConfirm, unsupported,
@@ -32,15 +34,46 @@ const ROLE_TEXT = {
 /* ------------------------------------------------------------ connecting */
 
 async function withMongo(cfg, fn) {
-  // A full connection string (mongodb+srv://… for Atlas) is used as it is.
-  if (/^mongodb(\+srv)?:\/\//.test(cfg.host)) return connect(cfg, cfg.host, fn);
-  return withTunnel(cfg.server, cfg.host, cfg.port, ({ host, port }) => connect(cfg, `mongodb://${host.includes(':') ? `[${host}]` : host}:${port}/`, fn));
+  // A full connection string (mongodb+srv://… for Atlas) is used as it is —
+  // always dialled from the panel, so every host in it is checked first.
+  if (/^mongodb(\+srv)?:\/\//.test(cfg.host)) {
+    await checkUriHosts(cfg.host);
+    return connect(cfg, cfg.host, fn);
+  }
+  return withTunnel(cfg.server, cfg.host, cfg.port, ({ host, port, servername }) =>
+    connect(cfg, `mongodb://${host.includes(':') ? `[${host}]` : host}:${port}/`, fn, servername));
 }
 
-async function connect(cfg, uri, fn) {
+/**
+ * A connection string is handed to the driver as written (Atlas needs its
+ * hostnames for TLS), so it cannot be pinned to a resolved address the way a
+ * plain host is. Instead each host it names — or, for mongodb+srv, each host
+ * the SRV record points at — goes through safeTarget before connecting. A DNS
+ * answer that changes between this check and the driver's own lookup is not
+ * caught; tie the connection to a server where that matters.
+ */
+async function checkUriHosts(uri) {
+  const m = uri.match(/^mongodb(\+srv)?:\/\/(?:[^@/]*@)?([^/?]+)/);
+  if (!m) throw new Error('That MongoDB connection string could not be read');
+  const hosts = m[2].split(',').map((h) => h.replace(/:\d+$/, '').replace(/^\[|\]$/g, ''));
+  if (m[1]) {
+    let records;
+    try {
+      records = await dns.resolveSrv(`_mongodb._tcp.${hosts[0]}`);
+    } catch {
+      throw new Error(`"${hosts[0]}" has no MongoDB SRV record`);
+    }
+    hosts.push(...records.map((r) => r.name));
+  }
+  for (const h of hosts) await safeTarget(h);
+}
+
+async function connect(cfg, uri, fn, servername) {
   const client = new MongoClient(uri, {
     ...(cfg.user ? { auth: { username: cfg.user, password: cfg.password }, authSource: cfg.authSource || 'admin' } : {}),
     ...(/^mongodb\+srv/.test(uri) ? {} : { directConnection: true }),
+    // The URI may hold the resolved IP; keep the hostname for SNI.
+    ...(cfg.tls && servername ? { servername } : {}),
     tls: cfg.tls || undefined,
     tlsAllowInvalidCertificates: cfg.tls || undefined,
     serverSelectionTimeoutMS: 12000,
@@ -63,14 +96,15 @@ function friendly(err) {
   const msg = String(err?.message || err);
   const map = [
     [/Authentication failed|auth.*fail/i, 'Authentication failed — check the username, password and auth database.'],
-    [/ECONNREFUSED/i, 'Connection refused — MongoDB is not listening on that host and port.'],
-    [/Server selection timed out|ETIMEDOUT|timed out/i, 'Timed out reaching MongoDB. It may listen on localhost only — tie this connection to a server so the panel tunnels over SSH.'],
+    // Refused and timed out read the same (and the raw error is dropped), so
+    // the test form is no use for probing which ports are open.
+    [/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|Server selection timed out|ETIMEDOUT|timed out/i, 'Could not reach MongoDB on that host and port. It may listen on localhost only — tie this connection to a server so the panel tunnels over SSH.', true],
     [/ENOTFOUND|EAI_AGAIN/i, 'Host not found — the hostname could not be resolved.'],
   ];
-  for (const [re, nice] of map) {
+  for (const [re, nice, hideCause] of map) {
     if (re.test(msg)) {
       const e = new Error(nice);
-      e.cause = msg;
+      if (!hideCause) e.cause = msg;
       return e;
     }
   }
@@ -467,6 +501,23 @@ export const queryHelp = {
   databaseLabel: 'Database',
 };
 
+/**
+ * Viewers can run this, so anything that writes ($out, $merge) or runs
+ * JavaScript on the server ($where, $function, $accumulator) is refused,
+ * wherever it sits — filter, projection, sort or pipeline. Keys are checked
+ * after JSON parsing, so escaped spellings ("$out") are caught too.
+ */
+const FORBIDDEN_OPERATORS = new Set(['$out', '$merge', '$where', '$function', '$accumulator']);
+
+function checkReadQuery(value) {
+  if (Array.isArray(value)) return value.forEach(checkReadQuery);
+  if (!value || typeof value !== 'object') return;
+  for (const [k, v] of Object.entries(value)) {
+    if (FORBIDDEN_OPERATORS.has(k)) throw new Error(`${k} is not allowed here — it writes data or runs code on the server`);
+    checkReadQuery(v);
+  }
+}
+
 export async function query(cfg, { text: input, database }) {
   let q;
   try {
@@ -477,7 +528,7 @@ export async function query(cfg, { text: input, database }) {
   const dbName = q.db || database || cfg.database;
   if (!dbName) throw new Error('Pick a database');
   if (!q.collection) throw new Error('"collection" is required');
-  if (q.aggregate && JSON.stringify(q.aggregate).match(/"\$(out|merge)"/)) throw new Error('$out and $merge write data and are not allowed here');
+  checkReadQuery(q);
   const limit = Math.min(Number(q.limit) || 50, 200);
 
   return withMongo(cfg, async (client) => {
@@ -493,6 +544,40 @@ export async function query(cfg, { text: input, database }) {
       rowCount: Math.min(docs.length, limit),
       truncated: docs.length > limit,
       durationMs: Date.now() - started,
+    };
+  });
+}
+
+/** A few cheap numbers for the connection's card, read every few seconds. */
+export async function pulse(cfg, { storage = false } = {}) {
+  return withMongo(cfg, async (client) => {
+    const s = await admin(client).command({ serverStatus: 1, metrics: 0, locks: 0 });
+    const hello = await maybe(admin(client).command({ hello: 1 }));
+    let storageBytes = null;
+    if (storage) {
+      const dbs = await maybe(admin(client).command({ listDatabases: 1 }));
+      storageBytes = dbs?.totalSize ?? null;
+    }
+    const c = s.connections || {};
+    const op = s.opcounters || {};
+    const cache = s.wiredTiger?.cache || {};
+    const cacheUsed = Number(cache['bytes currently in the cache'] || 0);
+    const cacheMax = Number(cache['maximum bytes configured'] || 0);
+    return {
+      version: `MongoDB ${s.version}`,
+      uptimeSec: Number(s.uptime || 0),
+      role: hello?.setName ? (hello.isWritablePrimary ? 'primary' : 'secondary') : 'standalone',
+      counter: ['insert', 'query', 'update', 'delete', 'getmore', 'command'].reduce((n, k) => n + Number(op[k] || 0), 0),
+      counterUnit: 'ops/s',
+      connections: { used: Number(c.current || 0), max: Number(c.current || 0) + Number(c.available || 0) },
+      memory: cacheMax ? { label: 'WiredTiger cache', used: cacheUsed, max: cacheMax, usedBytes: cacheUsed, maxBytes: cacheMax } : null,
+      hitRate: null,
+      storageBytes,
+      facts: [
+        ['Resident memory', s.mem?.resident ? `${s.mem.resident} MB` : '—'],
+        ['Inserts', Number(op.insert || 0)],
+        ['Queries', Number(op.query || 0)],
+      ],
     };
   });
 }

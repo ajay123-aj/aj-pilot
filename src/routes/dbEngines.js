@@ -7,10 +7,12 @@
  */
 
 import { Router } from 'express';
-import { one, run, logActivity } from '../db/index.js';
+import { one, all, run, logActivity } from '../db/index.js';
 import { decrypt } from '../lib/crypto.js';
 import { asJson } from '../lib/gitAccounts.js';
 import { engineFor, DATABASE_PROVIDERS } from '../lib/engines/index.js';
+import { pulse as mysqlPulse } from '../lib/mysql.js';
+import * as redisKeys from '../lib/engines/redisKeys.js';
 
 export const dbEnginesRouter = Router();
 
@@ -66,7 +68,7 @@ function engineRoute(handler, { manage = false } = {}) {
 const manage = (action, handler) => engineRoute(async (engine, cfg, req, row) => {
   const result = await handler(engine, cfg, req.body || {});
   await logActivity('credential', row.id, `db_${action}`, `${DATABASE_PROVIDERS[row.provider].label} "${row.name}": ${result.summary}`,
-    /drop|revoke|flush/.test(action) ? 'warn' : 'info');
+    /drop|revoke|flush|deleted/.test(action) ? 'warn' : 'info');
   return result;
 }, { manage: true });
 
@@ -111,3 +113,145 @@ dbEnginesRouter.delete('/:id/db/users', manage('user_dropped', (e, cfg, b) => e.
 dbEnginesRouter.post('/:id/db/users/grants', manage('grant', (e, cfg, b) => e.grant(cfg, b.key, b)));
 dbEnginesRouter.delete('/:id/db/users/grants', manage('revoke', (e, cfg, b) => e.revoke(cfg, b.key, b)));
 dbEnginesRouter.put('/:id/db/config', manage('config_set', (e, cfg, b) => e.setConfig(cfg, b)));
+
+/* ------------------------------------------------------- Redis key manager */
+
+/*
+ * Finding and reading keys are POSTs listed as read-only in authGuard, so a
+ * viewer can browse. Adding a key needs "create", changing one "edit",
+ * deleting "delete" — the usual rule for POST, PUT and DELETE.
+ */
+/** A read: a missing key is the answer, not a sign the connection is broken — so nothing is marked invalid. */
+const redisRead = (fn) => async (req, res) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'Connection not found' });
+    if (row.provider !== 'redis') return res.status(400).json({ error: 'Key management is for Redis connections' });
+    res.json({ ok: true, ...(await fn(await engineConfig(row, req.orgId), req.body || {})) });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+};
+const redisManage = (action, fn) => manage(action, (engine, cfg, b) => fn(cfg, b));
+const onlyRedis = (req, res, next) => one('SELECT provider FROM credentials WHERE id = ? AND org_id = ?', [req.params.id, req.orgId])
+  .then((r) => (r?.provider === 'redis' ? next() : res.status(400).json({ error: 'Key management is for Redis connections' })))
+  .catch(next);
+
+dbEnginesRouter.post('/:id/redis/scan', redisRead(redisKeys.scanKeys));
+dbEnginesRouter.post('/:id/redis/key', redisRead(redisKeys.readKey));
+dbEnginesRouter.post('/:id/redis/keys', onlyRedis, redisManage('key_created', redisKeys.createKey));
+dbEnginesRouter.put('/:id/redis/key', onlyRedis, redisManage('key_changed', redisKeys.editKey));
+dbEnginesRouter.delete('/:id/redis/keys', onlyRedis, redisManage('key_deleted', redisKeys.deleteKeys));
+
+/* ------------------------------------------------------------- live card pulse */
+
+/*
+ * GET /credentials/pulse — the numbers on every database card, asked for every
+ * five seconds while the Databases page is open.
+ *
+ * Each connection's answer is kept for a few seconds and shared, so two people
+ * (or two tabs) watching the page cost the database one set of queries, not two.
+ * The size on disk is the one expensive question; it is asked once a minute.
+ * Rates — queries or operations per second — come from the difference between
+ * two readings of the engine's own counter.
+ */
+const PULSE_TTL_MS = 4000;
+const PULSE_RETRY_MS = 20_000;
+const PULSE_TIMEOUT_MS = 8000;
+const STORAGE_EVERY_MS = 60_000;
+const PULSE_CONCURRENCY = 6;
+const pulses = new Map(); // credential id -> { at, data, pending, counter, counterAt, rate, storageBytes, storageAt }
+
+const pulseFor = (provider) => (provider === 'mysql' ? mysqlPulse : engineFor(provider)?.pulse);
+
+function withTimeout(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`No answer within ${ms / 1000}s`)), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function readPulse(row) {
+  const entry = pulses.get(row.id) || {};
+  // A connection that failed is tried again less often: it would only time out again.
+  const ttl = entry.data?.ok === false ? PULSE_RETRY_MS : PULSE_TTL_MS;
+  if (entry.at && Date.now() - entry.at < ttl) return entry.data;
+  if (entry.pending) return entry.pending;
+
+  const wantStorage = !entry.storageAt || Date.now() - entry.storageAt >= STORAGE_EVERY_MS;
+  entry.pending = (async () => {
+    const started = Date.now();
+    try {
+      const p = await withTimeout(pulseFor(row.provider)(await engineConfig(row, row.org_id), { storage: wantStorage }), PULSE_TIMEOUT_MS);
+      const now = Date.now();
+      // A counter that went backwards means the database restarted: no rate until the next reading.
+      entry.rate = entry.counterAt && p.counter >= entry.counter
+        ? Math.round(((p.counter - entry.counter) / ((now - entry.counterAt) / 1000)) * 10) / 10
+        : (entry.counter && p.counter < entry.counter ? null : entry.rate ?? null);
+      entry.counter = p.counter;
+      entry.counterAt = now;
+      if (wantStorage) { entry.storageBytes = p.storageBytes; entry.storageAt = now; }
+      const { counter, storageBytes, ...rest } = p;
+      return { ok: true, latencyMs: now - started, ...rest, rate: entry.rate, storageBytes: entry.storageBytes ?? null };
+    } catch (err) {
+      return { ok: false, latencyMs: Date.now() - started, error: friendlyDbError(err) };
+    }
+  })();
+  pulses.set(row.id, entry);
+  try {
+    entry.data = await entry.pending;
+    entry.at = Date.now();
+    return entry.data;
+  } finally {
+    entry.pending = null;
+  }
+}
+
+/** Driver errors can be long and technical; the card has room for one line. */
+const friendlyDbError = (err) => String(err?.message || err || 'Unreachable').split('\n')[0].slice(0, 200);
+
+/** Run `fn` over `items`, at most `limit` at a time. */
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
+
+dbEnginesRouter.get('/pulse', async (req, res, next) => {
+  try {
+    const providers = Object.keys(DATABASE_PROVIDERS);
+    const rows = await all(
+      `SELECT * FROM credentials WHERE org_id = ? AND provider IN (${providers.map(() => '?').join(',')})`,
+      [req.orgId, ...providers]
+    );
+
+    // The disk of the server a database is tunnelled through, from that server's last "Fetch details".
+    const serverIds = [...new Set(rows.map((r) => r.server_id).filter(Boolean))];
+    const disks = new Map();
+    if (serverIds.length) {
+      const facts = await all(`
+        SELECT f.server_id, f.collected_at, f.payload FROM server_facts f
+         WHERE f.id IN (SELECT MAX(id) FROM server_facts WHERE server_id IN (${serverIds.map(() => '?').join(',')}) GROUP BY server_id)`,
+      serverIds);
+      for (const f of facts) {
+        const p = asJson(f.payload);
+        const disk = p.disks?.find((d) => d.mount === '/') || p.disks?.[0];
+        if (disk) disks.set(f.server_id, { usedPct: disk.usedPct, usedBytes: disk.usedBytes, sizeBytes: disk.sizeBytes, availableBytes: disk.availableBytes, mount: disk.mount, collectedAt: f.collected_at });
+      }
+    }
+
+    const results = await mapLimit(rows, PULSE_CONCURRENCY, async (row) => ({
+      id: row.id,
+      ...(await readPulse(row)),
+      hostDisk: row.server_id ? disks.get(row.server_id) || null : null,
+    }));
+    res.json({ at: new Date().toISOString(), everySeconds: 5, connections: results });
+  } catch (err) { next(err); }
+});

@@ -26,14 +26,24 @@ import { attachUser, requireAuth, requireOrg, guardMutations } from './lib/authG
 import { startHealthMonitor } from './lib/healthMonitor.js';
 import { connectorsRouter } from './routes/connectors.js';
 import { attachConnectorHub } from './lib/connectorHub.js';
+import { securityHeaders, sameOriginOnly } from './lib/security.js';
 
 const app = express();
+app.disable('x-powered-by');
+if (config.trustProxy) app.set('trust proxy', true);
+app.use(securityHeaders);
 
 // File uploads to a server arrive base64-encoded (a 50 MB file is ~67 MB of JSON);
 // everything else keeps the small limit.
-const smallJson = express.json({ limit: '2mb' });
+const smallJson = express.json({
+  limit: '2mb',
+  // Webhook deliveries keep their exact bytes: GitHub's signature is over those.
+  verify: (req, res, buf) => { if (req.url.startsWith('/api/hooks/')) req.rawBody = buf; },
+});
 const uploadJson = express.json({ limit: '70mb' });
-app.use((req, res, next) => (/^\/api\/servers\/\d+\/files\/upload$/.test(req.path) ? uploadJson : smallJson)(req, res, next));
+const isUpload = (req) => /^\/api\/servers\/\d+\/files\/upload$/.test(req.path);
+// The big parser waits until the session is known (below), so strangers cannot make the panel chew 70 MB.
+app.use((req, res, next) => (isUpload(req) ? next() : smallJson(req, res, next)));
 // The public page is rendered on the server so search engines see prices, answers and structured data.
 app.get(['/', '/index.html'], async (req, res, next) => {
   try {
@@ -61,7 +71,7 @@ app.use(express.static(path.join(ROOT, 'public'), {
 // GitHub, GitLab and Bitbucket call this when a branch changes — no session; the token in the address is the key.
 app.post('/api/hooks/apps/:token', handleAppWebhook);
 
-app.use('/api', attachUser);
+app.use('/api', sameOriginOnly, attachUser);
 app.use('/api/auth', authRouter);
 
 /** The plans shown on the pricing section of the landing page — public, no sign-in. */
@@ -92,7 +102,8 @@ app.get('/api/health', async (req, res, next) => {
       credentials: Number(await scalar('SELECT COUNT(*) FROM credentials WHERE org_id = ?', [req.orgId])),
       runners: Number(await scalar('SELECT COUNT(*) FROM runners WHERE org_id = ?', [req.orgId])),
       organisation: req.organisation?.name || null,
-      database: `${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}`,
+      // Where the panel's own database lives is for the platform owner only.
+      ...(req.user.role === 'super_admin' ? { database: `${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}` } : {}),
       uptimeSeconds: Math.round(process.uptime()),
     });
   } catch (err) { next(err); }
@@ -100,6 +111,7 @@ app.get('/api/health', async (req, res, next) => {
 
 // From here on a session is required, and a role decides what may be changed.
 app.use('/api', requireAuth, guardMutations);
+app.use((req, res, next) => (isUpload(req) ? uploadJson(req, res, next) : next()));
 
 app.get('/api/activity', blockIfExpired, async (req, res, next) => {
   try {
@@ -114,7 +126,7 @@ app.get('/api/activity', blockIfExpired, async (req, res, next) => {
     res.json(await all(
       `SELECT a.*, u.name AS user_name FROM activity_log a
          LEFT JOIN users u ON u.id = a.user_id
-        WHERE a.org_id = ? OR a.org_id IS NULL
+        WHERE a.org_id = ?
         ORDER BY a.id DESC LIMIT 50`,
       [req.orgId]
     ));
@@ -149,8 +161,13 @@ app.use('/api/git/oauth', inOrg, gitOauthRouter);
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 
 app.use((err, req, res, next) => {
+  // A body that is too big or not JSON is the caller's mistake, not ours.
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'The request is too large' });
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'The request body is not valid JSON' });
   console.error('[error]', err);
-  res.status(500).json({ error: err.message || 'Internal server error' });
+  // The panel's own database errors (SQL text, table names) stay in the log, not in the browser.
+  const internal = err.code && /^(ER_|PROTOCOL_)/.test(String(err.code));
+  res.status(500).json({ error: internal ? 'Internal server error' : (err.message || 'Internal server error') });
 });
 
 async function start() {

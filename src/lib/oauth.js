@@ -100,6 +100,7 @@ function validateCredentials(label, clientId, clientSecret) {
     );
   }
   if (/\s/.test(id)) throw new Error('The client ID should not contain spaces — copy it exactly as shown.');
+  if (/[\s\0]/.test(secret)) throw new Error('The client secret should not contain spaces or line breaks — copy it exactly as shown.');
   if (id.length < 10) {
     throw new Error(`That client ID looks too short for ${label}. Copy the whole value from the OAuth app page.`);
   }
@@ -141,8 +142,8 @@ export async function verifyClientCredentials(kind, clientId, clientSecret) {
     });
     data = await res.json().catch(() => ({}));
   } catch (err) {
-    // Offline or blocked: save anyway and let the real sign-in surface it.
-    return { ok: true, unchecked: err.message };
+    // Unchecked credentials are platform-wide, so they are not saved on trust.
+    return { ok: false, reason: `${label} could not be reached to check these credentials (${err.message}). Try again in a moment.` };
   }
 
   const error = String(data.error || '');
@@ -164,7 +165,7 @@ export async function verifyClientCredentials(kind, clientId, clientSecret) {
   // "bad code" is the expected answer when the app and secret are both right.
   if (/bad_verification_code|invalid_grant/i.test(error)) return { ok: true, verified: true };
 
-  return { ok: true, verified: false, status: res.status, providerError: error || null };
+  return { ok: false, reason: `${label} gave an unexpected answer (HTTP ${res.status}${error ? `, ${error}` : ''}) — the credentials could not be confirmed.` };
 }
 
 /** Store an OAuth app's credentials and start using them without a restart. */
@@ -207,13 +208,14 @@ function sweep() {
   for (const [key, v] of pending) if (v.createdAt < cutoff) pending.delete(key);
 }
 
-export function beginAuthorization(kind, { name } = {}) {
+export function beginAuthorization(kind, { name, userId = null, orgId = null } = {}) {
   const { p, c } = providerOrThrow(kind);
   sweep();
 
   const state = crypto.randomBytes(24).toString('base64url');
   const verifier = p.usesPkce ? crypto.randomBytes(48).toString('base64url') : null;
-  pending.set(state, { kind, name: (name || '').trim(), verifier, createdAt: Date.now() });
+  // The state is tied to who started the sign-in, so a link finished by someone else is refused.
+  pending.set(state, { kind, name: (name || '').trim(), verifier, userId, orgId, createdAt: Date.now() });
 
   const url = new URL(`${c.webUrl.replace(/\/+$/, '')}${p.authorizePath}`);
   url.searchParams.set('client_id', c.clientId);

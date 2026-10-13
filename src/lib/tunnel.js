@@ -1,5 +1,6 @@
 import net from 'node:net';
 import { connectionFromRow, withConnection } from './ssh.js';
+import { safeTarget } from './netGuard.js';
 
 /**
  * Reach `host:port` as seen from `server`, for drivers that only know how to
@@ -7,10 +8,19 @@ import { connectionFromRow, withConnection } from './ssh.js';
  *
  * A listener on 127.0.0.1:<random> is opened for the duration of `fn`; every
  * socket that connects to it is piped through the server's SSH connection.
- * Without a server, `fn` simply gets the address it asked for.
+ * Without a server the panel dials the database itself, so the host is first
+ * checked with safeTarget (no loopback, private network or cloud metadata) and
+ * `fn` gets the resolved address — a DNS answer cannot change between the
+ * check and the connect. `servername` carries the original hostname so a TLS
+ * connection still sends the right SNI (and, where a driver verifies the
+ * certificate, checks it against the name rather than the IP).
  */
 export async function withTunnel(server, host, port, fn) {
-  if (!server) return fn({ host, port });
+  if (!server) {
+    const address = await safeTarget(host);
+    const name = String(host || '').trim().replace(/^\[|\]$/g, '');
+    return fn({ host: address, port, servername: net.isIP(name) ? undefined : name });
+  }
 
   return withConnection(connectionFromRow(server), async (ssh) => {
     const sockets = new Set();

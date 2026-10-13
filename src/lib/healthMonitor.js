@@ -136,6 +136,17 @@ async function checkServer(row) {
   };
   live.set(row.id, state);
 
+  // The stored status can also be stale on its own — a failed "Test" or "Fetch
+  // details" writes it without touching this monitor's memory — so it is put
+  // right whenever it disagrees. A reboot in progress is left alone until the
+  // host actually goes away and comes back.
+  const storedStale = row.status !== 'rebooting'
+    && (row.status !== status || (row.last_error ?? null) !== (state.error ?? null));
+  if (previous === status && storedStale) {
+    await run('UPDATE servers SET status = ?, last_error = ?, last_checked_at = NOW() WHERE id = ?',
+      [status, state.error, row.id]);
+  }
+
   if (previous !== status) {
     await run('UPDATE servers SET status = ?, last_error = ?, last_checked_at = NOW() WHERE id = ?',
       [status, state.error, row.id]);
@@ -200,7 +211,7 @@ export async function runHealthSweep() {
   const started = Date.now();
 
   try {
-    const rows = await all('SELECT id, org_id, name, host, port, username, status, auth_type, password_enc, private_key_enc, passphrase_enc, sudo_password_enc FROM servers');
+    const rows = await all('SELECT id, org_id, name, host, port, username, status, last_error, auth_type, password_enc, private_key_enc, passphrase_enc, sudo_password_enc FROM servers');
     const ids = new Set(rows.map((r) => r.id));
     for (const id of live.keys()) if (!ids.has(id)) live.delete(id);
     for (const id of connectorProbes.keys()) if (!ids.has(id)) connectorProbes.delete(id);

@@ -437,8 +437,10 @@ exit $rc`;
 }
 
 export async function containerLogs(conn, server, name, tail = 200) {
+  // Capped so one request cannot pull a container's whole history through the panel.
+  const n = Math.min(Math.max(1, (Number(tail) | 0) || 200), 5000);
   const result = await rootExec(conn, server,
-    `docker logs --tail ${Number(tail) || 200} ${q(name)} 2>&1 | tail -n ${Number(tail) || 200}`,
+    `docker logs --tail ${n} ${q(name)} 2>&1 | tail -n ${n}`,
     { timeout: 60000 });
   if (result.code !== 0 && !result.stdout.trim()) throw dockerError(`Reading the logs of ${name}`, result);
   return lines(result.stdout);

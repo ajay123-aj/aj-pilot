@@ -19,8 +19,23 @@ import {
 import { publicUser, orgOf, endSession, endAllSessions, requireAuth } from '../lib/authGuard.js';
 import { createOrganisation, OrgError } from '../lib/organisations.js';
 import { setSubscription } from '../lib/plans.js';
+import { clientIp, rateLimiter } from '../lib/security.js';
 
 export const authRouter = Router();
+
+/*
+ * Password guessing: an address gets 20 tries and one account 8 tries per
+ * quarter hour, whichever runs out first. A right password clears the account's count.
+ */
+const loginByIp = rateLimiter({ windowMs: 15 * 60_000, max: 20 });
+const loginByEmail = rateLimiter({ windowMs: 15 * 60_000, max: 8 });
+
+/** Checked against when the email has no account, so a miss takes as long as a wrong password. */
+const DUMMY_HASH = hashPassword(newSessionToken());
+
+const tooMany = (res, wait) => res.status(429)
+  .set('Retry-After', String(wait))
+  .json({ error: `Too many attempts — try again in ${Math.ceil(wait / 60)} minute${wait > 60 ? 's' : ''}.` });
 
 const cookieOptions = () => ({ maxAge: config.auth.sessionDays * 86400, secure: config.auth.secureCookie });
 
@@ -34,7 +49,7 @@ async function startSession(req, res, user) {
   await run(
     'INSERT INTO sessions (token_hash, user_id, expires_at, ip, user_agent) VALUES (?,?,?,?,?)',
     [hashToken(token), user.id, expires.toISOString().slice(0, 19).replace('T', ' '),
-      (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().slice(0, 64),
+      clientIp(req),
       String(req.headers['user-agent'] || '').slice(0, 255)]
   );
   await run('UPDATE users SET last_login_at = NOW() WHERE id = ?', [user.id]);
@@ -131,10 +146,13 @@ authRouter.post('/signup', async (req, res, next) => {
     // The hidden field is only ever filled in by bots.
     if (b.hp_check) return res.status(400).json({ error: 'Sign-up could not be completed.' });
 
-    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const ip = clientIp(req);
     const now = Date.now();
     const hits = (signupHits.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
     if (hits.length >= SIGNUP_PER_WINDOW) return res.status(429).json({ error: 'Too many sign-ups from this network — please try again in an hour.' });
+    // Every attempt counts, so the "already has an account" answer cannot be used to test emails in bulk.
+    hits.push(now);
+    signupHits.set(ip, hits);
 
     const name = String(b.name || '').trim().slice(0, 190);
     if (!name) return res.status(400).json({ error: 'Your name is required' });
@@ -150,8 +168,6 @@ authRouter.post('/signup', async (req, res, next) => {
       return res.status(409).json({ error: `${email.value} already has an account — sign in instead.`, signIn: true });
     }
 
-    hits.push(now);
-    signupHits.set(ip, hits);
     if (signupHits.size > 5000) for (const [k, v] of signupHits) if (!v.some((t) => now - t < SIGNUP_WINDOW_MS)) signupHits.delete(k);
 
     // The plan they picked. A free one starts at once; a paid one starts them on the free
@@ -199,13 +215,18 @@ authRouter.post('/signup', async (req, res, next) => {
 
 authRouter.post('/login', async (req, res, next) => {
   try {
-    const email = String(req.body.email || '').trim().toLowerCase();
+    const email = String(req.body.email || '').trim().toLowerCase().slice(0, 190);
+    const wait = Math.max(loginByIp.hit(clientIp(req)), loginByEmail.hit(email));
+    if (wait) return tooMany(res, wait);
+
     const user = email ? await one('SELECT * FROM users WHERE email = ?', [email]) : null;
 
-    // The same answer either way, so this cannot be used to find out who has an account.
-    if (!user || !verifyPassword(req.body.password || '', user.password_hash)) {
+    // The same answer, and the same time taken, either way — so this cannot be used to find out who has an account.
+    const passwordOk = verifyPassword(req.body.password || '', user?.password_hash || DUMMY_HASH);
+    if (!user || !passwordOk) {
       return res.status(401).json({ error: 'That email and password do not match an account' });
     }
+    loginByEmail.reset(email);
     if (user.status !== 'active') {
       return res.status(403).json({ error: 'This account has been disabled. Ask an admin to turn it back on.' });
     }
@@ -243,6 +264,15 @@ authRouter.put('/profile', requireAuth, async (req, res, next) => {
     const email = checkEmail(req.body.email ?? req.user.email);
     if (email.error) return res.status(400).json({ error: email.error });
 
+    // Moving the account to another email is a takeover if the session was stolen: it needs the password.
+    if (email.value !== req.user.email) {
+      const wait = loginByEmail.hit(req.user.email);
+      if (wait) return tooMany(res, wait);
+      if (!verifyPassword(req.body.current || '', req.user.password_hash)) {
+        return res.status(400).json({ error: 'Enter your current password to change the email you sign in with', needsPassword: true });
+      }
+    }
+
     if (email.value !== req.user.email
       && await one('SELECT id FROM users WHERE email = ? AND id <> ?', [email.value, req.user.id])) {
       return res.status(409).json({ error: `Somebody else already signs in with ${email.value}` });
@@ -263,6 +293,8 @@ authRouter.put('/profile', requireAuth, async (req, res, next) => {
 /** Change your own password. Every other session of yours is ended. */
 authRouter.post('/password', requireAuth, async (req, res, next) => {
   try {
+    const wait = loginByEmail.hit(req.user.email);
+    if (wait) return tooMany(res, wait);
     if (!verifyPassword(req.body.current || '', req.user.password_hash)) {
       return res.status(400).json({ error: 'Your current password is not right' });
     }

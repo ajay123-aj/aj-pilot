@@ -20,9 +20,14 @@ export const asJson = (v) => {
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
-/** The credential row, its settings and a usable token — or a 404/400 error. */
-export async function loadGitCredential(id) {
-  const row = await one('SELECT * FROM credentials WHERE id = ?', [id]);
+/**
+ * The credential row, its settings and a usable token — or a 404/400 error.
+ * Pass the organisation so another organisation's account is never read (or refreshed).
+ */
+export async function loadGitCredential(id, orgId) {
+  const row = orgId === undefined
+    ? await one('SELECT * FROM credentials WHERE id = ?', [id])
+    : await one('SELECT * FROM credentials WHERE id = ? AND org_id = ?', [id, orgId]);
   if (!row) throw httpError('Git account not found', 404);
   if (row.provider !== 'git') throw httpError('That credential is not a git account', 400);
   const extra = asJson(row.extra);

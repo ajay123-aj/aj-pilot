@@ -20,6 +20,12 @@ import { installRunner, removeRunner, validateRunnerName, RUNNER_ROOT } from '..
 
 export const runnersRouter = Router();
 
+/** Shell-safe single-quoted literal. */
+const q = (v) => `'${String(v ?? '').replace(/'/g, `'\\''`)}'`;
+
+/** A systemd unit name, before it goes anywhere near a command line. */
+const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9._@:-]{0,180}$/;
+
 const getRow = (id, orgId) => one('SELECT * FROM runners WHERE id = ? AND org_id = ?', [id, orgId]);
 
 /** A runner row plus the names of the account and server behind it. */
@@ -93,7 +99,7 @@ runnersRouter.post('/', async (req, res, next) => {
 
     let account;
     try {
-      account = await loadGitCredential(credentialId);
+      account = await loadGitCredential(credentialId, req.orgId);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
     }
@@ -170,7 +176,7 @@ runnersRouter.post('/:id/refresh', async (req, res, next) => {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'Runner not found' });
     try {
-      const account = await loadGitCredential(row.credential_id);
+      const account = await loadGitCredential(row.credential_id, req.orgId);
       const remote = await listRunners(account.token, account.extra, row.scope, row.target);
       const mine = remote.find((r) => (row.remote_id && r.id === row.remote_id) || r.name === row.name) || null;
 
@@ -199,6 +205,8 @@ runnersRouter.post('/:id/action', async (req, res, next) => {
     const action = SERVICE_ACTIONS[String(req.body.action || '')];
     if (!action) return res.status(400).json({ error: 'action must be start, stop or restart' });
     if (!row.service_name) return res.status(400).json({ error: 'This runner has no systemd service recorded — reinstall it.' });
+    // The unit name came back from a script run on the server, so it is checked before it goes into another one.
+    if (!SERVICE_NAME.test(row.service_name)) return res.status(400).json({ error: 'The recorded service name is not a valid systemd unit — reinstall the runner.' });
 
     const server = await one('SELECT * FROM servers WHERE id = ? AND org_id = ?', [row.server_id, req.orgId]);
     if (!server) return res.status(400).json({ error: 'The server this runner runs on no longer exists' });
@@ -206,7 +214,7 @@ runnersRouter.post('/:id/action', async (req, res, next) => {
     try {
       const result = await withConnection(connectionFromRow(server), (conn) => rootExec(
         conn, server,
-        `systemctl ${action} '${row.service_name}' 2>&1; systemctl is-active '${row.service_name}' || true`,
+        `systemctl ${action} ${q(row.service_name)} 2>&1; systemctl is-active ${q(row.service_name)} || true`,
         { timeout: 60000 }
       ));
       const active = result.stdout.trim().split('\n').pop();
@@ -235,7 +243,7 @@ runnersRouter.delete('/:id', async (req, res, next) => {
     let account = null;
 
     try {
-      account = await loadGitCredential(row.credential_id);
+      account = await loadGitCredential(row.credential_id, req.orgId);
     } catch (err) {
       problems.push(`Could not reach the git account: ${err.message}`);
     }
@@ -251,6 +259,7 @@ runnersRouter.delete('/:id', async (req, res, next) => {
           dir: row.runner_dir,
           name: row.name,
           token: removeToken,
+          serviceUser: row.service_user,
         }));
       } catch (err) {
         problems.push(`Could not clean up ${server.name}: ${err.message}`);

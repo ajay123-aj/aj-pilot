@@ -22,6 +22,7 @@ import { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import { one, run, logActivity } from '../db/index.js';
 import { runWithContext } from './context.js';
+import { clientIp } from './security.js';
 
 export const CONNECTOR_PATH = '/api/connectors/ws';
 const HELLO_TIMEOUT_MS = 10000;
@@ -80,10 +81,7 @@ export function attachConnectorHub(httpServer) {
   }, HEARTBEAT_MS).unref();
 }
 
-function clientAddress(req) {
-  return String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
-    .split(',')[0].trim().slice(0, 64);
-}
+const clientAddress = (req) => clientIp(req);
 
 function accept(ws, req) {
   const address = clientAddress(req);

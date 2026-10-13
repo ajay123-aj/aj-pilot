@@ -11,6 +11,7 @@
  */
 
 import { config } from '../config.js';
+import { clientIp as securityClientIp } from './security.js';
 
 const PRIVATE = [
   /^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^169\.254\./, /^0\./,
@@ -21,15 +22,13 @@ const PRIVATE = [
 export const plainIp = (ip) => String(ip || '').trim().replace(/^::ffff:/i, '');
 export const isPrivateIp = (ip) => !ip || PRIVATE.some((re) => re.test(plainIp(ip)));
 
-/** The visitor's address, trusting the proxies this panel is normally behind (Cloudflare, nginx). */
-export function clientIp(req) {
-  const h = req.headers;
-  const ip = h['cf-connecting-ip'] || String(h['x-forwarded-for'] || '').split(',')[0] || h['x-real-ip'] || req.socket.remoteAddress || '';
-  return plainIp(ip).slice(0, 64);
-}
+/** The visitor's address — proxy headers are believed only with TRUST_PROXY=true (see lib/security.js). */
+export const clientIp = (req) => plainIp(securityClientIp(req)).slice(0, 64);
 
 /** Cloudflare's own idea of where the visitor is, when it is in front of the site. */
 export function fromCloudflare(req) {
+  // Anyone can send these headers; they mean something only when a proxy we trust put them there.
+  if (!config.trustProxy) return null;
   const h = req.headers;
   const cc = String(h['cf-ipcountry'] || '').toUpperCase();
   if (!cc || cc === 'XX' || cc === 'T1') return null;

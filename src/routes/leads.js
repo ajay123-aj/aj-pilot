@@ -103,14 +103,17 @@ export async function submitLead(req, res, next) {
       `SELECT * FROM leads WHERE email = ? AND status IN ('new','contacted','qualified','proposal')
         AND created_at > DATE_SUB(NOW(), INTERVAL 30 DAY) ORDER BY id DESC LIMIT 1`, [email.value]);
     if (open) {
+      // Anyone can type any email into the public form, so a repeat only adds a note and
+      // fills in what the lead is missing — it never overwrites what is already known.
+      const given = [phone && `phone ${phone}`, b.company && `company ${clip(b.company, 190)}`, ip && `from ${ip}`].filter(Boolean).join(', ');
       await run('INSERT INTO lead_notes (lead_id, kind, body) VALUES (?,?,?)', [open.id, 'note',
-        `Asked again from the ${form} form${plan ? ` about ${plan.name} (${cycle})` : ''}.${message ? `\n\n${message}` : ''}`]);
-      await run(`UPDATE leads SET phone = COALESCE(?, phone), company = COALESCE(?, company), plan_id = COALESCE(?, plan_id),
-          device = COALESCE(?, device), visitor_id = COALESCE(visitor_id, ?), fingerprint = COALESCE(?, fingerprint), visit = COALESCE(?, visit),
-          ip = ?, updated_at = NOW() WHERE id = ?`,
+        `Asked again from the ${form} form${plan ? ` about ${plan.name} (${cycle})` : ''}${given ? ` — ${given}` : ''}.${message ? `\n\n${message}` : ''}`]);
+      await run(`UPDATE leads SET phone = COALESCE(phone, ?), company = COALESCE(company, ?), plan_id = COALESCE(plan_id, ?),
+          device = COALESCE(device, ?), visitor_id = COALESCE(visitor_id, ?), fingerprint = COALESCE(fingerprint, ?), visit = COALESCE(visit, ?),
+          ip = COALESCE(ip, ?), updated_at = NOW() WHERE id = ?`,
         [phone, clip(b.company, 190), plan?.id || null, deviceJson, visitorId, fingerprint, visitJson, ip, open.id]);
       res.status(201).json({ ok: true });
-      if (ip !== open.ip || !open.geo) locateLead(open.id, ip, cfGeo);
+      if (!open.ip || !open.geo) locateLead(open.id, open.ip || ip, cfGeo);
       return;
     }
 

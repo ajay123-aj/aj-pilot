@@ -5,6 +5,7 @@ import { authenticate, gitKind } from '../lib/git.js';
 import { configuredProviders, beginAuthorization, takeState, exchangeCode, callbackUrl, setProviderCredentials, verifyClientCredentials } from '../lib/oauth.js';
 import { setEnvValues, envFilePath } from '../lib/envFile.js';
 import { config } from '../config.js';
+import { can } from '../lib/auth.js';
 
 export const gitOauthRouter = Router();
 
@@ -18,6 +19,10 @@ gitOauthRouter.get('/providers', (req, res) => {
  * straight away, so connecting an account never needs a restart.
  */
 gitOauthRouter.post("/config", async (req, res) => {
+  // The OAuth app is shared by every organisation and written to .env: the platform owner's call alone.
+  if (req.user.role !== 'super_admin') {
+    return res.status(403).json({ ok: false, error: 'Only a super admin can set up browser sign-in for git providers.', forbidden: true });
+  }
   const kind = gitKind(req.body.kind);
   const previous = { ...config.oauth[kind] };
   try {
@@ -53,6 +58,10 @@ gitOauthRouter.post("/config", async (req, res) => {
  */
 gitOauthRouter.get('/start', (req, res) => {
   const kind = gitKind(req.query.kind);
+  // A GET skips the role check every POST gets, so it is made here.
+  if (!can(req.user, 'create')) {
+    return res.status(403).send(resultPage({ ok: false, error: 'Your role cannot add git accounts.' }));
+  }
   // Not set up (or the keys were taken out of .env since the page loaded): send the wizard to its setup step.
   if (!config.oauth[kind]?.clientId || !config.oauth[kind]?.clientSecret) {
     return res.status(400).send(resultPage({
@@ -61,7 +70,7 @@ gitOauthRouter.get('/start', (req, res) => {
     }));
   }
   try {
-    const { url } = beginAuthorization(kind, { name: req.query.name });
+    const { url } = beginAuthorization(kind, { name: req.query.name, userId: req.user.id, orgId: req.orgId });
     res.redirect(url);
   } catch (err) {
     res.status(400).send(resultPage({ ok: false, error: err.message }));
@@ -86,6 +95,10 @@ gitOauthRouter.get('/callback', async (req, res) => {
   }
 
   const entry = takeState(String(state));
+  // Only the person who started this sign-in, in the organisation they started it in, may finish it.
+  if (entry && (entry.userId !== req.user.id || String(entry.orgId) !== String(req.orgId) || !can(req.user, 'create'))) {
+    return res.status(403).send(resultPage({ ok: false, error: 'This sign-in was started by someone else. Start the connection again from your own account.' }));
+  }
   if (!entry) {
     return res.status(400).send(resultPage({
       ok: false,

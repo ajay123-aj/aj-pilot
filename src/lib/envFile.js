@@ -16,6 +16,9 @@ export function setEnvValues(values) {
 
   for (const [key, raw] of Object.entries(values)) {
     const value = String(raw ?? '');
+    // A line break in a value would write a second, attacker-chosen setting.
+    if (!/^[A-Z][A-Z0-9_]*$/.test(key)) throw new Error(`"${key}" is not a valid setting name`);
+    if (/[\r\n\0]/.test(value)) throw new Error(`The value for ${key} cannot contain line breaks`);
     const pattern = new RegExp(`^\\s*${key}\\s*=`);
     const index = lines.findIndex((l) => pattern.test(l));
     if (index >= 0) lines[index] = `${key}=${value}`;

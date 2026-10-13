@@ -151,6 +151,21 @@ echo ok`;
 }
 
 /**
+ * The unit file with every Environment= value blanked out, for people who may
+ * look at a server but not change it. Those values are often passwords and API
+ * keys; the variable names are kept so the file still reads sensibly.
+ */
+export function maskUnitSecrets(text) {
+  if (!text) return text;
+  return String(text).split('\n').map((line) => {
+    const m = /^(\s*Environment\s*=)(.*)$/.exec(line);
+    if (!m) return line;
+    const keys = [...m[2].matchAll(/(?:^|[\s"'])([A-Za-z_][A-Za-z0-9_]*)=/g)].map((k) => k[1]);
+    return `${m[1]}${keys.map((k) => `${k}=••••••`).join(' ') || '••••••'}`;
+  }).join('\n');
+}
+
+/**
  * systemd reports ExecStart as a whole record:
  *   { path=/usr/sbin/cron ; argv[]=/usr/sbin/cron -f ; ignore_errors=no ; … }
  * Only the command line is worth showing.
@@ -232,6 +247,14 @@ export function validateServiceSpec(body) {
   const { unit, error } = validateUnit(body.unit || body.name);
   if (error) return { error };
 
+  // Every field below lands in a heredoc on the server, one setting per line.
+  // A line break in any of them would start a new setting — or end the heredoc
+  // early and run the rest as a root shell command — so none may contain one.
+  for (const field of ['execStart', 'execStop', 'execReload', 'workingDirectory', 'environmentFile',
+    'user', 'group', 'after', 'wantedBy', 'description', 'type', 'restart']) {
+    if (/[\r\n]/.test(String(body[field] ?? ''))) return { error: `${field} must be a single line` };
+  }
+
   const execStart = String(body.execStart || '').trim();
   if (!execStart) return { error: 'The start command (ExecStart) is required' };
   if (!/^[-+!@]*\//.test(execStart)) {
@@ -257,7 +280,9 @@ export function validateServiceSpec(body) {
     if (i <= 0) return { error: `Environment lines must look like KEY=value — "${text.slice(0, 40)}" does not` };
     const key = text.slice(0, i).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return { error: `"${key}" is not a valid environment variable name` };
-    environment.push([key, text.slice(i + 1).trim().replace(/"/g, '\\"')]);
+    const value = text.slice(i + 1).trim();
+    if (/[\r\n]/.test(value)) return { error: `The value of ${key} must be a single line` };
+    environment.push([key, value.replace(/"/g, '\\"')]);
   }
 
   for (const [field, value] of [['workingDirectory', body.workingDirectory], ['environmentFile', body.environmentFile]]) {

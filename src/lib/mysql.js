@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { connectionFromRow, withConnection } from './ssh.js';
+import { safeTarget } from './netGuard.js';
 
 const SYSTEM_SCHEMAS = ['information_schema', 'performance_schema', 'mysql', 'sys'];
 
@@ -50,7 +51,11 @@ export async function withMysql({ host, port, user, password, database, server }
     });
   }
 
-  const conn = await mysql.createConnection({ ...base, host, port }).catch((err) => { throw normalizeMysqlError(err); });
+  // Direct from the panel: refuse loopback, private and metadata addresses, and
+  // dial the address that was checked. No TLS is configured here, so dialling
+  // the IP instead of the name changes nothing else.
+  const address = await safeTarget(host);
+  const conn = await mysql.createConnection({ ...base, host: address, port }).catch((err) => { throw normalizeMysqlError(err); });
   return run(conn);
 }
 
@@ -264,28 +269,57 @@ export async function inspectTable(cfg, database, tableName) {
   });
 }
 
-/** Read-only query runner — anything that could change data or schema is refused. */
+/**
+ * Read-only query runner — anything that could change data or schema is refused.
+ * Viewers can run this, so it is guarded twice: the text is checked here, and
+ * the query runs inside a READ ONLY transaction that is always rolled back.
+ *
+ * Comments are refused outright: MySQL executes /*! … *\/ "comments", and a
+ * comment can split a keyword the checks below look for. That also refuses a
+ * "#" or "-- " inside a string literal — use CHAR(35) or LIKE patterns instead.
+ * The keyword checks run on the raw text with backticks removed, so a word
+ * inside a string trips them too; that only ever refuses, never lets through.
+ */
 const READ_ONLY = /^\s*(SELECT|SHOW|DESCRIBE|DESC|EXPLAIN)\b/i;
-const FORBIDDEN = /\b(INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE|SLEEP|BENCHMARK)\s*\(?/i;
+const COMMENT = /\/\*|#|--(\s|$)/;
+const FORBIDDEN = [
+  // Writing files on the database host.
+  [/\b(OUTFILE|DUMPFILE|LOAD_FILE)\b/i, 'Reading or writing files is not allowed here'],
+  // Stalling the server or holding locks other sessions wait on.
+  [/\b(SLEEP|BENCHMARK|GET_LOCK|RELEASE_LOCK|RELEASE_ALL_LOCKS|MASTER_POS_WAIT|SOURCE_POS_WAIT|WAIT_FOR_EXECUTED_GTID_SET|WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS)\b/i, 'That function is not allowed here'],
+  [/\bFOR\s+(UPDATE|SHARE)\b|\bLOCK\s+IN\s+SHARE\s+MODE\b/i, 'Row locks (FOR UPDATE / FOR SHARE) are not allowed here'],
+  // EXPLAIN ANALYZE runs the statement it explains.
+  [/^\s*(EXPLAIN|DESCRIBE|DESC)\b[\s\S]*\bANALYZE\b/i, 'EXPLAIN ANALYZE runs the query and is not allowed here — use plain EXPLAIN'],
+];
 
 export async function runReadOnlyQuery(cfg, sql, limit = 200) {
   const trimmed = String(sql || '').trim().replace(/;\s*$/, '');
   if (!trimmed) throw new Error('A query is required');
   if (trimmed.includes(';')) throw new Error('Only one statement at a time is allowed');
   if (!READ_ONLY.test(trimmed)) throw new Error('Only SELECT, SHOW, DESCRIBE and EXPLAIN queries are allowed here');
-  if (FORBIDDEN.test(trimmed)) throw new Error('That query uses a construct this panel does not allow');
+  if (COMMENT.test(trimmed)) throw new Error('Comments (/* */, -- and #) are not allowed here, not even inside a string');
+  const flat = trimmed.replace(/`/g, '');
+  for (const [re, message] of FORBIDDEN) if (re.test(flat)) throw new Error(message);
 
   return withMysql(cfg, async (conn) => {
-    const started = Date.now();
-    const [rows, fields] = await conn.query({ sql: trimmed, timeout: 20000 });
-    const list = Array.isArray(rows) ? rows : [rows];
-    return {
-      columns: (fields || []).map((f) => f.name),
-      rows: list.slice(0, limit),
-      rowCount: list.length,
-      truncated: list.length > limit,
-      durationMs: Date.now() - started,
-    };
+    // One connection throughout, so the transaction covers the query.
+    // max_execution_time is MySQL-only (MariaDB has no such variable), so it is best effort.
+    await conn.query('SET SESSION max_execution_time = 20000').catch(() => {});
+    await conn.query('START TRANSACTION READ ONLY');
+    try {
+      const started = Date.now();
+      const [rows, fields] = await conn.query({ sql: trimmed, timeout: 20000 });
+      const list = Array.isArray(rows) ? rows : [rows];
+      return {
+        columns: (fields || []).map((f) => f.name),
+        rows: list.slice(0, limit),
+        rowCount: list.length,
+        truncated: list.length > limit,
+        durationMs: Date.now() - started,
+      };
+    } finally {
+      await conn.query('ROLLBACK').catch(() => {});
+    }
   });
 }
 
@@ -724,18 +758,60 @@ function normalizeMysqlError(err) {
   const map = [
     [/ER_ACCESS_DENIED_ERROR|Access denied/i, 'Access denied — check the MySQL username and password.'],
     [/ER_DBACCESS_DENIED_ERROR/i, 'That MySQL user cannot access the requested database.'],
-    [/ECONNREFUSED/i, 'Connection refused — MySQL is not listening on that host and port.'],
-    [/ETIMEDOUT|timeout/i, 'Connection timed out — MySQL may be bound to localhost only. Tie this credential to a server so the panel can tunnel over SSH.'],
+    // Refused and timed out read the same (and the raw error is dropped), so
+    // the test form is no use for probing which ports are open.
+    [/ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|timeout/i, 'Could not reach MySQL on that host and port. It may be bound to localhost only — tie this credential to a server so the panel can tunnel over SSH.', true],
     [/ENOTFOUND|EAI_AGAIN/i, 'Host not found — the MySQL hostname could not be resolved.'],
     [/ER_HOST_NOT_PRIVILEGED|not allowed to connect/i, 'This host is not allowed to connect to that MySQL server. Grant access for the connecting host, or tunnel through the server over SSH.'],
     [/ER_BAD_DB_ERROR|Unknown database/i, 'That database does not exist on the server.'],
   ];
-  for (const [re, friendly] of map) {
+  for (const [re, friendly, hideCause] of map) {
     if (re.test(msg)) {
       const e = new Error(friendly);
-      e.cause = msg;
+      if (!hideCause) e.cause = msg;
       return e;
     }
   }
   return err instanceof Error ? err : new Error(msg);
+}
+
+/**
+ * A few cheap numbers for the connection's card, read every few seconds — so
+ * no schema scans, except the size on disk when `storage` asks for it (the
+ * caller does that far less often).
+ */
+export async function pulse(cfg, { storage = false } = {}) {
+  return withMysql(cfg, async (conn) => {
+    const [[id]] = await conn.query('SELECT VERSION() AS version, @@max_connections AS maxConn, @@innodb_buffer_pool_size AS poolSize, @@read_only AS readOnly');
+    const [statusRows] = await conn.query("SHOW GLOBAL STATUS WHERE Variable_name IN ('Uptime','Threads_connected','Threads_running','Questions','Slow_queries','Innodb_buffer_pool_pages_data','Innodb_buffer_pool_pages_total','Innodb_buffer_pool_read_requests','Innodb_buffer_pool_reads')");
+    const s = pairsToObject(statusRows);
+    let storageBytes = null;
+    if (storage) {
+      try {
+        const [[size]] = await conn.query('SELECT COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) AS bytes FROM information_schema.TABLES');
+        storageBytes = Number(size.bytes);
+      } catch { /* an account that cannot see the tables just has no size */ }
+    }
+    const pagesTotal = Number(s.Innodb_buffer_pool_pages_total || 0);
+    const pagesData = Number(s.Innodb_buffer_pool_pages_data || 0);
+    const requests = Number(s.Innodb_buffer_pool_read_requests || 0);
+    const poolSize = Number(id.poolSize || 0);
+    return {
+      version: `MySQL ${String(id.version).split('-')[0]}`,
+      uptimeSec: Number(s.Uptime || 0),
+      role: Number(id.readOnly) ? 'read-only' : null,
+      counter: Number(s.Questions || 0),
+      counterUnit: 'queries/s',
+      connections: { used: Number(s.Threads_connected || 0), max: Number(id.maxConn || 0) },
+      memory: pagesTotal
+        ? { label: 'Buffer pool', used: pagesData, max: pagesTotal, usedBytes: Math.round((poolSize * pagesData) / pagesTotal), maxBytes: poolSize }
+        : null,
+      hitRate: requests ? Math.round(((requests - Number(s.Innodb_buffer_pool_reads || 0)) / requests) * 1000) / 10 : null,
+      storageBytes,
+      facts: [
+        ['Running', Number(s.Threads_running || 0)],
+        ['Slow queries', Number(s.Slow_queries || 0)],
+      ],
+    };
+  });
 }
