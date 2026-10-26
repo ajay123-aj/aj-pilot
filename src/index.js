@@ -1,7 +1,9 @@
 import path from 'node:path';
 import express from 'express';
 import { config, ROOT } from './config.js';
-import { initDb, scalar, all } from './db/index.js';
+import { initDb, scalar, all, logActivity } from './db/index.js';
+import { confirmEmail } from './lib/verification.js';
+import { handleWebhook as handleRazorpayWebhook, PaymentError } from './lib/razorpay.js';
 import { importSqliteIfPresent } from './db/importSqlite.js';
 import { serversRouter } from './routes/servers.js';
 import { credentialsRouter } from './routes/credentials.js';
@@ -20,6 +22,7 @@ import { requirePlan, enforceLimits, DB_PROVIDERS, FREE_TRIAL_DAYS, blockIfExpir
 import { submitLead } from './routes/leads.js';
 import { renderLanding, robotsTxt, sitemapXml } from './lib/landing.js';
 import { renderDocsHome, renderDoc } from './lib/docsPage.js';
+import { renderTerms } from './lib/terms.js';
 import { docsFor } from './lib/docs.js';
 import { ensureSuperAdmin } from './lib/superAdmin.js';
 import { attachUser, requireAuth, requireOrg, guardMutations } from './lib/authGuard.js';
@@ -58,6 +61,17 @@ app.get('/docs/:slug', (req, res) => {
   if (!html) return res.redirect(302, '/docs');
   res.set('Cache-Control', 'no-cache').type('html').send(html);
 });
+// The link in the "verify your email" message: confirm, then back to the sign-in card saying how it went.
+app.get('/verify-email', async (req, res, next) => {
+  try {
+    const { result, user } = await confirmEmail(String(req.query.token || ''));
+    if (result === 'verified') await logActivity('user', user.id, 'email_verified', `${user.name} verified ${user.email}`);
+    const params = new URLSearchParams({ verify: result });
+    if (user && result !== 'invalid') params.set('email', user.email);
+    res.set('Cache-Control', 'no-store').redirect(302, `/?${params}#signin`);
+  } catch (err) { next(err); }
+});
+app.get('/terms', (req, res) => res.set('Cache-Control', 'no-cache').type('html').send(renderTerms(req)));
 app.get('/robots.txt', (req, res) => res.type('text/plain').send(robotsTxt(req)));
 app.get('/sitemap.xml', (req, res) => res.type('application/xml').send(sitemapXml(req)));
 
@@ -70,6 +84,19 @@ app.use(express.static(path.join(ROOT, 'public'), {
 // Everything under /api knows who is asking; most of it then insists on it.
 // GitHub, GitLab and Bitbucket call this when a branch changes — no session; the token in the address is the key.
 app.post('/api/hooks/apps/:token', handleAppWebhook);
+// Razorpay tells us about payments here; the signature over the raw body is the key.
+app.post('/api/hooks/razorpay', async (req, res) => {
+  try {
+    if (!req.rawBody) return res.status(400).json({ error: 'No body' });
+    const result = await handleRazorpayWebhook(req.rawBody, req.headers['x-razorpay-signature']);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
+    console.error('[razorpay] webhook failed:', err.message);
+    // A 5xx makes Razorpay retry later, which is what we want if the database blinked.
+    res.status(500).json({ error: 'Could not process the event' });
+  }
+});
 
 app.use('/api', sameOriginOnly, attachUser);
 app.use('/api/auth', authRouter);

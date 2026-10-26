@@ -1,6 +1,10 @@
 /**
  * Signing in.
  *
+ * Signing in and signing up both end in a one-time code sent to the mobile
+ * number (lib/verification.js), and a self sign-up must also click the link
+ * emailed to it before its first sign-in.
+ *
  * The very first run has no accounts at all, so the panel asks whoever gets
  * there first to create the super admin. A super admin runs the platform and
  * belongs to no organisation. After that this router issues and ends
@@ -20,6 +24,10 @@ import { publicUser, orgOf, endSession, endAllSessions, requireAuth } from '../l
 import { createOrganisation, OrgError } from '../lib/organisations.js';
 import { setSubscription } from '../lib/plans.js';
 import { clientIp, rateLimiter } from '../lib/security.js';
+import {
+  createChallenge, verifyChallenge, resendChallenge, VerifyError, sendVerificationEmail, usersByPhone, phoneDigits,
+} from '../lib/verification.js';
+import { TERMS_VERSION } from '../lib/terms.js';
 
 export const authRouter = Router();
 
@@ -133,8 +141,13 @@ async function freeOrgName(base) {
 }
 
 /**
- * Anyone can create their own organisation: they become its admin, it starts
- * on the free plan (when there is one) and they are signed straight in.
+ * Anyone can create their own organisation, in three steps:
+ *
+ *   1. POST /signup         everything is checked, then a one-time code goes to the mobile number
+ *   2. POST /signup/verify  the right code creates the organisation, with them as its admin,
+ *                           on the free plan (when there is one) — and emails a verification link
+ *   3. GET  /verify-email   the link marks the email verified; only then can they sign in
+ *
  * Without a free plan the organisation waits on the "choose a plan" page.
  */
 authRouter.post('/signup', async (req, res, next) => {
@@ -153,82 +166,183 @@ authRouter.post('/signup', async (req, res, next) => {
     // Every attempt counts, so the "already has an account" answer cannot be used to test emails in bulk.
     hits.push(now);
     signupHits.set(ip, hits);
-
-    const name = String(b.name || '').trim().slice(0, 190);
-    if (!name) return res.status(400).json({ error: 'Your name is required' });
-    const email = checkEmail(b.email);
-    if (email.error) return res.status(400).json({ error: email.error });
-    const phone = checkPhone(b.phone, { required: true });
-    if (phone.error) return res.status(400).json({ error: phone.error });
-    const passwordError = checkPassword(b.password);
-    if (passwordError) return res.status(400).json({ error: passwordError });
-    if (b.confirm !== undefined && b.confirm !== b.password) return res.status(400).json({ error: 'The two passwords do not match' });
-    if (!(b.terms === true || b.terms === 'on' || b.terms === 'true')) return res.status(400).json({ error: 'Please accept the terms to create an account' });
-    if (await one('SELECT id FROM users WHERE email = ?', [email.value])) {
-      return res.status(409).json({ error: `${email.value} already has an account — sign in instead.`, signIn: true });
-    }
-
     if (signupHits.size > 5000) for (const [k, v] of signupHits) if (!v.some((t) => now - t < SIGNUP_WINDOW_MS)) signupHits.delete(k);
 
-    // The plan they picked. A free one starts at once; a paid one starts them on the free
-    // plan and is recorded as a request, which a super admin switches on once it is paid for.
-    const cycle = b.cycle === 'yearly' ? 'yearly' : 'monthly';
-    const chosen = b.plan_id
-      ? await one("SELECT * FROM plans WHERE id = ? AND status = 'active' AND is_public = 1", [Number(b.plan_id)])
-      : null;
-    if (b.plan_id && !chosen) return res.status(400).json({ error: 'That plan is not available — pick another one' });
+    const checked = await checkSignup(b);
+    if (checked.error) return res.status(checked.status || 400).json(checked);
+
+    const challenge = await createChallenge({ purpose: 'signup', payload: checked.value, phone: checked.value.phone });
+    res.json({ ok: true, ...challenge });
+  } catch (err) { next(err); }
+});
+
+/** Step 2: the code is right — create the organisation and email the verification link. */
+authRouter.post('/signup/verify', async (req, res, next) => {
+  try {
+    const wait = loginByIp.hit(clientIp(req));
+    if (wait) return tooMany(res, wait);
+    if (!signupOpen()) return res.status(403).json({ error: 'Sign-up is closed on this panel. Ask an admin for an account.' });
+
+    const { payload } = await verifyChallenge(req.body.challenge, req.body.otp, 'signup');
+    // Checked again: somebody may have taken the email or number while the code was on its way.
+    const checked = await checkSignup(payload);
+    if (checked.error) return res.status(checked.status || 400).json(checked);
+    const b = checked.value;
+
     const isFree = (p) => p && Number(p.price_monthly) === 0 && Number(p.price_yearly) === 0;
-    if (chosen && !isFree(chosen) && cycle === 'yearly' && !(Number(chosen.price_yearly) > 0)) {
-      return res.status(400).json({ error: `${chosen.name} is not sold yearly — choose monthly` });
-    }
+    const chosen = b.plan_id ? await one("SELECT * FROM plans WHERE id = ? AND status = 'active' AND is_public = 1", [b.plan_id]) : null;
     const plan = isFree(chosen) ? chosen : await freePlan();
     const requested = chosen && !isFree(chosen) ? chosen : null;
 
-    const company = String(b.company || '').trim();
     const orgId = await createOrganisation({
-      name: await freeOrgName(company || `${name}'s workspace`),
-      notes: `Signed up from the website${requested ? ` — asked for ${requested.name} (${cycle})` : ''}`,
-      admin_email: email.value, admin_password: b.password, admin_name: name, admin_phone: b.phone,
+      name: await freeOrgName(b.company || `${b.name}'s workspace`),
+      notes: `Signed up from the website${requested ? ` — asked for ${requested.name} (${b.cycle})` : ''}`,
+      admin_email: b.email, admin_password: b.password, admin_name: b.name, admin_phone: b.phone,
       plan_id: plan?.id, sub_status: 'active',
     }, null);
-    if (requested) await setSubscription(orgId, requested, { cycle, status: 'pending', notes: 'Chosen at sign-up' });
+    if (requested) await setSubscription(orgId, requested, { cycle: b.cycle, status: 'pending', notes: 'Chosen at sign-up' });
 
-    const user = await one('SELECT * FROM users WHERE email = ?', [email.value]);
+    // Signed up from the website: the email must be confirmed before the first sign-in.
+    await run(
+      'UPDATE users SET email_verified = 0, email_verified_at = NULL, terms_version = ?, terms_accepted_at = NOW() WHERE email = ?',
+      [TERMS_VERSION, b.email],
+    );
+    const user = await one('SELECT * FROM users WHERE email = ?', [b.email]);
     const org = await one('SELECT * FROM organisations WHERE id = ?', [orgId]);
-    await startSession(req, res, user);
-    await logActivity('user', user.id, 'signup', `${name} signed up and created "${org.name}"`
-      + `${plan ? ` on ${plan.name}` : ' (no free plan — waiting for one)'}${requested ? `, asking for ${requested.name} (${cycle})` : ''}`);
+    const mail = await sendVerificationEmail(req, user);
+
+    await logActivity('user', user.id, 'signup', `${b.name} signed up and created "${org.name}"`
+      + `${plan ? ` on ${plan.name}` : ' (no free plan — waiting for one)'}${requested ? `, asking for ${requested.name} (${b.cycle})` : ''}`
+      + ' — mobile verified, waiting for the email to be verified');
 
     res.status(201).json({
       ok: true,
-      user: publicUser(user, org),
+      verifyEmail: true,
+      email: user.email,
+      emailSent: Boolean(mail.delivered),
       plan: plan ? { id: plan.id, name: plan.name } : null,
-      requested: requested ? { id: requested.id, name: requested.name, cycle } : null,
+      requested: requested ? { id: requested.id, name: requested.name, cycle: b.cycle } : null,
     });
   } catch (err) {
+    if (err instanceof VerifyError) return res.status(err.status).json({ error: err.message, restart: Boolean(err.restart) });
     if (err instanceof OrgError) return res.status(err.status).json({ error: err.message });
     next(err);
   }
 });
 
+/** A new code for a sign-up or sign-in that is waiting on one. */
+authRouter.post('/otp/resend', async (req, res, next) => {
+  try {
+    const wait = loginByIp.hit(clientIp(req));
+    if (wait) return tooMany(res, wait);
+    const purpose = req.body.purpose === 'signup' ? 'signup' : 'login';
+    res.json({ ok: true, ...(await resendChallenge(req.body.challenge, purpose)) });
+  } catch (err) {
+    if (err instanceof VerifyError) return res.status(err.status).json({ error: err.message, restart: Boolean(err.restart) });
+    next(err);
+  }
+});
+
+/**
+ * Everything a sign-up form says, checked: { value } ready to use, or { error }
+ * (with the field it is about, so the form can point at it).
+ */
+async function checkSignup(b) {
+  const fail = (field, error, extra = {}) => ({ error, field, ...extra });
+
+  const name = String(b.name || '').trim().slice(0, 190);
+  if (!name) return fail('name', 'Your name is required');
+  if (name.length < 2) return fail('name', 'Your name is too short');
+  const email = checkEmail(b.email);
+  if (email.error) return fail('email', email.error);
+  const phone = checkPhone(b.phone, { required: true });
+  if (phone.error) return fail('phone', phone.error);
+  const passwordError = checkPassword(b.password);
+  if (passwordError) return fail('password', passwordError);
+  if (b.confirm !== undefined && b.confirm !== b.password) return fail('confirm', 'The two passwords do not match');
+  if (!(b.terms === true || b.terms === 'on' || b.terms === 'true')) return fail('terms', 'Please read and accept the Terms & Conditions to create an account');
+
+  if (await one('SELECT id FROM users WHERE email = ?', [email.value])) {
+    return fail('email', `${email.value} already has an account — sign in instead.`, { status: 409, signIn: true });
+  }
+  if ((await usersByPhone(phone.value)).length) {
+    return fail('phone', `${phone.value} is already on an account — sign in instead, or use another number.`, { status: 409, signIn: true });
+  }
+
+  // The plan they picked. A free one starts at once; a paid one starts them on the free
+  // plan and is recorded as a request, which a super admin switches on once it is paid for.
+  const cycle = b.cycle === 'yearly' ? 'yearly' : 'monthly';
+  const chosen = b.plan_id ? await one("SELECT * FROM plans WHERE id = ? AND status = 'active' AND is_public = 1", [Number(b.plan_id)]) : null;
+  if (b.plan_id && !chosen) return fail('plan', 'That plan is not available — pick another one');
+  const paid = chosen && !(Number(chosen.price_monthly) === 0 && Number(chosen.price_yearly) === 0);
+  if (paid && cycle === 'yearly' && !(Number(chosen.price_yearly) > 0)) {
+    return fail('plan', `${chosen.name} is not sold yearly — choose monthly`);
+  }
+
+  return {
+    value: {
+      name, email: email.value, phone: phone.value, password: String(b.password), terms: true,
+      company: String(b.company || '').trim().slice(0, 180), plan_id: chosen ? chosen.id : null, cycle,
+    },
+  };
+}
+
 /* ---------------------------------------------------------------- login */
 
+/**
+ * Sign in with an email or a mobile number and the password, then a one-time
+ * code. An account that signed up itself must have verified its email first.
+ */
 authRouter.post('/login', async (req, res, next) => {
   try {
-    const email = String(req.body.email || '').trim().toLowerCase().slice(0, 190);
-    const wait = Math.max(loginByIp.hit(clientIp(req)), loginByEmail.hit(email));
+    const login = String(req.body.login ?? req.body.email ?? '').trim().toLowerCase().slice(0, 190);
+    const byEmail = login.includes('@');
+    const wait = Math.max(loginByIp.hit(clientIp(req)), loginByEmail.hit(byEmail ? login : phoneDigits(login)));
     if (wait) return tooMany(res, wait);
 
-    const user = email ? await one('SELECT * FROM users WHERE email = ?', [email]) : null;
-
-    // The same answer, and the same time taken, either way — so this cannot be used to find out who has an account.
-    const passwordOk = verifyPassword(req.body.password || '', user?.password_hash || DUMMY_HASH);
-    if (!user || !passwordOk) {
-      return res.status(401).json({ error: 'That email and password do not match an account' });
+    if (!login) return res.status(400).json({ error: 'Enter your email or mobile number', field: 'login' });
+    if (byEmail && checkEmail(login).error) return res.status(400).json({ error: 'That does not look like an email address', field: 'login' });
+    if (!byEmail && checkPhone(login).error) {
+      return res.status(400).json({ error: 'Enter your email or mobile number (e.g. 98765 43210)', field: 'login' });
     }
-    loginByEmail.reset(email);
+    if (!req.body.password) return res.status(400).json({ error: 'Enter your password', field: 'password' });
+
+    // A number can be on more than one account; the password says which one is meant.
+    const candidates = byEmail ? [await one('SELECT * FROM users WHERE email = ?', [login])].filter(Boolean) : await usersByPhone(login);
+    let user = null;
+    for (const c of candidates) if (verifyPassword(req.body.password, c.password_hash)) user = user || c;
+    // The same answer, and the same time taken, either way — so this cannot be used to find out who has an account.
+    if (!candidates.length) verifyPassword(req.body.password, DUMMY_HASH);
+    if (!user) {
+      return res.status(401).json({ error: `That ${byEmail ? 'email' : 'mobile number'} and password do not match an account` });
+    }
+    loginByEmail.reset(byEmail ? login : phoneDigits(login));
     if (user.status !== 'active') {
       return res.status(403).json({ error: 'This account has been disabled. Ask an admin to turn it back on.' });
+    }
+    if (!Number(user.email_verified)) {
+      return res.status(403).json({
+        error: `Verify your email first — we sent a link to ${user.email}.`,
+        needsEmailVerification: true,
+        email: user.email,
+      });
+    }
+
+    const challenge = await createChallenge({ purpose: 'login', user, phone: user.phone, email: user.email });
+    res.json({ ok: true, ...challenge });
+  } catch (err) { next(err); }
+});
+
+/** Step 2 of signing in: the code, then the session. */
+authRouter.post('/login/verify', async (req, res, next) => {
+  try {
+    const wait = loginByIp.hit(clientIp(req));
+    if (wait) return tooMany(res, wait);
+
+    const { userId } = await verifyChallenge(req.body.challenge, req.body.otp, 'login');
+    const user = await one('SELECT * FROM users WHERE id = ?', [userId]);
+    if (!user || user.status !== 'active') {
+      return res.status(403).json({ error: 'This account has been disabled. Ask an admin to turn it back on.', restart: true });
     }
 
     // A super admin always lands on the platform, not inside the last organisation they opened.
@@ -242,6 +356,30 @@ authRouter.post('/login', async (req, res, next) => {
     await logActivity('user', user.id, 'login', `${user.name} signed in`);
 
     res.json({ ok: true, user: publicUser(user, org) });
+  } catch (err) {
+    if (err instanceof VerifyError) return res.status(err.status).json({ error: err.message, restart: Boolean(err.restart) });
+    next(err);
+  }
+});
+
+/* ------------------------------------------------- email verification */
+
+const verifyResends = rateLimiter({ windowMs: 60 * 60_000, max: 5 });
+
+/**
+ * Send the verification link again. The answer is the same whether or not the
+ * address has an account waiting, so it cannot be used to look accounts up.
+ */
+authRouter.post('/verify-email/resend', async (req, res, next) => {
+  try {
+    const email = checkEmail(req.body.email);
+    if (email.error) return res.status(400).json({ error: email.error });
+    const wait = Math.max(loginByIp.hit(clientIp(req)), verifyResends.hit(email.value));
+    if (wait) return tooMany(res, wait);
+
+    const user = await one('SELECT * FROM users WHERE email = ?', [email.value]);
+    if (user && !Number(user.email_verified) && user.status === 'active') await sendVerificationEmail(req, user);
+    res.json({ ok: true, message: `If ${email.value} is waiting to be verified, a new link is on its way.` });
   } catch (err) { next(err); }
 });
 

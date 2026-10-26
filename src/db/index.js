@@ -133,6 +133,36 @@ async function createSchema() {
       CONSTRAINT fk_session_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // A one-time code waiting to be typed in: a sign-in (user_id) or a sign-up not yet created (payload, encrypted).
+    `CREATE TABLE IF NOT EXISTS auth_challenges (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      token_hash   CHAR(64) NOT NULL UNIQUE,
+      purpose      VARCHAR(16) NOT NULL,
+      user_id      INT NULL,
+      payload      MEDIUMTEXT NULL,
+      code_hash    CHAR(64) NOT NULL,
+      channel      VARCHAR(10) NOT NULL,
+      sent_to      VARCHAR(190) NOT NULL,
+      attempts     INT NOT NULL DEFAULT 0,
+      sends        INT NOT NULL DEFAULT 1,
+      last_sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at   DATETIME NOT NULL,
+      created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_challenge_expiry (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // The link in a "verify your email" message; only its SHA-256 is kept.
+    `CREATE TABLE IF NOT EXISTS email_verifications (
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      user_id    INT NOT NULL,
+      email      VARCHAR(190) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_verify_user (user_id),
+      CONSTRAINT fk_verify_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     `CREATE TABLE IF NOT EXISTS servers (
       id                INT AUTO_INCREMENT PRIMARY KEY,
       name              VARCHAR(190) NOT NULL UNIQUE,
@@ -365,6 +395,28 @@ async function createSchema() {
       CONSTRAINT fk_pay_org FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // An online payment started with Razorpay: what it is for, and whether it went through.
+    `CREATE TABLE IF NOT EXISTS payment_orders (
+      id                  INT AUTO_INCREMENT PRIMARY KEY,
+      org_id              INT NOT NULL,
+      plan_id             INT NOT NULL,
+      user_id             INT NULL,
+      cycle               VARCHAR(10) NOT NULL DEFAULT 'monthly',
+      amount              DECIMAL(12,2) NOT NULL,
+      currency            VARCHAR(8) NOT NULL DEFAULT 'INR',
+      provider            VARCHAR(20) NOT NULL DEFAULT 'razorpay',
+      provider_order_id   VARCHAR(64) NOT NULL UNIQUE,
+      provider_payment_id VARCHAR(64) NULL,
+      status              VARCHAR(20) NOT NULL DEFAULT 'created',
+      error               VARCHAR(500) NULL,
+      payment_id          INT NULL,
+      paid_at             DATETIME NULL,
+      created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_porder_org (org_id),
+      CONSTRAINT fk_porder_org FOREIGN KEY (org_id) REFERENCES organisations(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // People who asked about the platform from the public site, and what was done about it.
     `CREATE TABLE IF NOT EXISTS leads (
       id             INT AUTO_INCREMENT PRIMARY KEY,
@@ -551,6 +603,13 @@ async function addOrgScoping() {
     // What the visitor's browser reported about their computer when they sent the form.
     // A mobile number — required for admins and super admins.
     ['users', 'phone', 'VARCHAR(32) NULL'],
+    // Self sign-ups start unverified and must click the emailed link; everyone else (and every
+    // account that existed before this column) counts as verified.
+    ['users', 'email_verified', 'TINYINT(1) NOT NULL DEFAULT 1'],
+    ['users', 'email_verified_at', 'DATETIME NULL'],
+    // Which wording of the Terms & Conditions the person agreed to at sign-up, and when.
+    ['users', 'terms_version', 'VARCHAR(20) NULL'],
+    ['users', 'terms_accepted_at', 'DATETIME NULL'],
     ['leads', 'device', 'JSON'],
     // Telling one person apart from another, and where their connection is.
     ['leads', 'visitor_id', 'VARCHAR(64) NULL'],

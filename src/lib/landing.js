@@ -192,6 +192,7 @@ export function sitemapXml(req) {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>${esc(url)}/</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>1.0</priority></url>
   <url><loc>${esc(url)}/docs</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>${esc(url)}/terms</loc><lastmod>${lastmod}</lastmod><changefreq>yearly</changefreq><priority>0.3</priority></url>
 ${docsFor().map((d) => `  <url><loc>${esc(url)}/docs/${d.slug}</loc><lastmod>${lastmod}</lastmod><changefreq>monthly</changefreq><priority>0.6</priority></url>`).join('\n')}
 </urlset>
 `;

@@ -13,6 +13,7 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import { connectionFromRow, withConnection } from '../lib/ssh.js';
 import { byKey, publicCatalog, containerPlan, publicSettings, extraPortPlan } from '../lib/catalog.js';
 import { resolveEnvironmentChoice } from '../lib/environments.js';
+import { installAnalyzer } from '../lib/nginxLogs.js';
 import {
   dockerState, requireDocker, DockerMissingError, runContainer, recreateContainer,
   containerAction, containerLogs, removeContainer, installEngine, installCompose,
@@ -99,6 +100,7 @@ installsRouter.post('/', async (req, res, next) => {
 async function installOnHost(entry, server, req, res) {
   try {
     const result = await withConnection(connectionFromRow(server), async (conn) => {
+      if (entry.key === 'nginx-logs') return installAnalyzer(conn, server);
       if (entry.key === 'compose') await requireDocker(conn, server);
       return entry.key === 'docker' ? installEngine(conn, server) : installCompose(conn, server);
     });

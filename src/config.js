@@ -83,6 +83,40 @@ export const config = {
   },
 
   /**
+   * The one-time code asked for at sign-in and sign-up. "fixed" uses OTP_FIXED_CODE
+   * for everyone (testing, until an SMS provider is connected); "random" makes a
+   * fresh code each time and, with no provider yet, writes it to the server log.
+   */
+  otp: {
+    mode: String(process.env.OTP_MODE || 'fixed').trim().toLowerCase() === 'random' ? 'random' : 'fixed',
+    fixedCode: /^\d{6}$/.test(String(process.env.OTP_FIXED_CODE || '')) ? String(process.env.OTP_FIXED_CODE) : '123456',
+    minutes: Math.max(1, Number(process.env.OTP_MINUTES || 10)),
+  },
+
+  /** Outgoing email (verification links). Without SMTP_HOST the message is written to the server log instead. */
+  mail: {
+    host: String(process.env.SMTP_HOST || '').trim(),
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+    user: String(process.env.SMTP_USER || '').trim(),
+    pass: process.env.SMTP_PASS || '',
+    from: String(process.env.MAIL_FROM || '').trim() || 'AJ Pilot <no-reply@localhost>',
+  },
+  emailVerifyHours: Math.max(1, Number(process.env.EMAIL_VERIFY_HOURS || 24)),
+
+  /**
+   * Razorpay: paying for a plan online. With both keys set, choosing a paid
+   * plan opens Razorpay Checkout and the plan starts as soon as the payment is
+   * verified; without them a paid plan stays a request a super admin switches on.
+   */
+  razorpay: {
+    keyId: String(process.env.RAZORPAY_KEY_ID || '').trim(),
+    keySecret: String(process.env.RAZORPAY_KEY_SECRET || '').trim(),
+    webhookSecret: String(process.env.RAZORPAY_WEBHOOK_SECRET || '').trim(),
+    apiBase: String(process.env.RAZORPAY_API_BASE || 'https://api.razorpay.com/v1').trim().replace(/\/+$/, ''),
+  },
+
+  /**
    * The platform owner, kept in .env. When both are set, boot makes sure this
    * account exists as an active super admin with exactly this password.
    */

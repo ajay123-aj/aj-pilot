@@ -60,6 +60,7 @@
         <a href="#pricing" class="%%PRICING_HIDDEN%%" id="nav-pricing">Pricing</a>
         <a href="#faq">FAQ</a>
         <a href="/docs">Docs</a>
+        <a href="/terms">Terms</a>
         <a href="#contact">Contact</a>
       </nav>
       <div class="landing-actions">
@@ -797,6 +798,7 @@
         <a href="#about">About</a>
         <a href="#contact">Contact</a>
         <a href="#faq">FAQ</a>
+        <a href="/terms">Terms &amp; Conditions</a>
         <a href="#top" id="link-foot-signin">Sign in</a>
       </nav>
     </div>
@@ -840,7 +842,7 @@
         <label>Your name<input name="name" placeholder="Jane Doe" required /></label>
         <label>Email<input name="email" type="email" placeholder="jane@company.com" required autocomplete="username" /></label>
       </div>
-      <label>Mobile number <span class="muted small">(with country code)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" required /></label>
+      <label>Mobile number<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="98765 43210" required /></label>
       <label>Password<input name="password" type="password" required autocomplete="new-password" /></label>
       <p class="muted small">At least 10 characters, with letters and numbers.</p>
       <div id="setup-msg" class="msg hidden"></div>
@@ -848,10 +850,10 @@
     </form>
 
     <!-- every run after that -->
-    <form id="form-login" class="hidden">
+    <form id="form-login" class="hidden" novalidate>
       <h2>Sign in</h2>
       <p class="muted small">Your servers and credentials are behind this.</p>
-      <label>Email<input name="email" type="email" required autocomplete="username" /></label>
+      <label>Email or mobile number<input name="login" type="text" required maxlength="190" autocomplete="username" placeholder="jane@company.com or 98765 43210" /></label>
       <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
       <div id="login-msg" class="msg hidden"></div>
       <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Sign in</button>
@@ -868,7 +870,7 @@
         <label>Work email<input name="email" type="email" placeholder="jane@company.com" required maxlength="190" autocomplete="email" /></label>
       </div>
       <div class="row">
-        <label>Mobile number <span class="muted small">(with country code)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" required /></label>
+        <label>Mobile number<input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="98765 43210" required /></label>
         <label>Company <span class="muted small">(your organisation)</span><input name="company" maxlength="180" autocomplete="organization" placeholder="Acme Studio" /></label>
       </div>
       <div class="su-plan-block" id="signup-plan-block" hidden>
@@ -890,15 +892,46 @@
       </div>
       <div class="pw-meter" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <p class="muted small" id="signup-pw-hint" style="margin:6px 0 0">At least 10 characters, with letters and numbers.</p>
-      <label class="check" style="margin-top:12px"><input type="checkbox" name="terms" required /> <span>I agree to the terms of service and privacy policy</span></label>
+      <label class="check" style="margin-top:12px"><input type="checkbox" name="terms" required /> <span>I have read and agree to the <a href="/terms" target="_blank" rel="noopener" class="terms-link">Terms &amp; Conditions</a></span></label>
       <div class="hp" aria-hidden="true"><label>Leave this empty<input name="hp_check" type="text" tabindex="-1" autocomplete="off" /></label></div>
       <div id="signup-msg" class="msg hidden"></div>
-      <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Create account</button>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:16px" disabled aria-describedby="signup-terms-hint">Create account</button>
+      <p class="muted small" id="signup-terms-hint" style="margin:6px 0 0;text-align:center">Tick the box above to agree to the Terms &amp; Conditions first.</p>
       <ul class="signup-perks">
         <li>Free plan on one server</li><li>Auto deploy on merge</li><li>Encrypted secrets</li>
       </ul>
       <p class="muted small auth-switch" style="margin-top:12px">Already have an account? <a href="#signin" data-auth-mode="login">Sign in</a></p>
     </form>
+
+    <!-- step 2 of signing in or signing up: the one-time code -->
+    <form id="form-otp" class="hidden" novalidate>
+      <div class="auth-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2.5"/><path d="M11 18h2"/></svg></div>
+      <h2 id="otp-title">Enter the verification code</h2>
+      <p class="muted small">We sent a 6-digit code to <b id="otp-to"></b>. It works for <span id="otp-minutes">10</span> minutes.</p>
+      <div class="otp-boxes" id="otp-boxes" role="group" aria-label="6-digit code">
+        <input inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1" />
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 2" />
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 3" />
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 4" />
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 5" />
+        <input inputmode="numeric" maxlength="1" aria-label="Digit 6" />
+      </div>
+      <div class="msg info" id="otp-test" hidden></div>
+      <div id="otp-msg" class="msg hidden"></div>
+      <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Verify</button>
+      <p class="muted small otp-resend">Didn't get it? <button type="button" class="link-btn" id="otp-resend">Send a new code</button> <span id="otp-timer"></span></p>
+      <p class="muted small" style="margin-top:6px"><a href="#" id="otp-back">← Back</a></p>
+    </form>
+
+    <!-- after sign-up, or signing in before the email is confirmed -->
+    <div id="auth-email" class="hidden">
+      <div class="auth-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 6 9 7 9-7"/></svg></div>
+      <h2 id="email-title">Verify your email</h2>
+      <p class="muted small" id="email-sub"></p>
+      <div id="email-msg" class="msg hidden"></div>
+      <button type="button" class="btn" id="email-resend" style="width:100%;margin-top:16px">Send the link again</button>
+      <button type="button" class="btn primary" data-auth-mode="login" style="width:100%;margin-top:10px">Back to sign in</button>
+    </div>
   </div>
 </div>
 
@@ -1833,7 +1866,7 @@
         <label>Name<input name="name" placeholder="Jane Doe" required /></label>
         <label>Email<input name="email" type="email" placeholder="jane@company.com" required /></label>
       </div>
-      <label id="member-phone-label">Mobile number <span class="muted small" id="member-phone-hint">(optional)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" /></label>
+      <label id="member-phone-label">Mobile number <span class="muted small" id="member-phone-hint">(optional)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="98765 43210" /></label>
       <label id="member-org-field" class="hidden">Organisation
         <select name="org_id" id="member-org"></select>
       </label>
@@ -1882,7 +1915,7 @@
       <label>Name<input name="name" required /></label>
       <label>Email <span class="muted small">(this is what you sign in with)</span><input name="email" type="email" required /></label>
       <label id="profile-current-wrap" class="hidden">Current password <span class="muted small">(needed to change your email)</span><input name="current" type="password" autocomplete="current-password" /></label>
-      <label>Mobile number <span class="muted small" id="profile-phone-hint">(optional)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" /></label>
+      <label>Mobile number <span class="muted small" id="profile-phone-hint">(optional)</span><input name="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="98765 43210" /></label>
       <div id="profile-msg" class="msg hidden"></div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" data-close id="btn-profile-cancel">Cancel</button>

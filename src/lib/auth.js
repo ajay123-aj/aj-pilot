@@ -46,7 +46,8 @@ export const PHONE_ROLES = ['super_admin', 'admin'];
 export const phoneRequired = (role) => PHONE_ROLES.includes(role);
 
 /**
- * A mobile number, with its country code: "+91 98765 43210". Spaces, dashes,
+ * A mobile number, with or without its country code: "98765 43210" or
+ * "+91 98765 43210". Spaces, dashes,
  * dots and brackets are allowed; 8 to 15 digits. `required` makes empty an error.
  */
 export function checkPhone(phone, { required = false } = {}) {
@@ -54,7 +55,7 @@ export function checkPhone(phone, { required = false } = {}) {
   if (!value) return required ? { error: 'A mobile number is required for admins and super admins' } : { value: null };
   const digits = value.replace(/\D/g, '');
   if (!/^\+?[\d\s().-]+$/.test(value) || digits.length < 8 || digits.length > 15) {
-    return { error: `"${value}" does not look like a mobile number — use digits with the country code, e.g. +91 98765 43210` };
+    return { error: `"${value}" does not look like a mobile number — use 8 to 15 digits, e.g. 98765 43210` };
   }
   return { value: value.slice(0, 32) };
 }

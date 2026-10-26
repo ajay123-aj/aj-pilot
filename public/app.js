@@ -600,10 +600,14 @@ function openAuth(mode = 'login') {
   $('#form-setup').classList.toggle('hidden', m !== 'setup');
   $('#form-login').classList.toggle('hidden', m !== 'login');
   $('#form-signup').classList.toggle('hidden', m !== 'signup');
+  $('#form-otp').classList.toggle('hidden', m !== 'otp');
+  $('#auth-email').classList.toggle('hidden', m !== 'email');
   $('.gate-card').classList.toggle('wide', m === 'signup');
-  ['#setup-msg', '#login-msg', '#signup-msg'].forEach((id) => $(id).classList.add('hidden'));
-  if (m === 'signup') renderSignupPlans();
-  $(`#form-${m} input`)?.focus();
+  ['#setup-msg', '#login-msg', '#signup-msg', '#otp-msg', '#email-msg'].forEach((id) => $(id).classList.add('hidden'));
+  if (m !== 'otp') stopOtpTimer();
+  if (m === 'signup') { renderSignupPlans(); syncSignupButton(); }
+  if (m === 'otp') $('#otp-boxes input')?.focus();
+  else $(`#form-${m} input:not([type=hidden])`)?.focus();
 }
 
 // "Create a free account" / "Sign in" links move between the two forms.
@@ -1031,56 +1035,340 @@ signupForm.addEventListener('submit', async (e) => {
   body.plan_id = signupPlan.id || undefined;
   body.cycle = signupPlan.cycle;
   // Caught here first, so nobody waits on the server to hear about a typo.
-  const problem = !body.name.trim() ? 'Your name is required'
-    : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()) ? 'Enter a valid email address'
-      : !body.phone.trim() ? 'Your mobile number is required'
-        : passwordScore(body.password) < 2 ? 'Choose a password of at least 10 characters, with letters and numbers'
-          : body.password !== body.confirm ? 'The two passwords do not match'
-            : !body.terms ? 'Please accept the terms to create an account' : null;
-  if (problem) return formMsg(msg, problem, 'err');
+  if (!validateAuthForm(signupForm)) return formMsg(msg, 'Fix the highlighted fields to carry on.', 'err');
 
-  busy(btn, true, 'Creating your account…');
+  busy(btn, true, 'Checking…');
   try {
     const r = await api('/auth/signup', { method: 'POST', body });
-    session.user = r.user;
-    signupForm.reset();
-    $('.pw-meter', signupForm).dataset.score = '';
     msg.classList.add('hidden');
-    await enterApp();
-    toast(r.requested && r.plan
-      ? `Welcome, ${r.user.name} — you are on ${r.plan.name}; your ${r.requested.name} request is with our team`
-      : r.requested
-        ? `Welcome, ${r.user.name} — your ${r.requested.name} request is with our team; the panel opens once it is switched on`
-        : r.plan
-          ? `Welcome, ${r.user.name} — ${r.user.organisation?.name} is ready on the ${r.plan.name} plan`
-          : `Welcome, ${r.user.name} — choose a plan to start using ${r.user.organisation?.name}`);
+    startOtp('signup', r);
   } catch (err) {
+    showServerFieldError(signupForm, err);
     formMsg(msg, err.message, 'err');
     // Already has an account: offer the sign-in form with the email filled in.
     if (err.body?.signIn) {
       msg.innerHTML += ' <a href="#signin" data-auth-mode="login">Sign in</a>';
-      $('#form-login').email.value = body.email;
+      $('#form-login').login.value = err.body.field === 'phone' ? body.phone : body.email;
     }
   }
   busy(btn, false);
+  syncSignupButton();
 });
+
+/** "Create account" only works once the terms are ticked; the hint under it says why. */
+function syncSignupButton() {
+  const agreed = signupForm.terms.checked;
+  $('button[type=submit]', signupForm).disabled = !agreed;
+  $('#signup-terms-hint').hidden = agreed;
+}
+signupForm.terms.addEventListener('change', syncSignupButton);
 
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = e.submitter || $('button[type=submit]', e.target);
   const msg = $('#login-msg');
+  if (!validateAuthForm(e.target)) return msg.classList.add('hidden');
   busy(btn, true, 'Signing in…');
   try {
     const r = await api('/auth/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target).entries()) });
-    session.user = r.user;
-    e.target.reset();
     msg.classList.add('hidden');
-    await enterApp();
+    startOtp('login', r);
   } catch (err) {
-    formMsg(msg, err.message, 'err');
+    if (err.body?.needsEmailVerification) {
+      showEmailPanel('unverified', err.body.email);
+    } else {
+      showServerFieldError(e.target, err);
+      formMsg(msg, err.message, 'err');
+    }
   }
   busy(btn, false);
 });
+
+/* ------------------------------------------------- sign-in field checks */
+
+/*
+ * Each field is checked when you leave it and again on submit, and says what
+ * is wrong right under it. The server checks the same things; these only save
+ * a round trip.
+ */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** A mobile number: 8 to 15 digits; a leading "+" and country code are welcome but not needed. */
+function phoneProblem(value) {
+  const v = String(value || '').trim();
+  if (!v) return 'Your mobile number is required';
+  if (!/^\+?[\d\s().-]+$/.test(v)) return 'Use digits only, e.g. 98765 43210';
+  const digits = v.replace(/\D/g, '').length;
+  if (digits < 8 || digits > 15) return 'A mobile number has 8 to 15 digits, e.g. 98765 43210';
+  return null;
+}
+
+const AUTH_RULES = {
+  name: (v) => (!v.trim() ? 'Your name is required' : v.trim().length < 2 ? 'Your name is too short' : null),
+  email: (v) => (!v.trim() ? 'Your email is required' : !EMAIL_RE.test(v.trim()) ? 'Enter a valid email, like jane@company.com' : null),
+  phone: (v) => phoneProblem(v),
+  login: (v) => {
+    const s = v.trim();
+    if (!s) return 'Enter your email or mobile number';
+    if (s.includes('@')) return EMAIL_RE.test(s) ? null : 'Enter a valid email, like jane@company.com';
+    return phoneProblem(s) && 'Enter a valid email or mobile number (e.g. 98765 43210)';
+  },
+  password: (v, form) => (form.id === 'form-login'
+    ? (v ? null : 'Enter your password')
+    : passwordScore(v) < 2 ? 'At least 10 characters, with letters and numbers' : null),
+  confirm: (v, form) => (!v ? 'Type the password again' : v !== form.password.value ? 'The two passwords do not match' : null),
+  terms: (v, form) => (form.terms.checked ? null : 'Please accept the terms to create an account'),
+};
+
+function setFieldError(input, text) {
+  input.setAttribute('aria-invalid', text ? 'true' : 'false');
+  const label = input.closest('label');
+  if (!label) return;
+  let el = $('.field-err', label);
+  if (!el) {
+    el = document.createElement('small');
+    el.className = 'field-err';
+    el.id = `err-${input.form?.id}-${input.name}`;
+    label.appendChild(el);
+    input.setAttribute('aria-describedby', el.id);
+  }
+  el.textContent = text || '';
+  el.hidden = !text;
+}
+
+function checkAuthField(input) {
+  const rule = AUTH_RULES[input.name];
+  if (!rule) return true;
+  const problem = rule(input.value, input.form);
+  setFieldError(input, problem);
+  return !problem;
+}
+
+/** Every field at once; the first one that fails gets the focus. */
+function validateAuthForm(form) {
+  const fields = $$('input[name]', form).filter((i) => AUTH_RULES[i.name] && !i.closest('.hp'));
+  const bad = fields.filter((i) => !checkAuthField(i));
+  bad[0]?.focus();
+  return !bad.length;
+}
+
+/** The server named the field it did not like: point at it. */
+function showServerFieldError(form, err) {
+  const name = err.body?.field;
+  const input = name && form.elements[name];
+  if (input instanceof HTMLInputElement) setFieldError(input, err.message);
+}
+
+['#form-login', '#form-signup'].forEach((sel) => {
+  const form = $(sel);
+  // Leaving a field checks it; typing into one that was wrong re-checks as you go.
+  form.addEventListener('focusout', (e) => {
+    if (e.target.matches('input[name]') && e.target.value !== '' && e.target.type !== 'checkbox') checkAuthField(e.target);
+  });
+  form.addEventListener('input', (e) => {
+    if (e.target.getAttribute('aria-invalid') === 'true') checkAuthField(e.target);
+    // A changed password makes "confirm" worth another look.
+    if (e.target.name === 'password' && form.confirm?.value) checkAuthField(form.confirm);
+  });
+  form.addEventListener('change', (e) => { if (e.target.name === 'terms') checkAuthField(e.target); });
+});
+
+/* ------------------------------------------------------ one-time code */
+
+const otpState = { purpose: null, challenge: null, resendAt: 0, timer: null };
+const otpBoxes = () => $$('#otp-boxes input');
+
+function startOtp(purpose, r) {
+  otpState.purpose = purpose;
+  otpState.challenge = r.challenge;
+  $('#otp-title').textContent = purpose === 'signup' ? 'Verify your mobile number' : 'Enter the verification code';
+  $('#otp-to').textContent = r.sentTo;
+  $('#otp-minutes').textContent = String(r.expiresInMinutes || 10);
+  const test = $('#otp-test');
+  test.hidden = !r.testMode;
+  test.innerHTML = r.testMode
+    ? `Test mode — no ${r.channel === 'sms' ? 'SMS' : 'email'} is sent yet. Use the code <b>${esc(r.testCode || '')}</b>.` : '';
+  otpBoxes().forEach((b) => { b.value = ''; b.classList.remove('filled'); });
+  openAuth('otp');
+  startOtpTimer(r.resendAfterSeconds || 30);
+}
+
+function startOtpTimer(seconds) {
+  stopOtpTimer();
+  otpState.resendAt = Date.now() + seconds * 1000;
+  const tick = () => {
+    const left = Math.ceil((otpState.resendAt - Date.now()) / 1000);
+    $('#otp-resend').disabled = left > 0;
+    $('#otp-timer').textContent = left > 0 ? `in ${left}s` : '';
+    if (left <= 0) stopOtpTimer();
+  };
+  tick();
+  otpState.timer = setInterval(tick, 1000);
+}
+
+function stopOtpTimer() {
+  clearInterval(otpState.timer);
+  otpState.timer = null;
+}
+
+const otpCode = () => otpBoxes().map((b) => b.value).join('');
+
+function fillOtp(from, digits) {
+  const boxes = otpBoxes();
+  [...digits].slice(0, boxes.length - from).forEach((d, i) => { boxes[from + i].value = d; });
+  boxes.forEach((b) => b.classList.toggle('filled', Boolean(b.value)));
+  const next = boxes.find((b) => !b.value);
+  (next || boxes[boxes.length - 1]).focus();
+  // All six in: send it without making anyone reach for the button.
+  if (otpCode().length === boxes.length) $('#form-otp').requestSubmit();
+}
+
+$('#otp-boxes').addEventListener('input', (e) => {
+  const box = e.target;
+  const digits = box.value.replace(/\D/g, '');
+  box.value = '';
+  if (digits) fillOtp(otpBoxes().indexOf(box), digits);
+  else box.classList.remove('filled');
+});
+$('#otp-boxes').addEventListener('keydown', (e) => {
+  const boxes = otpBoxes();
+  const i = boxes.indexOf(e.target);
+  if (e.key === 'Backspace' && !e.target.value && i > 0) { boxes[i - 1].value = ''; boxes[i - 1].classList.remove('filled'); boxes[i - 1].focus(); e.preventDefault(); }
+  if (e.key === 'ArrowLeft' && i > 0) boxes[i - 1].focus();
+  if (e.key === 'ArrowRight' && i < boxes.length - 1) boxes[i + 1].focus();
+});
+$('#otp-boxes').addEventListener('paste', (e) => {
+  const digits = (e.clipboardData?.getData('text') || '').replace(/\D/g, '');
+  if (!digits) return;
+  e.preventDefault();
+  fillOtp(otpBoxes().indexOf(e.target), digits);
+});
+$('#otp-boxes').addEventListener('focusin', (e) => e.target.select?.());
+
+$('#form-otp').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('button[type=submit]', e.target);
+  const msg = $('#otp-msg');
+  const otp = otpCode();
+  if (!/^\d{6}$/.test(otp)) return formMsg(msg, 'Enter all 6 digits of the code.', 'err');
+  if (btn.disabled) return undefined;
+
+  busy(btn, true, 'Verifying…');
+  try {
+    const r = await api(`/auth/${otpState.purpose}/verify`, { method: 'POST', body: { challenge: otpState.challenge, otp } });
+    stopOtpTimer();
+    if (otpState.purpose === 'login') {
+      session.user = r.user;
+      $('#form-login').reset();
+      await enterApp();
+    } else {
+      signupForm.reset();
+      syncSignupButton();
+      $('.pw-meter', signupForm).dataset.score = '';
+      showEmailPanel('sent', r.email, { emailSent: r.emailSent, plan: r.plan, requested: r.requested });
+    }
+  } catch (err) {
+    if (err.body?.restart) {
+      // The code expired or ran out of tries: back to the form it came from, still filled in.
+      openAuth(otpState.purpose);
+      formMsg($(`#${otpState.purpose}-msg`), err.message, 'err');
+    } else {
+      formMsg(msg, err.message, 'err');
+      const boxes = $('#otp-boxes');
+      boxes.classList.remove('shake');
+      void boxes.offsetWidth;
+      boxes.classList.add('shake');
+      otpBoxes().forEach((b) => { b.value = ''; b.classList.remove('filled'); });
+      otpBoxes()[0].focus();
+    }
+  }
+  busy(btn, false);
+  return undefined;
+});
+
+$('#otp-resend').addEventListener('click', async (e) => {
+  const msg = $('#otp-msg');
+  busy(e.target, true, 'Sending…');
+  try {
+    const r = await api('/auth/otp/resend', { method: 'POST', body: { challenge: otpState.challenge, purpose: otpState.purpose } });
+    busy(e.target, false);
+    formMsg(msg, `A new code is on its way to ${r.sentTo}.`, 'ok');
+    startOtpTimer(r.resendAfterSeconds || 30);
+  } catch (err) {
+    busy(e.target, false);
+    if (err.body?.restart) {
+      openAuth(otpState.purpose);
+      formMsg($(`#${otpState.purpose}-msg`), err.message, 'err');
+    } else {
+      formMsg(msg, err.message, 'err');
+    }
+  }
+});
+
+$('#otp-back').addEventListener('click', (e) => {
+  e.preventDefault();
+  openAuth(otpState.purpose || 'login');
+});
+
+/* ------------------------------------------------- email verification */
+
+let emailPanelAddress = '';
+
+/**
+ * The "check your email" card: after signing up (`sent`), when signing in
+ * before the email is confirmed (`unverified`), or when a link has expired.
+ */
+function showEmailPanel(kind, email, extra = {}) {
+  emailPanelAddress = email || '';
+  const who = `<b>${esc(email || 'your email')}</b>`;
+  const plan = extra.requested
+    ? ` Your ${esc(extra.requested.name)} request is with our team.`
+    : extra.plan ? ` Your workspace is ready on the ${esc(extra.plan.name)} plan.` : '';
+  const copy = {
+    sent: ['Check your email', `Your mobile number is verified and your account is created. We sent a link to ${who} — click it to verify your email, then sign in.${plan}`],
+    unverified: ['Verify your email first', `Your account is waiting for its email to be confirmed. Click the link we sent to ${who}, then sign in.`],
+    expired: ['That link has expired', `Verification links work for a limited time. Send a new one to ${who} and click it.`],
+  }[kind];
+  $('#email-title').textContent = copy[0];
+  $('#email-sub').innerHTML = copy[1];
+  $('#email-resend').hidden = !email;
+  openAuth('email');
+  if (kind === 'sent' && extra.emailSent === false) {
+    formMsg($('#email-msg'), 'Email is not set up on this server yet, so the link was written to the server log instead.', 'info');
+  }
+}
+
+$('#email-resend').addEventListener('click', async (e) => {
+  const msg = $('#email-msg');
+  busy(e.target, true, 'Sending…');
+  try {
+    const r = await api('/auth/verify-email/resend', { method: 'POST', body: { email: emailPanelAddress } });
+    formMsg(msg, r.message, 'ok');
+  } catch (err) {
+    formMsg(msg, err.message, 'err');
+  }
+  busy(e.target, false);
+});
+
+/** Coming back from the link in the email: /?verify=verified&email=…#signin */
+function handleVerifyReturn() {
+  const params = new URLSearchParams(location.search);
+  const result = params.get('verify');
+  if (!result) return;
+  const email = params.get('email') || '';
+  history.replaceState(null, '', location.pathname);
+
+  if (result === 'expired') return showEmailPanel('expired', email);
+  openAuth('login');
+  if (email) $('#form-login').login.value = email;
+  const say = {
+    verified: ['Your email is verified — sign in to continue.', 'ok'],
+    already: ['This email is already verified — sign in to continue.', 'info'],
+    invalid: ['That verification link is not valid. Sign in to have a new one sent.', 'err'],
+  }[result] || ['That verification link is not valid.', 'err'];
+  formMsg($('#login-msg'), say[0], say[1]);
+  if (email) $('#form-login').password.focus();
+}
 
 $('#btn-signout').addEventListener('click', async () => {
   try { await api('/auth/logout', { method: 'POST' }); } catch { /* the cookie is going either way */ }
@@ -1139,8 +1427,8 @@ async function loadOrgSwitcher() {
 
 /** Admins and super admins must have a mobile number; everyone else may leave it empty. */
 const PHONE_ROLES = ['super_admin', 'admin'];
-const PHONE_FIELD = (name, value = '', required = false) => `<label>Mobile number <span class="muted small">${required ? '(required — with country code)' : '(optional)'}</span>
-  <input name="${name}" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="+91 98765 43210" value="${esc(value || '')}" ${required ? 'required' : ''} /></label>`;
+const PHONE_FIELD = (name, value = '', required = false) => `<label>Mobile number <span class="muted small">${required ? '(required)' : '(optional)'}</span>
+  <input name="${name}" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="98765 43210" value="${esc(value || '')}" ${required ? 'required' : ''} /></label>`;
 
 /**
  * Open your profile. With `mustAddPhone`, it is the one thing between an
@@ -1158,7 +1446,7 @@ function openProfile({ mustAddPhone = false } = {}) {
   form.phone.value = session.user?.phone || '';
   const required = PHONE_ROLES.includes(session.user?.role);
   form.phone.required = required;
-  $('#profile-phone-hint').textContent = required ? '(required — with country code)' : '(optional)';
+  $('#profile-phone-hint').textContent = required ? '(required)' : '(optional)';
   $('#profile-title').textContent = mustAddPhone ? 'Add your mobile number' : 'Edit profile';
   $('#profile-phone-needed').classList.toggle('hidden', !mustAddPhone);
   // The line about "this organisation" means nothing to a super admin on the platform.
@@ -1531,6 +1819,7 @@ const SERVER_TABS = [
   { key: 'apps', label: 'Apps', load: () => loadServerApps() },
   { key: 'docker', label: 'Docker', load: () => loadServerDocker() },
   { key: 'nginx', label: 'Nginx', load: () => loadServerNginx() },
+  { key: 'nginxlogs', label: 'Nginx Logs', load: () => loadServerNginxLogs() },
   { key: 'cron', label: 'Cron', load: () => loadServerCron() },
   { key: 'users', label: 'Users', load: () => loadServerUsers() },
   { key: 'services', label: 'Services', load: () => loadServerServices() },
@@ -1589,7 +1878,7 @@ async function openServer(id) {
 }
 
 const liveTabPanelId = (key) => ({
-  live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel',
+  live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel', nginxlogs: 'nginx-logs-panel',
   cron: 'cron-panel', users: 'users-panel', services: 'services-panel', runners: 'server-runners-panel',
 }[key]);
 
@@ -10399,7 +10688,7 @@ installForm.addEventListener('submit', async (e) => {
       ? `${entry.label} installed${r.version ? ` — ${r.version}` : ''}`
       : `${entry.label} is running as "${r.name}" on port ${r.port}${r.connection ? ` — added to Databases as "${r.connection.name}"` : ''}`);
     if (!$('#view-installs').classList.contains('hidden')) loadInstallList();
-    if (!$('#view-server-detail').classList.contains('hidden')) refreshServerTab('docker');
+    if (!$('#view-server-detail').classList.contains('hidden')) refreshServerTab(entry.key === 'nginx-logs' ? 'nginxlogs' : 'docker');
   } catch (err) {
     formMsg(msg, err.message, 'err');
     if (err.body?.dockerMissing) {
@@ -12837,6 +13126,729 @@ $('#form-network').addEventListener('submit', async (e) => {
   busy(btn, false);
 });
 
+/* -------------------------------------------------- the nginx logs tab */
+
+/*
+ * The analysis is read fresh from the server each time — the last N lines of
+ * every access and error log — so the panel never holds a copy of anyone's logs.
+ * The tab is one report drawn as six views; switching view never re-reads.
+ */
+let nginxLogs = null;
+let nginxLogsLines = 20000;
+let nginxLogsView = 'overview';
+let nginxLogsSeverity = 'all';
+let nginxLogsCategory = 'all';
+let nginxLogsPaths = 'top';
+
+const NLOG_LINES = [[5000, '5k'], [20000, '20k'], [50000, '50k'], [100000, '100k']];
+const NLOG_SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'];
+const NLOG_TONE = { critical: 'err', high: 'err', medium: 'warn', low: 'info', info: '' };
+const NLOG_CATEGORY = {
+  security: 'Security', restriction: 'IP restriction', performance: 'Performance',
+  errors: 'Errors', config: 'Configuration', maintenance: 'Maintenance',
+};
+const NLOG_VERDICT = {
+  block: ['err', 'Block'], watch: ['warn', 'Watch'], blocked: ['ok', 'Blocked'], proxy: ['info', 'Proxy'], ok: ['', 'OK'],
+};
+// Validated as a set (CVD + normal-vision separation) against both themes' card surface.
+const NLOG_SERIES = [
+  ['ok', '2xx success', 'var(--viz-ok)'],
+  ['redirect', '3xx redirect', 'var(--viz-redirect)'],
+  ['client', '4xx client error', 'var(--viz-client)'],
+  ['server', '5xx server error', 'var(--viz-server)'],
+];
+
+const NLOG_ICON = (() => {
+  const svg = (body) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+  const alert = svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/>');
+  return {
+    critical: svg('<path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9z"/><path d="M12 8v4M12 16h.01"/>'),
+    high: alert,
+    medium: svg('<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>'),
+    low: svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>'),
+    info: svg('<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>'),
+    ok: svg('<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>'),
+    shield: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
+    copy: svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
+    chevron: svg('<path d="m6 9 6 6 6-6"/>'),
+  };
+})();
+
+const nlogPct = (n, of) => (of ? `${((n / of) * 100).toFixed(n && n / of < 0.01 ? 2 : 1)}%` : '—');
+const nlogSecs = (s) => (s === null || s === undefined ? '—' : s >= 1 ? `${s.toFixed(2)}s` : `${Math.round(s * 1000)}ms`);
+const nlogSpan = (min) => (min >= 2880 ? `${Math.round(min / 1440)} days` : min >= 120 ? `${Math.round(min / 60)} hours` : `${min} min`);
+const nlogCompact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K` : String(n));
+const nlogSevCount = (r, sev) => r.findings.filter((f) => f.severity === sev).length;
+
+async function loadServerNginxLogs() {
+  const box = $('#nginx-logs-panel');
+  if (!box) return;
+  tabsLoaded.add('nginxlogs');
+  box.innerHTML = `${nlogHeader(null)}
+    <div class="nlog-loading">
+      <div class="muted small"><span class="spinner"></span>Reading the last ${nginxLogsLines.toLocaleString()} log lines and nginx's configuration…</div>
+      <div class="nlog-skel" style="height:96px"></div>
+      <div class="nlog-skel-row">${'<div class="nlog-skel" style="height:78px"></div>'.repeat(4)}</div>
+      <div class="nlog-skel" style="height:220px"></div>
+    </div>`;
+  try {
+    const { report } = await api(`/servers/${currentServerId}/nginx/logs?lines=${nginxLogsLines}`);
+    nginxLogs = report;
+    renderNginxLogs();
+  } catch (err) {
+    setTabCount('nginxlogs', '!', 'err');
+    box.innerHTML = `${nlogHeader(null)}<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+function nlogHeader(r) {
+  const lines = `<div class="seg" role="group" aria-label="How many of the latest log lines to read">${NLOG_LINES.map(([n, l]) =>
+    `<button type="button" data-nlog-lines="${n}" class="${n === nginxLogsLines ? 'active' : ''}">${l}</button>`).join('')}</div>`;
+  const analyzer = !r?.nginxInstalled ? ''
+    : r.analyzer.installed
+      ? ifCan('delete', '<button class="btn tiny" data-nlog="remove">Remove analyzer</button>')
+      : ifCan('create', '<button class="btn tiny primary" data-nlog="install">Install analyzer</button>');
+
+  let meta = '<span class="muted small">Traffic, errors, attackers and IP restrictions — read live from the server</span>';
+  if (r?.nginxInstalled) {
+    const read = r.sources.filter((s) => !s.missing);
+    const access = read.filter((s) => s.kind === 'access');
+    const lineCount = access.reduce((s, x) => s + x.lines, 0);
+    meta = `<span class="muted small">${lineCount.toLocaleString()} requests from ${access.length} access log(s)`
+      + `${r.range ? ` · ${esc(nlogWhen(r.range.from, r.range.minutes))} → ${esc(nlogWhen(r.range.to, r.range.minutes))} (${nlogSpan(r.range.minutes)})` : ''}`
+      + ` · read ${esc(agoWords(r.readAt))}</span>
+      <details class="nlog-sources"><summary class="muted small">Sources</summary>
+        <ul>${r.sources.map((s) => `<li><code>${esc(s.path)}</code> <span class="muted small">${s.kind} · ${s.missing ? 'not found' : `${s.lines.toLocaleString()} lines`}</span></li>`).join('')}
+        ${r.unparsed ? `<li class="muted small">${r.unparsed.toLocaleString()} line(s) in a format this tab cannot read</li>` : ''}</ul>
+      </details>`;
+  }
+
+  return `<div class="nlog-top">
+    <div class="nlog-title">
+      <h2>Nginx logs ${r?.nginxInstalled ? `<span class="badge ${r.analyzer.installed ? 'ok' : ''}">${r.analyzer.installed ? 'analyzer on' : 'basic logs'}</span>` : ''}</h2>
+      <div class="nlog-meta">${meta}</div>
+    </div>
+    <div class="section-tools">${lines}${analyzer}<button class="btn tiny" data-nlog-reload="1">Analyse again</button></div>
+  </div>`;
+}
+
+/** A timestamp short enough for an axis: the time, plus the date when the range spans days. */
+function nlogWhen(iso, spanMinutes = 0) {
+  const d = new Date(iso);
+  return spanMinutes >= 1440
+    ? d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function renderNginxLogs() {
+  const box = $('#nginx-logs-panel');
+  const r = nginxLogs;
+  if (!box || !r) return;
+
+  if (!r.nginxInstalled) {
+    setTabCount('nginxlogs', '—');
+    box.innerHTML = `${nlogHeader(r)}<div class="nlog-empty card">
+      <div class="nlog-empty-icon">${NLOG_ICON.info}</div>
+      <h3>nginx is not installed on this server</h3>
+      <p class="muted small">Install it from the Nginx tab first — its logs are what this tab reads.</p></div>`;
+    return;
+  }
+
+  const serious = nlogSevCount(r, 'critical') + nlogSevCount(r, 'high');
+  const shown = r.findings.filter((f) => f.severity !== 'info').length;
+  setTabCount('nginxlogs', shown || null, serious ? 'err' : '');
+
+  const views = [
+    ['overview', 'Overview', null],
+    ['findings', 'Findings', shown],
+    ['threats', 'Threats', r.ips.filter((x) => x.verdict === 'block').length],
+    ['restrictions', 'IP restrictions', r.restrictions.blocklist.length || null],
+    ['traffic', 'Traffic', null],
+    ['errors', 'Error log', r.errors.total || null],
+  ];
+  const nav = `<nav class="nlog-nav" role="tablist">${views.map(([k, l, n]) => `<button type="button" role="tab" aria-selected="${k === nginxLogsView}"
+    class="${k === nginxLogsView ? 'active' : ''}" data-nlog-view="${k}">${l}${n ? `<span class="nlog-nav-count ${k === 'findings' && serious ? 'err' : k === 'threats' ? 'err' : ''}">${n}</span>` : ''}</button>`).join('')}</nav>`;
+
+  const banner = r.analyzer.installed ? '' : `<div class="nlog-banner">
+      <div class="nlog-banner-icon">${NLOG_ICON.info}</div>
+      <div><b>Running on basic logs.</b> <span class="muted">They have no response times or host names. The analyzer adds its own
+      log format beside them (tested with <code>nginx -t</code> first), unlocking slow endpoints, per-site figures and the IP blocklist.</span></div>
+      ${ifCan('create', '<button class="btn tiny primary" data-nlog="install">Install analyzer</button>')}
+    </div>`;
+
+  const body = {
+    overview: nlogOverview, findings: nlogFindingsView, threats: nlogThreatsView,
+    restrictions: nlogRestrictionsView, traffic: nlogTrafficView, errors: nlogErrorsView,
+  }[nginxLogsView] || nlogOverview;
+
+  box.innerHTML = `${nlogHeader(r)}${nav}${banner}<div class="nlog-view">${body(r)}</div>`;
+}
+
+/* ---------------------------------------------------- nginx logs: overview */
+
+function nlogOverview(r) {
+  const t = r.totals;
+  const counts = Object.fromEntries(NLOG_SEVERITIES.map((s) => [s, nlogSevCount(r, s)]));
+  const level = counts.critical ? 'critical' : counts.high ? 'high' : counts.medium ? 'medium' : 'ok';
+  const headline = {
+    critical: 'Needs attention now', high: 'Serious problems found', medium: 'A few things to improve', ok: 'Looking healthy',
+  }[level];
+  const sub = t.requests
+    ? `${t.requests.toLocaleString()} requests from ${t.ips.toLocaleString()} visitors${r.range ? ` over ${nlogSpan(r.range.minutes)}` : ''}`
+    : 'No requests in these log lines.';
+
+  const hero = `<div class="nlog-hero lvl-${level}">
+    <div class="nlog-hero-icon">${level === 'ok' ? NLOG_ICON.ok : NLOG_ICON[level]}</div>
+    <div class="nlog-hero-text"><div class="nlog-hero-title">${headline}</div><div class="muted small">${sub}</div></div>
+    <div class="nlog-hero-pills">${['critical', 'high', 'medium', 'low'].map((s) => `<button type="button" class="nlog-pill sev-${s}" data-nlog-sev="${s}" ${counts[s] ? '' : 'disabled'}>
+      <span class="nlog-pill-icon">${NLOG_ICON[s]}</span><b>${counts[s]}</b><span>${s}</span></button>`).join('')}</div>
+  </div>`;
+
+  const bans = r.restrictions.fail2ban.jails.reduce((s, j) => s + j.current, 0);
+  const errRate = t.classes['5xx'] / Math.max(1, t.requests);
+  const dot = (tone) => `<span class="nlog-dot ${tone}" aria-hidden="true"></span>`;
+  const tiles = `<div class="nlog-kpis">
+    ${tile('Requests', nlogCompact(t.requests), t.perMinute !== null ? `${t.perMinute.toLocaleString()} per minute` : 'no timestamps')}
+    ${tile('Visitors', nlogCompact(t.ips), `unique IPs · ${bytes(t.bytes)} sent`)}
+    ${tile('Server errors', `${dot(errRate >= 0.05 ? 'err' : errRate >= 0.01 ? 'warn' : 'ok')}${nlogPct(t.classes['5xx'], t.requests)}`, `5xx · ${nlogPct(t.classes['4xx'], t.requests)} were 4xx`)}
+    ${tile('Response time', t.hasTimings ? `${dot(t.p95 >= 2 ? 'err' : t.p95 >= 0.8 ? 'warn' : 'ok')}${nlogSecs(t.p95)}` : '—', t.hasTimings ? `p95 · median ${nlogSecs(t.p50)}` : 'needs the analyzer')}
+    ${tile('Threats', `${dot(t.threats ? 'err' : 'ok')}${t.threats}`, `to block · ${t.watch} to watch`)}
+    ${tile('Blocked', String(r.restrictions.blocklist.length), `in nginx${r.restrictions.fail2ban.installed ? ` · ${bans} by fail2ban` : ''}`)}
+  </div>`;
+
+  const topFindings = r.findings.filter((f) => f.severity !== 'info').slice(0, 5);
+  const findingsCard = `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>Top findings</h3>${r.findings.length ? '<button type="button" class="link-btn small" data-nlog-view="findings">See all →</button>' : ''}</div>
+    ${topFindings.length ? `<ul class="nlog-mini">${topFindings.map((f) => `<li>
+        <button type="button" data-nlog-open="${r.findings.indexOf(f)}">
+          <span class="nlog-sev-icon sev-${f.severity}" title="${esc(f.severity)}">${NLOG_ICON[f.severity]}</span>
+          <span class="nlog-mini-text">${esc(f.title)}<span class="muted small">${esc(NLOG_CATEGORY[f.category] || f.category)}</span></span>
+        </button></li>`).join('')}</ul>`
+    : `<div class="nlog-allclear">${NLOG_ICON.ok}<span>Nothing wrong found</span></div>`}
+  </div>`;
+
+  const threats = r.ips.filter((x) => x.verdict === 'block' || x.verdict === 'watch').slice(0, 5);
+  const threatsCard = `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>Top threats</h3>${threats.length ? '<button type="button" class="link-btn small" data-nlog-view="threats">See all →</button>' : ''}</div>
+    ${threats.length ? `<ul class="nlog-mini">${threats.map((x) => `<li><div class="nlog-mini-row">
+        <code>${esc(x.ip)}</code>
+        <span class="nlog-mini-text muted small">${esc(x.flags.slice(0, 2).join(' · '))}</span>
+        ${nlogRisk(x)}
+      </div></li>`).join('')}</ul>`
+    : `<div class="nlog-allclear">${NLOG_ICON.shield}<span>No suspicious addresses</span></div>`}
+  </div>`;
+
+  const busiest = `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>Busiest paths</h3><button type="button" class="link-btn small" data-nlog-view="traffic">Traffic →</button></div>
+    ${nlogRank(r.paths.top.slice(0, 6), (p) => p.requests, (p) => nlogPathLabel(p), (p) => p.requests.toLocaleString(), 'var(--viz-ok)', 'No requests.')}
+  </div>`;
+
+  return `${hero}${tiles}
+    ${nlogTimeline(r)}
+    <div class="nlog-grid">
+      <div class="card nlog-card"><div class="nlog-card-head"><h3>Status mix</h3></div>${nlogMix(r)}</div>
+      ${findingsCard}
+    </div>
+    <div class="nlog-grid">${threatsCard}${busiest}</div>`;
+}
+
+/* ------------------------------------------------- nginx logs: the charts */
+
+/** Requests over time, stacked by status class, with a hover read-out and a table behind it. */
+function nlogTimeline(r) {
+  const tl = r.timeline;
+  if (!tl || !tl.buckets.length) return '';
+  const totals = tl.buckets.map((b) => b.ok + b.redirect + b.client + b.server);
+  const peak = Math.max(1, ...totals);
+  const step = 10 ** Math.floor(Math.log10(peak));
+  const top = Math.ceil(peak / step) * step;
+  const ticks = [top, top / 2, 0];
+  const per = tl.bucketMinutes >= 60 ? `${tl.bucketMinutes / 60} hour${tl.bucketMinutes > 60 ? 's' : ''}` : `${tl.bucketMinutes} min`;
+  const span = r.range?.minutes || 0;
+  const present = NLOG_SERIES.filter(([k]) => tl.buckets.some((b) => b[k]));
+
+  const cols = tl.buckets.map((b, i) => {
+    const h = (totals[i] / top) * 100;
+    const segs = [...NLOG_SERIES].reverse().filter(([k]) => b[k])
+      .map(([k, , color]) => `<span style="flex-grow:${b[k]};background:${color}"></span>`).join('');
+    return `<div class="nlog-col" data-nlog-bucket="${i}" tabindex="0" aria-label="${esc(nlogWhen(b.at, span))}: ${totals[i]} requests">
+      <div class="nlog-stack" style="height:${totals[i] ? Math.max(h, 1.5) : 0}%">${segs}</div></div>`;
+  }).join('');
+
+  const mid = Math.floor(tl.buckets.length / 2);
+  const xLabels = [0, mid, tl.buckets.length - 1].filter((v, i, a) => a.indexOf(v) === i)
+    .map((i) => `<span style="left:${((i + 0.5) / tl.buckets.length) * 100}%">${esc(nlogWhen(tl.buckets[i].at, span))}</span>`).join('');
+
+  return `<div class="card nlog-chart" data-nlog-chart>
+    <div class="nlog-card-head">
+      <div><h3>Requests over time</h3><div class="muted small">per ${per}</div></div>
+      <ul class="nlog-legend">${present.map(([, label, color]) => `<li><i style="background:${color}"></i>${esc(label)}</li>`).join('')}</ul>
+    </div>
+    <div class="nlog-plot">
+      <div class="nlog-yaxis">${ticks.map((v) => `<span style="bottom:${(v / top) * 100}%">${nlogCompact(v)}</span>`).join('')}</div>
+      <div class="nlog-bars">
+        ${ticks.map((v) => `<div class="nlog-grid-line" style="bottom:${(v / top) * 100}%"></div>`).join('')}
+        ${cols}
+      </div>
+    </div>
+    <div class="nlog-xaxis">${xLabels}</div>
+    <div class="nlog-tip" role="status" hidden></div>
+    <details class="nlog-table-toggle"><summary class="muted small">View as table</summary>
+      ${table([{ label: 'From' }, ...NLOG_SERIES.map(([, l]) => ({ label: l, num: true })), { label: 'Total', num: true }],
+    tl.buckets.map((b, i) => [esc(nlogWhen(b.at, span)), ...NLOG_SERIES.map(([k]) => b[k].toLocaleString()), `<b>${totals[i].toLocaleString()}</b>`]))}
+    </details>
+  </div>`;
+}
+
+function nlogTimelineTip(col) {
+  const chart = col.closest('[data-nlog-chart]');
+  const tip = chart?.querySelector('.nlog-tip');
+  const b = nginxLogs?.timeline?.buckets[Number(col.dataset.nlogBucket)];
+  if (!tip || !b) return;
+  const total = b.ok + b.redirect + b.client + b.server;
+  tip.innerHTML = `<div class="nlog-tip-title">${esc(nlogWhen(b.at, nginxLogs.range?.minutes || 0))} · ${total.toLocaleString()} requests</div>
+    ${NLOG_SERIES.filter(([k]) => b[k]).map(([k, label, color]) => `<div class="nlog-tip-row"><i style="background:${color}"></i><span>${esc(label)}</span><b>${b[k].toLocaleString()}</b></div>`).join('')}`;
+  tip.hidden = false;
+  const box = chart.getBoundingClientRect();
+  const at = col.getBoundingClientRect();
+  const half = tip.offsetWidth / 2;
+  const x = Math.min(Math.max(at.left + at.width / 2 - box.left, half + 8), box.width - half - 8);
+  tip.style.left = `${x}px`;
+  $$('.nlog-col.hover', chart).forEach((c) => c.classList.remove('hover'));
+  col.classList.add('hover');
+}
+
+function nlogTimelineHide(chart) {
+  const tip = chart?.querySelector('.nlog-tip');
+  if (tip) tip.hidden = true;
+  $$('.nlog-col.hover', chart).forEach((c) => c.classList.remove('hover'));
+}
+
+/** Share of each status class as one bar, with the legend carrying the numbers. */
+function nlogMix(r) {
+  const c = r.totals.classes;
+  const map = { ok: c['2xx'], redirect: c['3xx'], client: c['4xx'], server: c['5xx'] };
+  const total = Object.values(map).reduce((a, b) => a + b, 0);
+  if (!total) return '<p class="muted small">No requests.</p>';
+  const codes = Object.entries(r.totals.codes).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  return `<div class="nlog-mix" role="img" aria-label="${NLOG_SERIES.map(([k, l]) => `${l} ${nlogPct(map[k], total)}`).join(', ')}">
+      ${NLOG_SERIES.filter(([k]) => map[k]).map(([k, label, color]) => `<span style="flex-grow:${map[k]};background:${color}" title="${esc(label)}: ${map[k].toLocaleString()}"></span>`).join('')}
+    </div>
+    <ul class="nlog-mix-legend">${NLOG_SERIES.map(([k, label, color]) => `<li>
+      <i style="background:${color}"></i><span>${esc(label)}</span><b>${map[k].toLocaleString()}</b><span class="muted">${nlogPct(map[k], total)}</span></li>`).join('')}</ul>
+    <div class="nlog-codes">${codes.map(([code, n]) => `<span class="chip"><b>${esc(code)}</b> ${nlogCompact(n)}</span>`).join('')}</div>`;
+}
+
+/** A ranked list with a thin proportional bar under each row — one series, so the heading names it. */
+function nlogRank(rows, value, label, shown, color, empty) {
+  if (!rows.length) return `<p class="muted small">${esc(empty)}</p>`;
+  const max = Math.max(...rows.map(value), 1e-9);
+  return `<ol class="nlog-rank">${rows.map((row) => `<li>
+    <div class="nlog-rank-row"><span class="nlog-rank-label">${label(row)}</span><span class="nlog-rank-val">${shown(row)}</span></div>
+    <div class="nlog-rank-track"><span style="width:${Math.max((value(row) / max) * 100, 1)}%;background:${color}"></span></div>
+  </li>`).join('')}</ol>`;
+}
+
+const nlogPathLabel = (p) => `<code>${esc(p.path)}</code>${p.host ? ` <span class="muted small">${esc(p.host)}</span>` : ''}`;
+
+function nlogRisk(x) {
+  const [tone] = NLOG_VERDICT[x.verdict] || [''];
+  return `<span class="nlog-risk ${tone}" title="Risk score ${x.score} of 100">
+    <span class="nlog-risk-track"><span style="width:${Math.max(x.score, 3)}%"></span></span><b>${x.score}</b></span>`;
+}
+
+/* ---------------------------------------------------- nginx logs: findings */
+
+function nlogFindingsView(r) {
+  if (!r.findings.length) {
+    return `<div class="nlog-empty card"><div class="nlog-empty-icon ok">${NLOG_ICON.ok}</div>
+      <h3>Nothing wrong found</h3><p class="muted small">In the last ${nginxLogsLines.toLocaleString()} lines and the running configuration.</p></div>`;
+  }
+  const sevs = NLOG_SEVERITIES.filter((s) => nlogSevCount(r, s));
+  const cats = Object.keys(NLOG_CATEGORY).filter((c) => r.findings.some((f) => f.category === c));
+  if (nginxLogsSeverity !== 'all' && !sevs.includes(nginxLogsSeverity)) nginxLogsSeverity = 'all';
+  if (nginxLogsCategory !== 'all' && !cats.includes(nginxLogsCategory)) nginxLogsCategory = 'all';
+
+  const filters = `<div class="nlog-filters">
+    <div class="seg"><button type="button" data-nlog-sev="all" class="${nginxLogsSeverity === 'all' ? 'active' : ''}">All ${r.findings.length}</button>
+      ${sevs.map((s) => `<button type="button" data-nlog-sev="${s}" class="${nginxLogsSeverity === s ? 'active' : ''}">${s[0].toUpperCase()}${s.slice(1)} ${nlogSevCount(r, s)}</button>`).join('')}</div>
+    ${cats.length > 1 ? `<div class="seg"><button type="button" data-nlog-cat="all" class="${nginxLogsCategory === 'all' ? 'active' : ''}">Every area</button>
+      ${cats.map((c) => `<button type="button" data-nlog-cat="${c}" class="${nginxLogsCategory === c ? 'active' : ''}">${esc(NLOG_CATEGORY[c])}</button>`).join('')}</div>` : ''}
+  </div>`;
+
+  const list = r.findings.map((f, i) => ({ f, i }))
+    .filter(({ f }) => (nginxLogsSeverity === 'all' || f.severity === nginxLogsSeverity) && (nginxLogsCategory === 'all' || f.category === nginxLogsCategory))
+    // The first few serious ones open with their fix showing; the rest stay a scannable list.
+    .map(({ f, i }, n) => nlogFindingCard(f, i, n < 3 && (f.severity === 'critical' || f.severity === 'high'))).join('');
+
+  return `${filters}<div class="nlog-findings">${list || '<p class="muted small">No findings match these filters.</p>'}</div>`;
+}
+
+function nlogFindingCard(f, i, open) {
+  return `<details class="nlog-finding sev-${esc(f.severity)}" id="nlog-finding-${i}" ${open ? 'open' : ''}>
+    <summary>
+      <span class="nlog-sev-icon sev-${esc(f.severity)}">${NLOG_ICON[f.severity] || NLOG_ICON.info}</span>
+      <span class="nlog-finding-title"><b>${esc(f.title)}</b>
+        <span class="nlog-finding-tags"><span class="badge ${NLOG_TONE[f.severity]}">${esc(f.severity)}</span><span class="muted small">${esc(NLOG_CATEGORY[f.category] || f.category)}</span></span></span>
+      <span class="nlog-chevron">${NLOG_ICON.chevron}</span>
+    </summary>
+    <div class="nlog-finding-body">
+      ${f.detail ? `<p>${esc(f.detail)}</p>` : ''}
+      ${f.evidence?.length ? `<div class="nlog-label">Evidence</div>
+        <ul class="nlog-evidence">${f.evidence.map((x) => `<li><code>${esc(x)}</code></li>`).join('')}</ul>` : ''}
+      ${f.solution || f.snippet || f.action ? `<div class="nlog-fix">
+        <div class="nlog-label">How to fix</div>
+        ${f.solution ? `<p>${esc(f.solution)}</p>` : ''}
+        ${f.snippet ? `<div class="nlog-code">
+          <div class="nlog-code-head"><span>nginx configuration</span>
+            <button type="button" class="btn tiny" data-nlog="copy" data-i="${i}">${NLOG_ICON.copy} Copy</button></div>
+          <pre>${esc(f.snippet)}</pre></div>` : ''}
+        ${f.action ? ifCan('create', `<div class="card-actions"><button class="btn tiny primary" data-nlog="finding" data-i="${i}">${esc(f.action.label)}</button></div>`) : ''}
+      </div>` : ''}
+    </div>
+  </details>`;
+}
+
+/* ----------------------------------------------------- nginx logs: threats */
+
+function nlogThreatsView(r) {
+  const toBlock = r.ips.filter((x) => x.verdict === 'block');
+  const head = `<div class="nlog-toolbar">
+    <div><b>${toBlock.length ? `${toBlock.length} address(es) recommended for blocking` : 'Nothing needs blocking'}</b>
+      <div class="muted small">Scored 0–100 from attack payloads, scanning, login guessing, request rate and error ratio. Proxies and private addresses are never suggested.</div></div>
+    ${toBlock.length ? ifCan('create', `<button class="btn tiny danger" data-nlog="block-all">Block all ${toBlock.length}</button>`) : ''}
+  </div>`;
+  return head + table(
+    [{ label: 'Address' }, { label: 'What it did' }, { label: 'Requests', num: true }, { label: 'Risk' }, { label: '' }],
+    r.ips.map((x) => {
+      const [tone, word] = NLOG_VERDICT[x.verdict] || ['', x.verdict];
+      return [
+        `<code class="nlog-ip">${esc(x.ip)}</code>
+         <div class="muted small">${x.last ? `last seen ${esc(agoWords(new Date(x.last).toISOString()))}` : ''}${x.cloudflare ? ' · Cloudflare' : x.private ? ' · private' : ''}</div>`,
+        `<div class="nlog-flags">${x.flags.map((f) => `<span class="chip">${esc(f)}</span>`).join('')}</div>
+         ${x.samplePaths.length ? `<div class="muted small nlog-paths">${x.samplePaths.slice(0, 3).map((p) => `<code>${esc(p)}</code>`).join(' ')}</div>` : ''}
+         ${x.ua ? `<div class="muted small nlog-ua" title="${esc(x.ua)}">${esc(x.ua)}</div>` : ''}`,
+        `${x.requests.toLocaleString()}<div class="muted small">${x.c4 ? `${x.c4} 4xx` : ''}${x.c4 && x.c5 ? ' · ' : ''}${x.c5 ? `${x.c5} 5xx` : ''}${x.peakPerMin > 1 ? `${x.c4 || x.c5 ? ' · ' : ''}${x.peakPerMin}/min` : ''}</div>`,
+        `${nlogRisk(x)}<div style="margin-top:4px"><span class="badge ${tone}">${esc(x.blockedBy ? `${word} · ${x.blockedBy}` : word)}</span></div>`,
+        x.verdict === 'blocked' || x.verdict === 'proxy' ? ''
+          : ifCan('create', `<button class="btn tiny ${x.verdict === 'block' ? 'danger' : ''}" data-nlog="block" data-ip="${esc(x.ip)}">Block</button>`),
+      ];
+    }),
+    'No address did anything suspicious in these lines.',
+  );
+}
+
+/* ----------------------------------------------- nginx logs: restrictions */
+
+function nlogRestrictionsView(r) {
+  const x = r.restrictions;
+  const f2b = x.fail2ban;
+  const nginxJails = f2b.jails.filter((j) => /nginx/i.test(j.name));
+  const status = (state, title, value, note, action = '') => `<div class="nlog-status st-${state}">
+    <div class="nlog-status-head"><span class="nlog-sev-icon ${state === 'bad' ? 'sev-high' : state === 'warn' ? 'sev-medium' : 'sev-ok'}">${state === 'good' ? NLOG_ICON.ok : state === 'bad' ? NLOG_ICON.high : NLOG_ICON.medium}</span>
+      <span>${esc(title)}</span></div>
+    <div class="nlog-status-value">${value}</div>
+    <div class="muted small">${note}</div>${action}</div>`;
+
+  const realBad = !x.realIp.header && (x.realIp.cloudflareShare >= 0.3 || x.realIp.privateShare >= 0.5);
+  const cards = `<div class="nlog-statuses">
+    ${status(x.blocklist.length ? 'good' : 'neutral', 'Blocklist', `${x.blocklist.length} blocked`,
+    r.analyzer.installed ? 'denied on every site at the http level' : 'install the analyzer to use it')}
+    ${status(x.rateLimits.applied ? 'good' : x.rateLimits.zones.length ? 'warn' : 'bad', 'Rate limiting',
+    x.rateLimits.applied ? 'On' : x.rateLimits.zones.length ? 'Defined, not applied' : 'Off',
+    `${x.rateLimits.zones.length} zone(s) · ${x.rateLimits.applied} limit_req`)}
+    ${status(!f2b.installed ? 'warn' : f2b.active !== 'active' ? 'bad' : nginxJails.length ? 'good' : 'warn', 'fail2ban',
+    !f2b.installed ? 'Not installed' : f2b.active !== 'active' ? esc(f2b.active || 'Stopped') : `${nginxJails.length} nginx jail(s)`,
+    f2b.installed ? `${f2b.jails.reduce((s, j) => s + j.current, 0)} banned right now` : 'bans repeat offenders automatically',
+    f2b.installed && f2b.active === 'active' && nginxJails.length ? '' : ifCan('create', '<button class="btn tiny" data-nlog="fail2ban">Set up fail2ban</button>'))}
+    ${status(realBad ? 'bad' : 'good', 'Real visitor IP', x.realIp.header ? esc(x.realIp.header) : realBad ? 'Not configured' : 'Direct',
+    x.realIp.cloudflareShare ? `${Math.round(x.realIp.cloudflareShare * 100)}% of traffic via Cloudflare` : x.realIp.privateShare ? `${Math.round(x.realIp.privateShare * 100)}% via a private proxy` : 'clients connect straight to nginx')}
+    ${status(x.firewall.ufw === 'active' ? 'good' : 'neutral', 'Firewall', x.firewall.ufw ? `ufw ${esc(x.firewall.ufw)}` : 'No ufw',
+    x.firewall.ufw ? `${x.firewall.ufwDeny} deny rule(s)` : `${x.firewall.iptablesDrop || 0} iptables drop rule(s)`)}
+  </div>`;
+
+  const blocklist = `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>Blocked addresses</h3>
+      ${r.analyzer.installed || x.blocklist.length ? ifCan('create', '<button class="btn tiny primary" data-nlog="add-block">+ Block an IP or range</button>') : ''}</div>
+    ${x.blocklist.length ? `<ul class="nlog-blocklist">${x.blocklist.map((b) => `<li>
+        <code class="nlog-ip">${esc(b.ip)}</code>
+        <span class="muted small nlog-mini-text">${esc(b.note || '')}${b.at ? ` · ${esc(agoWords(b.at))}` : ''}</span>
+        ${ifCan('delete', `<button class="btn tiny" data-nlog="unblock" data-ip="${esc(b.ip)}">Unblock</button>`)}</li>`).join('')}</ul>`
+    : `<p class="muted small">${r.analyzer.installed ? 'Nothing is blocked. Block an address from Threats, or add one by hand.' : 'Install the analyzer to block addresses from here.'}</p>`}
+  </div>`;
+
+  const jails = `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>fail2ban jails</h3></div>
+    ${f2b.jails.length ? `<ul class="nlog-blocklist">${f2b.jails.map((j) => `<li>
+        <b>${esc(j.name)}</b>
+        <span class="muted small nlog-mini-text">${j.banned.slice(0, 6).map((ip) => esc(ip)).join(', ')}${j.banned.length > 6 ? ' …' : ''}</span>
+        <span class="small"><b>${j.current}</b> now · ${j.total} total</span></li>`).join('')}</ul>`
+    : `<p class="muted small">${f2b.installed ? 'fail2ban has no jails.' : 'fail2ban is not installed.'}</p>`}
+  </div>`;
+
+  const ruleBlocks = x.rules.filter((b) => b.rules.length);
+  const rules = `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>allow / deny rules</h3><span class="muted small">nginx stops at the first rule that matches</span></div>
+    ${ruleBlocks.length ? ruleBlocks.map((b) => `<div class="nlog-rule ${b.problems.length ? 'bad' : ''}">
+        <div class="nlog-rule-head"><b>${esc(b.where)}</b><code class="small muted">${esc(b.file)}</code>
+          ${b.problems.length ? '<span class="badge err">does not work</span>' : `<span class="badge ok">ok</span>${b.overridesBlocklist ? ' <span class="badge warn">skips the blocklist</span>' : ''}`}</div>
+        <div class="nlog-rule-list">${b.rules.map((ru, n) => `<code class="${ru.action}"><span class="muted">${n + 1}</span> ${esc(ru.action)} ${esc(ru.value)};</code>`).join('')}</div>
+        ${b.problems.map((p) => `<div class="nlog-rule-problem">${NLOG_ICON.high}<span>${esc(p)}</span></div>`).join('')}
+      </div>`).join('')
+    : '<p class="muted small">No allow/deny rules besides the blocklist — every site is open to everyone.</p>'}
+  </div>`;
+
+  const conns = r.liveConnections.length ? `<div class="card nlog-card">
+    <div class="nlog-card-head"><h3>Open connections right now</h3><span class="muted small">ports 80 and 443</span></div>
+    ${nlogRank(r.liveConnections, (c) => c.count, (c) => `<code>${esc(c.ip)}</code>${c.cloudflare ? ' <span class="chip">Cloudflare edge</span>' : c.private ? ' <span class="chip">private</span>' : ''}`,
+    (c) => `${c.count}${c.count >= 50 && !c.cloudflare && !c.private ? ' <span class="badge warn">many</span>' : ''}`, 'var(--viz-ok)', '')}
+  </div>` : '';
+
+  return `${cards}<div class="nlog-grid">${blocklist}${jails}</div>${rules}${conns}`;
+}
+
+/* ----------------------------------------------------- nginx logs: traffic */
+
+function nlogTrafficView(r) {
+  const t = r.totals;
+  const views = [['top', 'Top paths'], ['notFound', '404s'], ['errors', '5xx'], ['slow', 'Slowest'], ['bandwidth', 'Bandwidth'],
+    ['ips', 'Busiest IPs'], ['agents', 'User agents'], ...(t.hasHost ? [['hosts', 'Sites']] : [])];
+  if (!views.some(([k]) => k === nginxLogsPaths)) nginxLogsPaths = 'top';
+  const seg = `<div class="seg nlog-seg-scroll">${views.map(([k, l]) =>
+    `<button type="button" data-nlog-paths="${k}" class="${k === nginxLogsPaths ? 'active' : ''}">${l}</button>`).join('')}</div>`;
+
+  const lists = {
+    top: () => nlogRank(r.paths.top, (p) => p.requests, nlogPathLabel, (p) => `${p.requests.toLocaleString()} <span class="muted small">· ${p.visitors} visitors${p.p95 !== null ? ` · p95 ${nlogSecs(p.p95)}` : ''}</span>`, 'var(--viz-ok)', 'No requests.'),
+    notFound: () => nlogRank(r.paths.notFound, (p) => p.c404, nlogPathLabel, (p) => `${p.c404.toLocaleString()} <span class="muted small">· ${p.visitors} visitors</span>`, 'var(--viz-client)', 'No 404s.'),
+    errors: () => nlogRank(r.paths.errors, (p) => p.c5, nlogPathLabel, (p) => `${p.c5.toLocaleString()} <span class="muted small">· ${Object.entries(p.codes5).map(([c, n]) => `${n}× ${c}`).join(', ')}</span>`, 'var(--viz-server)', 'No server errors.'),
+    slow: () => (t.hasTimings
+      ? nlogRank(r.paths.slow, (p) => p.p95, nlogPathLabel, (p) => `p95 <b>${nlogSecs(p.p95)}</b> <span class="muted small">· avg ${nlogSecs(p.avg)} · ${p.requests.toLocaleString()} req</span>`, 'var(--viz-ok)', 'Not enough requests to time.')
+      : '<p class="muted small">The current log format records no response times. Install the analyzer to see them.</p>'),
+    bandwidth: () => nlogRank(r.paths.bandwidth, (p) => p.bytes, nlogPathLabel, (p) => `${bytes(p.bytes)} <span class="muted small">· ${p.requests.toLocaleString()} req</span>`, 'var(--viz-ok)', 'Nothing sent.'),
+    ips: () => nlogRank(r.topIps, (x) => x.requests, (x) => `<code>${esc(x.ip)}</code>${x.cloudflare ? ' <span class="chip">Cloudflare</span>' : ''} <span class="muted small nlog-ua">${esc(x.ua || '')}</span>`,
+      (x) => `${x.requests.toLocaleString()} <span class="muted small">· ${(x.share * 100).toFixed(1)}% · ${x.peakPerMin}/min peak</span>`, 'var(--viz-ok)', 'No requests.'),
+    agents: () => nlogRank(r.agents, (a) => a.requests, (a) => `<span class="badge ${a.kind === 'attack tool' ? 'err' : a.kind === 'script' || a.kind === 'none' ? 'warn' : ''}">${esc(a.kind)}</span> <span class="small nlog-ua" title="${esc(a.ua)}">${esc(a.ua)}</span>`,
+      (a) => `${a.requests.toLocaleString()} <span class="muted small">· ${a.ips} IPs</span>`, 'var(--viz-ok)', 'No requests.'),
+    hosts: () => nlogRank(r.hosts, (h) => h.requests, (h) => `<b>${esc(h.host)}</b>`,
+      (h) => `${h.requests.toLocaleString()} <span class="muted small">· ${nlogPct(h.c4, h.requests)} 4xx · ${nlogPct(h.c5, h.requests)} 5xx · ${bytes(h.bytes)}</span>`, 'var(--viz-ok)', 'No requests.'),
+  };
+
+  const methods = Object.entries(t.methods).sort((a, b) => b[1] - a[1])
+    .map(([m, n]) => `<span class="chip"><b>${esc(m)}</b> ${nlogCompact(n)}</span>`).join('');
+
+  return `${nlogTimeline(r)}
+    <div class="nlog-grid">
+      <div class="card nlog-card"><div class="nlog-card-head"><h3>Status mix</h3></div>${nlogMix(r)}</div>
+      <div class="card nlog-card"><div class="nlog-card-head"><h3>At a glance</h3></div>
+        <dl class="nlog-facts">
+          <dt>Requests</dt><dd>${t.requests.toLocaleString()}</dd>
+          <dt>Per minute</dt><dd>${t.perMinute ?? '—'}</dd>
+          <dt>Visitors</dt><dd>${t.ips.toLocaleString()}</dd>
+          <dt>Sent</dt><dd>${bytes(t.bytes)}</dd>
+          <dt>Median / p95 / p99</dt><dd>${t.hasTimings ? `${nlogSecs(t.p50)} / ${nlogSecs(t.p95)} / ${nlogSecs(t.p99)}` : '—'}</dd>
+        </dl>
+        <div class="nlog-codes">${methods}</div>
+      </div>
+    </div>
+    <div class="card nlog-card">${seg}${lists[nginxLogsPaths]()}</div>`;
+}
+
+/* --------------------------------------------------- nginx logs: error log */
+
+function nlogErrorsView(r) {
+  const e = r.errors;
+  if (!e.groups.length) {
+    return `<div class="nlog-empty card"><div class="nlog-empty-icon ok">${NLOG_ICON.ok}</div>
+      <h3>The error log is quiet</h3><p class="muted small">No entries in the lines read.</p></div>`;
+  }
+  const max = Math.max(...e.groups.map((g) => g.count));
+  const levels = Object.entries(e.levels).map(([l, n]) => `<span class="chip"><b>${esc(l)}</b> ${n.toLocaleString()}</span>`).join('');
+  return `<div class="nlog-toolbar"><div><b>${e.total.toLocaleString()} error log entries</b>
+      <div class="muted small">Grouped by what went wrong; the known ones are named and have a finding with the fix.</div></div>
+    <div class="nlog-codes">${levels}</div></div>
+    <div class="nlog-errors">${e.groups.map((g) => `<div class="card nlog-error">
+      <div class="nlog-error-count"><b>${nlogCompact(g.count)}</b>
+        <span class="nlog-rank-track"><span style="width:${Math.max((g.count / max) * 100, 2)}%;background:${/emerg|alert|crit|error/.test(g.level) ? 'var(--viz-server)' : 'var(--viz-client)'}"></span></span>
+        <span class="badge ${/emerg|alert|crit|error/.test(g.level) ? 'err' : g.level === 'warn' ? 'warn' : ''}">${esc(g.level)}</span></div>
+      <div class="nlog-error-body">
+        ${g.title ? `<b>${esc(g.title)}</b>` : ''}
+        <code class="nlog-error-msg">${esc(g.sample)}</code>
+        <div class="muted small">${[
+    g.servers.length && `server ${g.servers.map(esc).join(', ')}`,
+    g.upstreams.length && `→ ${g.upstreams.map(esc).join(', ')}`,
+    g.clients && `${g.clients} client(s)`,
+    g.last && `last ${esc(agoWords(new Date(g.last).toISOString()))}`,
+  ].filter(Boolean).join(' · ')}</div>
+      </div></div>`).join('')}</div>`;
+}
+
+/* ----------------------------------------------------- nginx logs: actions */
+
+async function nginxLogsAction(btn) {
+  const { nlog: what, ip } = btn.dataset;
+  const r = nginxLogs;
+  const finding = btn.dataset.i !== undefined ? r?.findings[Number(btn.dataset.i)] : null;
+
+  const block = async (ips, note) => {
+    if (!await askConfirm(`Block ${ips.length === 1 ? ips[0] : `${ips.length} addresses`} in nginx?\n\n`
+      + `${ips.length > 1 ? `${ips.slice(0, 12).join(', ')}${ips.length > 12 ? ' …' : ''}\n\n` : ''}`
+      + 'They get 403 Forbidden on every site served by this nginx. The configuration is tested before nginx reloads.',
+    { ok: 'Block', danger: true })) return;
+    busy(btn, true, 'Blocking…');
+    try {
+      const res = await api(`/servers/${currentServerId}/nginx/logs/blocklist`, { method: 'POST', body: { ips, note } });
+      toast(res.added.length ? `Blocked ${res.added.length} address(es) — nginx reloaded` : 'Already blocked');
+    } catch (err) {
+      toast(err.message, 'err');
+      return busy(btn, false);
+    }
+    loadServerNginxLogs();
+  };
+
+  const install = async () => {
+    if (!await askConfirm('Install the nginx log analyzer?\n\n'
+      + 'Adds /etc/nginx/conf.d/aj-pilot-logs.conf (a log format with response times and host names, written to '
+      + '/var/log/nginx/aj-pilot.access.log) and an empty IP blocklist. nginx -t runs before the reload; if it fails, nothing changes.',
+    { ok: 'Install' })) return;
+    busy(btn, true, 'Installing…');
+    try {
+      await api(`/servers/${currentServerId}/nginx/logs/analyzer`, { method: 'POST' });
+      toast('Analyzer installed — new requests are logged with timings from now on');
+    } catch (err) {
+      toast(err.message, 'err');
+      return busy(btn, false);
+    }
+    loadServerNginxLogs();
+  };
+
+  const fail2ban = async () => {
+    if (!await askConfirm('Set up fail2ban with its nginx jails?\n\n'
+      + 'Installs fail2ban if needed and enables nginx-http-auth, nginx-botsearch, nginx-limit-req and nginx-bad-request '
+      + '(where this version has them): 5 offences in 10 minutes bans the address in the firewall for an hour. '
+      + 'If fail2ban will not start with them, they are taken back out.', { ok: 'Set up' })) return;
+    busy(btn, true, 'Installing…');
+    try {
+      const res = await api(`/servers/${currentServerId}/nginx/logs/fail2ban`, { method: 'POST' });
+      toast(`fail2ban running — jails: ${res.jails.join(', ') || 'none'}`);
+    } catch (err) {
+      toast(err.message, 'err');
+      return busy(btn, false);
+    }
+    loadServerNginxLogs();
+  };
+
+  if (what === 'install') return install();
+  if (what === 'fail2ban') return fail2ban();
+  if (what === 'block') return block([ip], 'blocked from the Nginx Logs tab');
+  if (what === 'block-all') return block(r.ips.filter((x) => x.verdict === 'block').map((x) => x.ip), 'recommended by the log analysis');
+
+  if (what === 'finding' && finding?.action) {
+    const a = finding.action;
+    if (a.kind === 'block') return block(a.ips, finding.title.slice(0, 100));
+    if (a.kind === 'fail2ban') return fail2ban();
+    if (a.kind === 'install') return install();
+    return undefined;
+  }
+
+  if (what === 'copy' && finding?.snippet) {
+    try { await navigator.clipboard.writeText(finding.snippet); toast('Copied'); } catch { toast('Could not copy — select the text and copy it', 'err'); }
+    return undefined;
+  }
+
+  if (what === 'add-block') {
+    const typed = await askPrompt('Block an IP address or range\nAn address (203.0.113.7) or a CIDR range (203.0.113.0/24). '
+      + 'It gets 403 Forbidden on every site served by this nginx.', '', { ok: 'Block', danger: true, placeholder: '203.0.113.7' });
+    if (!typed || !typed.trim()) return undefined;
+    busy(btn, true, 'Blocking…');
+    try {
+      const res = await api(`/servers/${currentServerId}/nginx/logs/blocklist`, { method: 'POST', body: { ips: [typed.trim()], note: 'added by hand' } });
+      toast(res.added.length ? `Blocked ${res.added[0]} — nginx reloaded` : 'Already covered by the blocklist');
+    } catch (err) {
+      toast(err.message, 'err');
+      return busy(btn, false);
+    }
+    return loadServerNginxLogs();
+  }
+
+  if (what === 'unblock') {
+    if (!await askConfirm(`Unblock ${ip}?\n\nIt is taken out of the blocklist and nginx reloaded.`, { ok: 'Unblock' })) return undefined;
+    busy(btn, true, 'Unblocking…');
+    try {
+      await api(`/servers/${currentServerId}/nginx/logs/blocklist`, { method: 'DELETE', body: { ips: [ip] } });
+      toast(`${ip} unblocked`);
+    } catch (err) {
+      toast(err.message, 'err');
+      return busy(btn, false);
+    }
+    return loadServerNginxLogs();
+  }
+
+  if (what === 'remove') {
+    const blocked = r?.restrictions.blocklist.length || 0;
+    if (!await askConfirm('Remove the nginx log analyzer?\n\n'
+      + `Its log format is taken out of nginx and the log stops growing (the file itself is left for logrotate).${blocked ? `\n\nThe blocklist stays — it still blocks ${blocked} address(es).` : ''}`)) return undefined;
+    busy(btn, true, 'Removing…');
+    try {
+      await api(`/servers/${currentServerId}/nginx/logs/analyzer`, { method: 'DELETE' });
+      toast('Analyzer removed — nginx reloaded');
+    } catch (err) {
+      toast(err.message, 'err');
+      return busy(btn, false);
+    }
+    return loadServerNginxLogs();
+  }
+  return undefined;
+}
+
+$('#view-server-detail').addEventListener('click', (e) => {
+  if (!e.target.closest('#nginx-logs-panel')) return undefined;
+  if (e.target.closest('[data-nlog-reload]')) return loadServerNginxLogs();
+
+  const lines = e.target.closest('button[data-nlog-lines]');
+  if (lines) {
+    nginxLogsLines = Number(lines.dataset.nlogLines);
+    return loadServerNginxLogs();
+  }
+  const view = e.target.closest('[data-nlog-view]');
+  if (view) { nginxLogsView = view.dataset.nlogView; return renderNginxLogs(); }
+  const sev = e.target.closest('button[data-nlog-sev]');
+  if (sev) { nginxLogsSeverity = sev.dataset.nlogSev; nginxLogsView = 'findings'; return renderNginxLogs(); }
+  const cat = e.target.closest('button[data-nlog-cat]');
+  if (cat) { nginxLogsCategory = cat.dataset.nlogCat; return renderNginxLogs(); }
+  const paths = e.target.closest('button[data-nlog-paths]');
+  if (paths) { nginxLogsPaths = paths.dataset.nlogPaths; return renderNginxLogs(); }
+
+  // A finding picked from the overview opens in the Findings view, scrolled to and expanded.
+  const open = e.target.closest('button[data-nlog-open]');
+  if (open) {
+    nginxLogsView = 'findings';
+    nginxLogsSeverity = 'all';
+    nginxLogsCategory = 'all';
+    renderNginxLogs();
+    const card = $(`#nlog-finding-${open.dataset.nlogOpen}`);
+    if (card) { card.open = true; card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    return undefined;
+  }
+
+  const btn = e.target.closest('button[data-nlog]');
+  if (btn) nginxLogsAction(btn);
+  return undefined;
+});
+
+// The timeline's read-out follows the pointer, and keyboard focus too.
+['mouseover', 'focusin'].forEach((type) => $('#view-server-detail').addEventListener(type, (e) => {
+  const col = e.target.closest?.('.nlog-col');
+  if (col) nlogTimelineTip(col);
+}));
+$('#view-server-detail').addEventListener('mouseout', (e) => {
+  const chart = e.target.closest?.('[data-nlog-chart]');
+  if (chart && !chart.contains(e.relatedTarget)) nlogTimelineHide(chart);
+});
+$('#view-server-detail').addEventListener('focusout', (e) => {
+  const chart = e.target.closest?.('[data-nlog-chart]');
+  if (chart && !chart.contains(e.relatedTarget)) nlogTimelineHide(chart);
+});
+
 /* ------------------------------------------------------------ settings */
 
 let teamState = { members: [], roles: [], canManage: false, organisations: [] };
@@ -13080,7 +14092,7 @@ function showRoleDetail() {
   // An admin must be reachable: their mobile number is required.
   const needed = PHONE_ROLES.includes($('#member-role').value);
   memberForm.phone.required = needed;
-  $('#member-phone-hint').textContent = needed ? '(required for an admin — with country code)' : '(optional)';
+  $('#member-phone-hint').textContent = needed ? '(required for an admin)' : '(optional)';
 }
 
 $('#member-role').addEventListener('change', showRoleDetail);
@@ -13570,7 +14582,7 @@ async function pfNewOrganisation() {
           <label>Email<input name="admin_email" type="email" autocomplete="off" /></label>
         </div>
         <div class="row">
-          <label>Mobile number <span class="muted small">(required with an admin)</span><input name="admin_phone" type="tel" inputmode="tel" autocomplete="off" maxlength="32" placeholder="+91 98765 43210" /></label>
+          <label>Mobile number <span class="muted small">(required with an admin)</span><input name="admin_phone" type="tel" inputmode="tel" autocomplete="off" maxlength="32" placeholder="98765 43210" /></label>
           <label>Password <span class="muted small">(10+ characters, letters and numbers)</span><input name="admin_password" type="password" autocomplete="new-password" /></label>
         </div>
       </fieldset>`,
@@ -14221,7 +15233,7 @@ function phoneFollowsRole(form) {
     const needed = PHONE_ROLES.includes(form.role.value);
     form.phone.required = needed;
     const hint = form.phone.closest('label').querySelector('.muted');
-    if (hint) hint.textContent = needed ? '(required for an admin — with country code)' : '(optional)';
+    if (hint) hint.textContent = needed ? '(required for an admin)' : '(optional)';
   };
   form.role.addEventListener('change', sync);
   sync();
@@ -15198,7 +16210,8 @@ function renderBilling() {
 
   const waiting = pending ? `
     <div class="msg info request-msg">⏳ You asked for <b>${esc(pending.plan)}</b> (${esc(pending.cycle)}, ${esc(fmtMoney(pending.amount, pending.currency))}) ${esc(agoWords(pending.requestedAt))}.
-      It is switched on as soon as the platform confirms your payment.
+      ${b.payOnline ? 'Pay for it now and it starts straight away.' : 'It is switched on as soon as the platform confirms your payment.'}
+      ${b.canChoose && b.payOnline ? `<button class="btn tiny primary" data-choose="${pending.planId}" data-cycle="${esc(pending.cycle)}" style="margin-left:8px">Pay now</button>` : ''}
       ${b.canChoose ? '<button class="btn tiny" id="btn-withdraw-request" style="margin-left:8px">Withdraw request</button>' : ''}</div>` : '';
 
   const current = sub && !ended ? `
@@ -15237,9 +16250,9 @@ function renderBilling() {
     else if (isCurrent && b.trial?.expired && b.canChoose) action = `<button class="btn primary big price-cta" data-choose="${p.id}" data-cycle="${cycle}">Renew ${esc(p.name)}</button>`;
     else if (isCurrent) action = '<button class="btn big price-cta" disabled>Your current plan</button>';
     else if (free && b.freeTrialUsed) action = '<button class="btn big price-cta" disabled>Free plan already used</button>';
-    else if (isPending) action = '<button class="btn big price-cta" disabled>Requested — waiting</button>';
+    else if (isPending && !b.payOnline) action = '<button class="btn big price-cta" disabled>Requested — waiting</button>';
     else if (!b.canChoose) action = '<button class="btn big price-cta" disabled>Ask your admin</button>';
-    else action = `<button class="btn ${p.highlighted ? 'primary' : ''} big price-cta" data-choose="${p.id}" data-cycle="${cycle}">${free ? 'Start free' : `Choose ${esc(p.name)}`}</button>`;
+    else action = `<button class="btn ${p.highlighted || isPending ? 'primary' : ''} big price-cta" data-choose="${p.id}" data-cycle="${cycle}">${free ? 'Start free' : b.payOnline ? `Pay & start ${esc(p.name)}` : `Choose ${esc(p.name)}`}</button>`;
     const note = yearly ? `≈ ${fmtMoney(p.priceYearly / 12, p.currency)} a month, billed yearly`
       : (!free && p.priceYearly > 0 ? `or ${fmtMoney(p.priceYearly, p.currency)} a year` : '');
     return `<article class="price-card ${p.highlighted ? 'featured' : ''} ${isCurrent ? 'current' : ''}">
@@ -15287,8 +16300,17 @@ $('#billing-body').addEventListener('click', async (e) => {
   const choose = e.target.closest('[data-choose]');
   if (!choose) return;
   const plan = session.billing.plans.find((p) => String(p.id) === choose.dataset.choose);
+  if (!plan) return toast('That plan is no longer on offer — choose another one', 'err');
   const cycle = choose.dataset.cycle;
   const price = cycle === 'yearly' ? plan.priceYearly : plan.priceMonthly;
+
+  if (price && session.billing.payOnline) {
+    if (!await askConfirm(`Pay ${fmtMoney(price, plan.currency)} for ${plan.name} (${cycle === 'yearly' ? 'one year' : 'one month'})?\n\n`
+      + 'Razorpay opens to take the payment by card, UPI, netbanking or wallet. The plan starts as soon as the payment goes through.',
+    { ok: 'Continue to payment' })) return;
+    return payForPlan(plan, cycle, choose);
+  }
+
   const ask = price
     ? `Request ${plan.name} at ${fmtMoney(price, plan.currency)} ${cycle === 'yearly' ? 'a year' : 'a month'}?\n\nIt is switched on once the platform confirms your payment.`
     : `Switch to the free ${plan.name} plan now?`;
@@ -15307,6 +16329,86 @@ $('#billing-body').addEventListener('click', async (e) => {
     busy(choose, false);
   }
 });
+
+/* ---------------------------------------------------- paying with Razorpay */
+
+/*
+ * Checkout is Razorpay's own window (card, UPI, netbanking, wallets). The
+ * panel only opens it on an order the server created, and the plan starts once
+ * the server has verified the payment with Razorpay — the browser's word is
+ * never enough. If the tab closes in between, the Razorpay webhook finishes it.
+ */
+let razorpayScript = null;
+
+function loadRazorpay() {
+  if (window.Razorpay) return Promise.resolve();
+  razorpayScript = razorpayScript || new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = resolve;
+    s.onerror = () => {
+      razorpayScript = null;
+      s.remove();
+      reject(new Error('Razorpay Checkout could not be loaded — check your connection and try again.'));
+    };
+    document.head.appendChild(s);
+  });
+  return razorpayScript;
+}
+
+/** Resolves to Checkout's success response, or null when the window is closed without paying. */
+function openCheckout(checkout) {
+  return new Promise((resolve) => {
+    const rzp = new window.Razorpay({
+      key: checkout.keyId,
+      order_id: checkout.orderId,
+      amount: checkout.amount,
+      currency: checkout.currency,
+      name: checkout.name,
+      description: checkout.description,
+      prefill: checkout.prefill,
+      notes: checkout.notes,
+      theme: { color: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#2563eb' },
+      handler: (response) => resolve(response),
+      modal: { ondismiss: () => resolve(null), confirm_close: true },
+    });
+    // A failed attempt leaves Checkout open to try another way; the reason is kept on the order.
+    rzp.on('payment.failed', (r) => {
+      api('/billing/checkout/failed', {
+        method: 'POST', body: { razorpay_order_id: checkout.orderId, reason: r.error?.description || r.error?.reason },
+      }).catch(() => {});
+    });
+    rzp.open();
+  });
+}
+
+async function payForPlan(plan, cycle, btn) {
+  busy(btn, true, 'Opening payment…');
+  try {
+    const [{ checkout }] = await Promise.all([
+      api('/billing/checkout', { method: 'POST', body: { plan_id: plan.id, cycle } }),
+      loadRazorpay(),
+    ]);
+    const paid = await openCheckout(checkout);
+    if (!paid) {
+      toast('Payment cancelled — your plan has not changed');
+      return busy(btn, false);
+    }
+
+    busy(btn, true, 'Confirming payment…');
+    const r = await api('/billing/checkout/verify', { method: 'POST', body: paid });
+    toast(r.message);
+    const wasGated = document.body.classList.contains('needs-plan');
+    await refreshBilling();
+    // A plan that is on right away opens the rest of the app.
+    if (wasGated && session.billing?.active) return enterApp({ keepOrgPicker: true });
+    renderBilling();
+  } catch (err) {
+    toast(err.message, 'err');
+    busy(btn, false);
+  }
+  return undefined;
+}
 
 /* ================================================================ docs */
 
@@ -16340,7 +17442,12 @@ async function boot() {
     session.roles = state.roles || [];
     session.user = state.user;
     signupOpen = Boolean(state.signupOpen);
-    if (!state.user) return showLanding(state.needsSetup);
+    if (!state.user) {
+      showLanding(state.needsSetup);
+      return handleVerifyReturn();
+    }
+    // Signed in already (another tab): the link did its job, nothing to say.
+    if (new URLSearchParams(location.search).has('verify')) history.replaceState(null, '', location.pathname);
     await enterApp();
   } catch (err) {
     $('#health-dot').className = 'dot error';

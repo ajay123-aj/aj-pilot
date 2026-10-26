@@ -157,7 +157,7 @@ echo ok`;
  * every directive is { name, args, file, children? }. Comments are dropped
  * and quoted strings kept whole.
  */
-function parseConfigTree(dump) {
+export function parseConfigTree(dump) {
   const root = { name: 'main', args: [], children: [] };
   const stack = [root];
   let file = null;
@@ -187,11 +187,11 @@ function parseConfigTree(dump) {
   return root;
 }
 
-const walk = (node, fn, parents = []) => {
+export const walk = (node, fn, parents = []) => {
   fn(node, parents);
   (node.children || []).forEach((c) => walk(c, fn, [...parents, node.name]));
 };
-const directive = (node, name) => (node.children || []).filter((c) => c.name === name);
+export const directive = (node, name) => (node.children || []).filter((c) => c.name === name);
 
 /** "host:port", "[::1]:8080", "unix:/run/x.sock" or "host" (port 80) as parts. */
 function parseAddress(addr, defaultPort = 80) {
@@ -543,7 +543,7 @@ async function readConfigFile(conn, server, path) {
  * Write a config file, test the whole configuration and reload — or put the
  * file back exactly as it was. `remove` deletes the file instead.
  */
-async function writeConfigFile(conn, server, path, content, { remove = false } = {}) {
+export async function writeConfigFile(conn, server, path, content, { remove = false } = {}) {
   const script = `set -uo pipefail
 FILE=${q(checkConfigPath(path))}
 BACKUP="$(mktemp /tmp/auto-deploy-nginx.XXXXXX)"
@@ -1027,7 +1027,7 @@ export async function deleteCertificate(conn, server, certName) {
 
 /* ---------------------------------------------------------------- errors */
 
-function nginxError(what, result) {
+export function nginxError(what, result) {
   const text = `${result.stdout}\n${result.stderr}`;
   if (/sudo:.*(password is required|no tty|incorrect password)/i.test(text)) {
     return new Error(`${what} needs root on this server, but sudo asked for a password the panel does not have. `

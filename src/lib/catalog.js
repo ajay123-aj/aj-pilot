@@ -60,6 +60,17 @@ export const CATALOG = [
     fields: [],
   },
   {
+    key: 'nginx-logs',
+    label: 'Nginx Log Analyzer',
+    tagline: 'Traffic, errors, attackers and IP restrictions — with fixes',
+    icon: '📊',
+    kind: 'host',
+    detail: 'Adds a log format with response times and host names to nginx, and an IP blocklist, both tested with nginx -t '
+      + 'before reloading. The server\'s Nginx Logs tab then analyses traffic, errors, slow endpoints, scanners, brute force '
+      + 'and IP restriction mistakes, and gives the fix for each. Needs nginx on the server.',
+    fields: [],
+  },
+  {
     key: 'mysql',
     label: 'MySQL',
     tagline: 'Relational database',

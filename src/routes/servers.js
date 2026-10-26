@@ -31,6 +31,9 @@ import {
   writeSite, readSite, removeSite, toggleSite, issueCertificate, renewCertificates,
   validateDomain, validateSiteName, validateUpstream, saveUpstream, deleteUpstream,
 } from '../lib/nginx.js';
+import {
+  nginxLogReport, installAnalyzer, removeAnalyzer, blockIps, unblockIps, installFail2ban, validateBlockTarget, parseCidr,
+} from '../lib/nginxLogs.js';
 import { decrypt } from '../lib/crypto.js';
 import { requirePermission } from '../lib/authGuard.js';
 import {
@@ -1515,6 +1518,70 @@ serversRouter.post('/:id/nginx/ssl/renew', async (req, res, next) => {
     }
   } catch (err) { next(err); }
 });
+
+/* ------------------------------------------------------- nginx: logs */
+
+/** The access and error logs, analysed — with findings and fixes. */
+serversRouter.get('/:id/nginx/logs', serverRoute(async (conn, row, req) => ({
+  report: await nginxLogReport(conn, row, { lines: Number(req.query.lines) || 20000 }),
+})));
+
+/** Add the analyzer's log format (and an empty blocklist) to nginx. */
+serversRouter.post('/:id/nginx/logs/analyzer', serverRoute(async (conn, row) => {
+  const result = await installAnalyzer(conn, row);
+  await logActivity('server', row.id, 'nginx_logs_installed', `Installed the nginx log analyzer on ${row.name}`);
+  return result;
+}));
+
+serversRouter.delete('/:id/nginx/logs/analyzer', serverRoute(async (conn, row) => {
+  const result = await removeAnalyzer(conn, row);
+  await logActivity('server', row.id, 'nginx_logs_removed', `Removed the nginx log analyzer from ${row.name}`, 'warn');
+  return result;
+}));
+
+/** The addresses as sent, each checked; one bad one refuses the lot. */
+function blockTargets(body, { forUnblock = false } = {}) {
+  const list = (Array.isArray(body.ips) ? body.ips : [body.ip]).map((v) => String(v || '').trim()).filter(Boolean);
+  if (!list.length) throw new Error('Give at least one IP address');
+  if (list.length > 500) throw new Error('At most 500 addresses at a time');
+  return list.map((ip) => {
+    // Unblocking takes anything well-formed, so a range added by hand can still be taken out.
+    if (forUnblock) {
+      const parsed = parseCidr(ip);
+      if (!parsed) throw new Error(`"${ip.slice(0, 60)}" is not an IP address or range`);
+      return parsed.text;
+    }
+    const { value, error } = validateBlockTarget(ip);
+    if (error) throw new Error(error);
+    return value;
+  });
+}
+
+serversRouter.post('/:id/nginx/logs/blocklist', serverRoute(async (conn, row, req) => {
+  const ips = blockTargets(req.body);
+  const result = await blockIps(conn, row, ips, String(req.body.note || '').slice(0, 120));
+  if (result.added.length) {
+    await logActivity('server', row.id, 'nginx_ip_blocked',
+      `Blocked ${result.added.length} IP(s) in nginx on ${row.name}: ${result.added.slice(0, 10).join(', ')}${result.added.length > 10 ? '…' : ''}`, 'warn');
+  }
+  return result;
+}));
+
+serversRouter.delete('/:id/nginx/logs/blocklist', serverRoute(async (conn, row, req) => {
+  const ips = blockTargets(req.body, { forUnblock: true });
+  const result = await unblockIps(conn, row, ips);
+  if (result.removed.length) {
+    await logActivity('server', row.id, 'nginx_ip_unblocked', `Unblocked ${result.removed.join(', ')} in nginx on ${row.name}`);
+  }
+  return result;
+}));
+
+/** fail2ban with its nginx jails, so repeat offenders are banned without anyone watching. */
+serversRouter.post('/:id/nginx/logs/fail2ban', serverRoute(async (conn, row) => {
+  const result = await installFail2ban(conn, row);
+  await logActivity('server', row.id, 'fail2ban_installed', `fail2ban set up on ${row.name} with jails: ${result.jails.join(', ') || 'none'}`);
+  return result;
+}));
 
 /* ------------------------------------------------ ad-hoc command (read) */
 

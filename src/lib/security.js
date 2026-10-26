@@ -13,12 +13,14 @@ import { config } from '../config.js';
  */
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  // Razorpay Checkout: its script, the payment window it frames, and its telemetry.
+  "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com",
+  "frame-src https://api.razorpay.com https://checkout.razorpay.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob:",
-  "connect-src 'self'",
+  "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

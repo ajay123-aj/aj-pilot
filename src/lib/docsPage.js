@@ -28,7 +28,12 @@ function sideNav(current) {
   }).join('');
 }
 
-function page({ req, title, description, path, body, current, ld }) {
+/**
+ * A public page in the site's own header and footer. `active` marks the menu
+ * item it belongs to; `side: false` drops the docs menu for a page that is
+ * not a guide (the terms).
+ */
+export function page({ req, title, description, path, body, current, ld, active = 'docs', side = true, ogType = 'article' }) {
   const url = siteUrl(req);
   return `<!doctype html>
 <html lang="en">
@@ -39,7 +44,7 @@ function page({ req, title, description, path, body, current, ld }) {
 <meta name="description" content="${esc(description)}" />
 <meta name="robots" content="index, follow" />
 <link rel="canonical" href="${esc(url + path)}" />
-<meta property="og:type" content="article" />
+<meta property="og:type" content="${esc(ogType)}" />
 <meta property="og:site_name" content="AJ Pilot" />
 <meta property="og:title" content="${esc(title)}" />
 <meta property="og:description" content="${esc(description)}" />
@@ -64,7 +69,7 @@ ${THEME}
   <div class="landing-head-inner">
     <a class="landing-brand" href="/" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true">${LOGO}</span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
     <nav class="landing-nav" id="landing-nav" aria-label="Main">
-      <a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/docs" class="active">Docs</a><a href="/#contact">Contact</a>
+      <a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/docs"${active === 'docs' ? ' class="active"' : ''}>Docs</a><a href="/terms"${active === 'terms' ? ' class="active"' : ''}>Terms</a><a href="/#contact">Contact</a>
     </nav>
     <div class="landing-actions">
       <button type="button" class="icon-btn landing-theme-btn" id="btn-landing-theme" aria-label="Switch theme" title="Switch theme"><span class="lt-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="lt-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg></span></button>
@@ -73,11 +78,11 @@ ${THEME}
     </div>
   </div>
 </header>
-<div class="docs-shell">
-  <aside class="docs-side" aria-label="Documentation">
+<div class="docs-shell${side ? '' : ' no-side'}">
+  ${side ? `<aside class="docs-side" aria-label="Documentation">
     <input type="search" class="docs-search" id="docs-search" placeholder="Search the docs…" aria-label="Search the docs" />
     <nav id="docs-nav">${sideNav(current)}</nav>
-  </aside>
+  </aside>` : ''}
   <main class="docs-main">${body}</main>
 </div>
 <footer class="landing-foot">
@@ -123,6 +128,7 @@ ${THEME}
       <a href="/#about">About</a>
       <a href="/#contact">Contact</a>
       <a href="/#faq">FAQ</a>
+      <a href="/terms">Terms &amp; Conditions</a>
       <a href="/#signin">Sign in</a>
     </nav>
   </div>
@@ -174,6 +180,7 @@ document.addEventListener('click', function (e) {
 // Filter the guides as you type: the menu here, and the cards on the docs home.
 (function () {
   var box = document.getElementById('docs-search');
+  if (!box) return;
   box.addEventListener('input', function () {
     var q = box.value.trim().toLowerCase();
     document.querySelectorAll('[data-search]').forEach(function (el) { el.hidden = !!q && el.dataset.search.indexOf(q) === -1; });
