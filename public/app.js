@@ -7060,17 +7060,45 @@ function stopCfWait() {
   $('#cf-waiting').hidden = true;
 }
 
+/**
+ * "manual" skips the pre-filled dashboard flow: the person brings a token they
+ * already have and names the account themselves.
+ */
+let cfMode = 'browser';
+
+function setCfMode(mode) {
+  cfMode = mode === 'manual' ? 'manual' : 'browser';
+  $$('[data-cf-mode]').forEach((b) => {
+    const on = b.dataset.cfMode === cfMode;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  $('#cf-step-start').hidden = cfMode === 'manual';
+  $('#cf-step-manual').hidden = cfMode !== 'manual';
+  $('#cf-msg').classList.add('hidden');
+  if (cfMode === 'manual') stopCfWait();
+}
+
+$$('[data-cf-mode]').forEach((b) => b.addEventListener('click', () => setCfMode(b.dataset.cfMode)));
+
+function setCfPermissions(text) {
+  $$('.cf-permissions-list').forEach((s) => { s.textContent = text; });
+}
+
 async function openCloudflareModal() {
   stopCfWait();
+  setCfMode('browser');
   $('#cf-token').value = '';
   $('#cf-token-name').value = '';
+  $('#cf-manual-token').value = '';
+  $('#cf-manual-name').value = '';
   $('#cf-msg').classList.add('hidden');
-  $('#cf-permissions').textContent = 'Zone: Edit, Zone Settings: Read, DNS: Edit, Account Settings: Read, User Details: Read, Cloudflare Tunnel: Edit, Zero Trust: Edit';
+  setCfPermissions('Zone: Edit, Zone Settings: Read, DNS: Edit, Account Settings: Read, User Details: Read, Cloudflare Tunnel: Edit, Zero Trust: Edit');
   cfModal.classList.remove('hidden');
   try {
     const link = await api('/credentials/cloudflare/token-link');
     $('#btn-cf-open').dataset.url = link.url;
-    $('#cf-permissions').textContent = link.permissions.join(', ');
+    setCfPermissions(link.permissions.join(', '));
   } catch { /* the button falls back to the plain tokens page */ }
 }
 
@@ -7116,20 +7144,26 @@ $('#cf-token').addEventListener('paste', () => setTimeout(() => {
   if (looksLikeCfToken($('#cf-token').value)) connectCloudflare();
 }, 0));
 
-$('#btn-cf-connect').addEventListener('click', () => connectCloudflare());
+$('#cf-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  connectCloudflare();
+});
 
 let cfConnecting = false;
 async function connectCloudflare() {
   if (cfConnecting) return;
   const msg = $('#cf-msg');
   const btn = $('#btn-cf-connect');
-  const secret = $('#cf-token').value.trim();
-  if (!secret) return formMsg(msg, 'Create the token on Cloudflare, then paste it here.', 'err');
+  const manual = cfMode === 'manual';
+  const secret = $(manual ? '#cf-manual-token' : '#cf-token').value.trim();
+  const name = $(manual ? '#cf-manual-name' : '#cf-token-name').value.trim();
+  if (manual && !name) return formMsg(msg, 'Give the account a name.', 'err');
+  if (!secret) return formMsg(msg, manual ? 'Paste the API token.' : 'Create the token on Cloudflare, then paste it here.', 'err');
 
   cfConnecting = true;
   busy(btn, true, 'Reading account…');
   try {
-    const r = await api('/credentials/cloudflare/connect', { method: 'POST', body: { secret, name: $('#cf-token-name').value.trim() } });
+    const r = await api('/credentials/cloudflare/connect', { method: 'POST', body: { secret, name } });
     stopCfWait();
     cfModal.classList.add('hidden');
     const a = r.credential.extra.account || {};
@@ -8051,6 +8085,7 @@ $('#cf-body').addEventListener('click', (e) => {
     // The same name makes the connect step update this account instead of adding another.
     openCloudflareModal();
     $('#cf-token-name').value = currentCf.name;
+    $('#cf-manual-name').value = currentCf.name;
     return;
   }
   if ('ztTunnelAdd' in d) return openTunnelModal();
@@ -8201,7 +8236,10 @@ $('#dh-token').addEventListener('paste', () => setTimeout(() => {
   if (looksLikeDhToken($('#dh-token').value)) connectDockerHub();
 }, 0));
 
-$('#btn-dh-connect').addEventListener('click', () => connectDockerHub());
+$('#dh-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  connectDockerHub();
+});
 
 async function connectDockerHub() {
   if (dhConnecting) return;

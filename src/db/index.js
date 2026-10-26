@@ -681,6 +681,24 @@ async function addOrgScoping() {
     await getPool().query('ALTER TABLE servers ADD UNIQUE KEY uq_server_org_name (org_id, name)');
   }
 
+  // Credential names were unique per provider across the whole panel, so two
+  // organisations connecting the same-named account (a Cloudflare login, say) collided.
+  const hasGlobalCredIndex = Number(await scalar(
+    `SELECT COUNT(*) FROM information_schema.statistics
+      WHERE table_schema = DATABASE() AND table_name = 'credentials' AND index_name = 'uq_provider_name'`
+  ));
+  if (hasGlobalCredIndex) {
+    await getPool().query('ALTER TABLE credentials DROP INDEX uq_provider_name');
+    console.log('[db] Credential names are now unique per organisation.');
+  }
+  const hasOrgCredIndex = Number(await scalar(
+    `SELECT COUNT(*) FROM information_schema.statistics
+      WHERE table_schema = DATABASE() AND table_name = 'credentials' AND index_name = 'uq_cred_org_provider_name'`
+  ));
+  if (!hasOrgCredIndex) {
+    await getPool().query('ALTER TABLE credentials ADD UNIQUE KEY uq_cred_org_provider_name (org_id, provider, name)');
+  }
+
   // Super admins run the platform and belong to no organisation; they only open one to work in it.
   const lifted = await run("UPDATE users SET org_id = NULL, active_org_id = NULL WHERE role = 'super_admin' AND org_id IS NOT NULL");
   if (lifted.affectedRows) console.log(`[db] ${lifted.affectedRows} super admin(s) now run the platform instead of sitting in an organisation.`);

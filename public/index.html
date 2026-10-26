@@ -1646,13 +1646,27 @@
   <div class="modal" style="max-width:560px">
     <h2>Connect Cloudflare</h2>
 
+    <form id="cf-form" autocomplete="off" novalidate>
+    <div class="seg git-mode" role="tablist" aria-label="How to connect">
+      <button type="button" class="active" data-cf-mode="browser" role="tab" aria-selected="true">Sign in with browser</button>
+      <button type="button" data-cf-mode="manual" role="tab" aria-selected="false">Add token manually</button>
+    </div>
+
+    <!-- manual: an existing token and a name for the account -->
+    <div id="cf-step-manual" hidden>
+      <p class="muted small">Already have an API token, or want to choose its permissions yourself? Create one under <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">My Profile → API Tokens</a> and paste it here.</p>
+      <p class="muted small">It needs: <span class="cf-permissions-list"></span>.</p>
+      <label>Account name<input id="cf-manual-name" autocomplete="off" maxlength="190" placeholder="e.g. Company Cloudflare" /></label>
+      <label>API token<input id="cf-manual-token" type="password" autocomplete="off" spellcheck="false" placeholder="paste the token here" /></label>
+    </div>
+
     <!-- step 1: open the dashboard -->
     <div id="cf-step-start">
       <p class="muted small">You sign in on Cloudflare itself. The panel opens your dashboard with an API token already filled in — you only press <b>Continue to summary</b> and <b>Create Token</b>.</p>
       <ol class="setup-steps">
         <li>
           <b>Sign in and create the token</b>
-          <p class="muted small">The token is limited to: <span id="cf-permissions"></span>, on all your zones.</p>
+          <p class="muted small">The token is limited to: <span class="cf-permissions-list"></span>, on all your zones.</p>
           <button type="button" class="btn primary" id="btn-cf-open">Sign in with Cloudflare ↗</button>
         </li>
         <li>
@@ -1663,12 +1677,14 @@
         </li>
       </ol>
       <p class="muted small" id="cf-waiting" hidden><span class="spinner"></span> Waiting for the token… <span id="cf-timer">0:00</span></p>
-      <div id="cf-msg" class="msg hidden"></div>
-      <div class="modal-actions">
-        <button type="button" class="btn ghost" data-close>Cancel</button>
-        <button type="button" class="btn primary" id="btn-cf-connect">Connect</button>
-      </div>
     </div>
+
+    <div id="cf-msg" class="msg hidden"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Cancel</button>
+      <button type="submit" class="btn primary" id="btn-cf-connect">Connect</button>
+    </div>
+    </form>
   </div>
 </div>
 
@@ -1677,6 +1693,7 @@
   <div class="modal" style="max-width:560px">
     <h2>Connect Docker Hub</h2>
     <p class="muted small">You sign in on Docker Hub itself and create an access token there. The panel picks it up, signs in with it and reads your account — no password is stored.</p>
+    <form id="dh-form" autocomplete="off" novalidate>
     <ol class="setup-steps">
       <li>
         <b>Your Docker ID</b>
@@ -1698,8 +1715,9 @@
     <div id="dh-msg" class="msg hidden"></div>
     <div class="modal-actions">
       <button type="button" class="btn ghost" data-close>Cancel</button>
-      <button type="button" class="btn primary" id="btn-dh-connect">Connect</button>
+      <button type="submit" class="btn primary" id="btn-dh-connect">Connect</button>
     </div>
+    </form>
   </div>
 </div>
 
