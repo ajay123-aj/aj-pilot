@@ -115,7 +115,7 @@ async function pollOnce() {
   if (polling) return;
   polling = true;
   try {
-    const apps = await all("SELECT * FROM apps WHERE auto_deploy = 1 AND status <> 'deploying'");
+    const apps = await all("SELECT * FROM apps WHERE auto_deploy = 1 AND status NOT IN ('deploying', 'removing', 'remove_failed')");
     for (const app of apps) {
       // Every change it makes is recorded against the app's own organisation.
       await runWithContext({ orgId: app.org_id, user: null }, () => checkApp(app, { source: 'branch check' }));

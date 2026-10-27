@@ -8677,7 +8677,12 @@ credForm.addEventListener('submit', async (e) => {
 
 /* ------------------------------------------------------------ apps */
 
-const APP_BADGE = { running: 'ok', deploying: 'warn', exited: 'err', error: 'err', pending: '', missing: 'err' };
+const APP_BADGE = { running: 'ok', deploying: 'warn', exited: 'err', error: 'err', pending: '', missing: 'err', removing: 'warn', remove_failed: 'err' };
+
+/** After a removal that failed: try again, or take it off the panel and leave the server as it is. */
+const removeRetryButtons = (a) => ifCan('delete', `
+  <button class="btn tiny" data-app-action="delete" data-id="${a.id}" data-name="${esc(a.name)}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">Try removing again</button>
+  <button class="btn tiny danger" data-app-action="delete" data-force="1" data-id="${a.id}" data-name="${esc(a.name)}">Remove from panel only</button>`);
 
 /** How each project type shows itself on a card. */
 const APP_TYPE_MARKS = {
@@ -8709,7 +8714,7 @@ let appWatch = null;
  */
 function watchDeployments(apps, { view = '#view-apps', reload = loadApps } = {}) {
   // A domain being set up after the deploy keeps the cards refreshing too.
-  const busyNow = apps.some((a) => a.status === 'deploying' || a.domain_status === 'configuring');
+  const busyNow = apps.some((a) => a.status === 'deploying' || a.status === 'removing' || a.domain_status === 'configuring');
   tickElapsed();
 
   if (!busyNow) return appPoll ? stopWatchingDeployments() : undefined;
@@ -8812,6 +8817,10 @@ function appCard(a) {
         <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'in progress' : esc(a.status)}</span>
       </div>
     </div>
+    ${a.status === 'removing' ? `<div class="deploy-progress">
+      <div class="muted small"><span class="spinner"></span>Removing from ${esc(a.server?.name || 'the server')} — containers, domains and webhook…</div>
+      <div class="meter indeterminate"><span></span></div>
+    </div>` : ''}
     ${busyNow && a.currentDeploy ? deployBanner(a, { compact: true }) : busyNow ? `<div class="deploy-progress">
       <div class="muted small"><span class="spinner"></span>${a.currentStep ? `${esc(a.currentStep)}…` : 'Starting…'}
         <span data-since="${esc(a.deploy_started_at || '')}"></span></div>
@@ -8828,11 +8837,15 @@ function appCard(a) {
       <button class="btn tiny primary" data-app-action="details" data-id="${a.id}" data-name="${esc(a.name)}">View details</button>
       ${busyNow || a.domain_status === 'configuring'
     ? `<button class="btn tiny" data-app-action="progress" data-id="${a.id}" data-name="${esc(a.name)}"><span class="spinner"></span>Check progress</button>` : ''}
-      ${busyNow ? '' : ifCan('create', `<button class="btn tiny" data-app-action="deploy" data-id="${a.id}" data-name="${esc(a.name)}">Redeploy</button>`)}
-      ${busyNow ? '' : ifCan('create', `<button class="btn tiny" data-app-action="${a.status === 'running' ? 'stop' : 'start'}" data-id="${a.id}">${a.status === 'running' ? 'Stop' : 'Start'}</button>`)}
+      ${busyNow || removalState(a) ? '' : ifCan('create', `<button class="btn tiny" data-app-action="deploy" data-id="${a.id}" data-name="${esc(a.name)}">Redeploy</button>`)}
+      ${busyNow || removalState(a) ? '' : ifCan('create', `<button class="btn tiny" data-app-action="${a.status === 'running' ? 'stop' : 'start'}" data-id="${a.id}">${a.status === 'running' ? 'Stop' : 'Start'}</button>`)}
+      ${a.status === 'remove_failed' ? removeRetryButtons(a) : ''}
     </div>
   </div>`;
 }
+
+/** Being removed, or a removal that failed: the app's other actions wait. */
+function removalState(a) { return a.status === 'removing' || a.status === 'remove_failed'; }
 
 /** Where the service answers: its first live domain, or its first port on the server. */
 function appAddress(a) {
@@ -9250,7 +9263,9 @@ function renderAppDetails(a) {
   $('#ad-title').innerHTML = `🚀 ${n}`;
   $('#ad-state').innerHTML = `<span class="badge type">${mark.icon} ${esc(mark.label)}</span> <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'deploying' : esc(a.status)}</span>`;
   $('#ad-sub').innerHTML = `<code class="small">${esc(a.repo)}</code>${a.root_dir ? ` › <code class="small">${esc(a.root_dir)}</code>` : ''} · ${esc(a.branch)} · 🖥 ${esc(a.server?.name || '—')} (${esc(a.server?.host || '')})`;
-  $('#ad-actions').innerHTML = `
+  $('#ad-actions').innerHTML = removalState(a) ? `
+    ${a.status === 'removing' ? '<span class="badge warn"><span class="spinner"></span>removing…</span>' : removeRetryButtons(a)}
+    <button class="btn tiny" data-ad-refresh="1">Refresh</button>` : `
     ${busyNow ? btn('progress', '<span class="spinner"></span>Check progress', 'primary') : a.hasLog ? btn('progress', 'Deploy log') : ''}
     ${btn('logs', 'Container logs')}
     ${busyNow ? '' : ifCan('edit', btn('edit', 'Edit settings'))}
@@ -9518,39 +9533,30 @@ async function appCardAction(btn, reload) {
   if (action === 'domain-add') return openDomainAdd(id, name, reload);
 
   if (action === 'delete') {
+    // After a removal that could not clean the server up: take it off the panel only.
+    const force = btn.dataset.force === '1';
     const domain = btn.dataset.domain;
-    if (!await askConfirm(`Remove "${name}"? Its container and the clone on the server are deleted.`
+    if (force) {
+      if (!await askConfirm(`Remove "${name}" from the panel only?\n\nIts containers may still be running on the server — stop and delete them there by hand.`, { danger: true })) return;
+    } else if (!await askConfirm(`Remove "${name}"? Its container and the clone on the server are deleted.`
       + (domain ? `\n\nIts domain ${domain} is removed too: the Cloudflare record or tunnel hostname, and the nginx site and certificate or the tunnel the panel made for it.` : ''))) return;
 
     // Volumes are the one part that cannot be rebuilt from the repository, so
     // they are kept unless somebody says otherwise.
-    const volumes = Number(btn.dataset.volumes || 0);
+    const volumes = force ? 0 : Number(btn.dataset.volumes || 0);
     const volumeChoice = volumes > 0 ? await askChoice(
       `Keep its ${volumes} volume${volumes > 1 ? 's' : ''}?\n\n`
       + 'Keeping the data means redeploying this service finds it again. Deleting removes the volumes and everything in them, for good.',
       [{ label: 'Delete volumes', value: 'drop', kind: 'danger' }, { label: 'Keep data', value: 'keep', kind: 'primary', main: true }]
     ) : 'keep';
     if (volumeChoice === null) return;
-    const dropVolumes = volumeChoice === 'drop';
+    const query = new URLSearchParams({ ...(volumeChoice === 'drop' ? { delete_volumes: '1' } : {}), ...(force ? { force: '1' } : {}) });
 
     busy(btn, true, 'Removing…');
-    const removeUrl = (force) => `/apps/${id}?${new URLSearchParams({ ...(dropVolumes ? { delete_volumes: '1' } : {}), ...(force ? { force: '1' } : {}) })}`;
     try {
-      let r;
-      try {
-        r = await api(removeUrl(false), { method: 'DELETE' });
-      } catch (err) {
-        // The server could not be cleaned up: say why, and let them take it off the panel anyway.
-        if (!err.body?.canForce) throw err;
-        const forceIt = await askChoice(`${err.message}\n\nThe app is still in the panel. Fix the server connection and try again, `
-          + 'or remove it from the panel only and clean the server up by hand.',
-        [{ label: 'Remove from panel only', value: true, kind: 'danger' }, { label: 'Keep it', value: false, kind: 'primary', main: true }],
-        { title: `Could not remove ${name}`, tone: 'danger' });
-        if (!forceIt) return busy(btn, false);
-        r = await api(removeUrl(true), { method: 'DELETE' });
-      }
-      toast(r.warnings?.length ? `Removed, with warnings: ${r.warnings.join(' · ')}`
-        : `${name} removed${r.domainRemoved?.length ? ` — ${r.domainRemoved.join(', ')}` : ''}`);
+      // The server answers at once and removes it in the background; the card shows how it goes.
+      await api(`/apps/${id}?${query}`, { method: 'DELETE' });
+      toast(`Removing ${name} — it disappears from the list once the server is cleaned up`);
       // Removed from its own Details page: that page has nothing left to show.
       if (String(detailsAppId) === String(id) && detailsOpen()) {
         detailsAppId = null;

@@ -254,6 +254,10 @@ const releaseStaleDeploys = () => Promise.all([
      WHERE status = 'deploying' AND deploy_started_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)`,
     [STALE_MINUTES]
   ),
+  // A removal takes a few minutes at most; one still going after fifteen died with the panel.
+  run(`UPDATE apps SET status = 'remove_failed',
+         last_error = 'The panel stopped before this app was removed — remove it again.'
+       WHERE status = 'removing' AND updated_at < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`),
   // Every step of a domain setup writes its log, so twenty quiet minutes means it died.
   run(`UPDATE app_domains SET status = 'error',
          error = 'The panel stopped before the domain was set up — retry it.'
@@ -516,7 +520,7 @@ appsRouter.post('/:id/auto-deploy/check', async (req, res, next) => {
  * cannot both start one.
  */
 export async function deployNow(id, { reason = '', meta = null } = {}) {
-  const claimed = await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ? AND status <> 'deploying'", [id]);
+  const claimed = await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ? AND status NOT IN ('deploying', 'removing', 'remove_failed')", [id]);
   if (!claimed.affectedRows) return false;
   startDeployment(id, { first: false, reason, meta });
   return true;
@@ -655,6 +659,7 @@ appsRouter.post('/:id/deploy', async (req, res, next) => {
     if (row.status === 'deploying') {
       return res.status(409).json({ error: `${row.name} is already being deployed — wait for that to finish.` });
     }
+    if (row.status === 'removing') return res.status(409).json({ error: `${row.name} is being removed.` });
 
     await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ?", [row.id]);
     res.status(202).json({ ok: true, started: true, ...(await publicApp(await one('SELECT * FROM apps WHERE id = ?', [row.id]))) });
@@ -1204,6 +1209,7 @@ appsRouter.post('/:id/action', async (req, res, next) => {
     if (!['start', 'stop', 'restart'].includes(action)) {
       return res.status(400).json({ error: 'action must be start, stop or restart' });
     }
+    if (row.status === 'removing') return res.status(409).json({ error: `${row.name} is being removed.` });
     const server = await getServer(row.server_id, req.orgId);
     if (!server) return res.status(400).json({ error: 'The server this runs on no longer exists' });
 
@@ -1249,63 +1255,96 @@ appsRouter.get('/:id/logs', async (req, res, next) => {
 
 /* -------------------------------------------------------------- delete */
 
+/**
+ * Removing takes a while — stopping containers, deleting the image, Cloudflare,
+ * nginx and the certificate for every domain — longer than a proxy in front of
+ * the panel waits (nginx 60s, Cloudflare 100s), which then answered 502. So the
+ * request only starts it: the app shows `removing`, and the cards, which poll
+ * while it does, see it go — or `remove_failed` with the reason.
+ */
 appsRouter.delete('/:id', async (req, res, next) => {
   try {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'App not found' });
+    if (row.status === 'removing') return res.status(409).json({ error: `${row.name} is already being removed.` });
     const server = await getServer(row.server_id, req.orgId);
-    // Remove it from the panel even though the server could not be cleaned up.
-    const force = req.query.force === '1';
-    const warnings = [];
+    const options = {
+      // Remove it from the panel even though the server could not be cleaned up.
+      force: req.query.force === '1',
+      keepImage: req.query.keep_image === '1',
+      // Volumes outlive the service unless the person said otherwise.
+      keepVolumes: req.query.delete_volumes !== '1',
+      who: req.user?.name || 'someone',
+    };
 
-    // A deploy still running would start the containers again after they are removed.
-    if (row.status === 'deploying' && server) {
-      try {
-        await stopRunningDeploy(row, server, req.user?.name || 'someone');
-      } catch (err) {
-        if (!force) return res.status(409).json({ error: `${row.name} is being deployed and the deploy could not be stopped: ${err.message}`, canForce: true });
-        warnings.push(`The running deploy could not be stopped: ${err.message}`);
-      }
+    await run("UPDATE apps SET status = 'removing', last_error = NULL WHERE id = ?", [row.id]);
+    res.status(202).json({ ok: true, removing: true });
+
+    removeApplication(row, server, options).catch(async (err) => {
+      console.error('[apps] removing crashed:', err);
+      await run("UPDATE apps SET status = 'remove_failed', last_error = ? WHERE id = ?",
+        [`Could not remove ${row.name}: ${err.message}`, row.id]).catch(() => {});
+    });
+  } catch (err) { next(err); }
+});
+
+async function removeApplication(row, server, { force, keepImage, keepVolumes, who }) {
+  const warnings = [];
+  // The app stays in the panel, domains, webhook and all, so it can be removed properly once the server answers.
+  const failed = async (why) => {
+    await run("UPDATE apps SET status = 'remove_failed', last_error = ? WHERE id = ?", [why, row.id]);
+    await logActivity('app', row.id, 'remove_failed', why, 'error');
+  };
+
+  // A deploy still running would start the containers again after they are removed.
+  if (row.status === 'deploying' && server) {
+    try {
+      await stopRunningDeploy(row, server, who);
+    } catch (err) {
+      if (!force) return failed(`${row.name} is being deployed and the deploy could not be stopped: ${err.message}`);
+      warnings.push(`The running deploy could not be stopped: ${err.message}`);
     }
+    // Stopping wrote the container's state back; it is still being removed.
+    await run("UPDATE apps SET status = 'removing' WHERE id = ?", [row.id]);
+  }
 
-    // The server first: if its containers cannot be removed, the app stays in the panel
-    // (domains, webhook and all) so it can be removed properly once the server answers.
-    if (server) {
-      let cleanup;
-      try {
-        cleanup = await withConnection(connectionFromRow(server), (conn) => removeApp(conn, server, {
-          ...containerSpecOf(row), image: row.image, tag: row.tag,
-        }, {
-          keepImage: req.query.keep_image === '1',
-          // Volumes outlive the service unless the person said otherwise.
-          keepVolumes: req.query.delete_volumes !== '1',
-        }));
-      } catch (err) {
-        cleanup = { ok: false, error: err.message };
-      }
-      if (!cleanup.ok) {
-        const why = `Could not remove ${row.name} from ${server.name}: ${cleanup.error}`;
-        if (!force) return res.status(409).json({ error: why, canForce: true });
-        warnings.push(`${why} — its containers may still be running there.`);
-      }
+  // The server first: its containers, image, volumes and the clone.
+  if (server) {
+    let cleanup;
+    try {
+      cleanup = await withConnection(connectionFromRow(server), (conn) => removeApp(conn, server, {
+        ...containerSpecOf(row), image: row.image, tag: row.tag,
+      }, { keepImage, keepVolumes }));
+    } catch (err) {
+      cleanup = { ok: false, error: err.message };
     }
+    if (!cleanup.ok) {
+      const why = `Could not remove ${row.name} from ${server.name}: ${cleanup.error}`;
+      if (!force) return failed(why);
+      warnings.push(`${why} — its containers may still be running there.`);
+    }
+  }
 
-    // Its webhook on the repository goes too, so the provider stops calling a hook that no longer exists.
-    await removeWebhook(row);
+  // Its webhook on the repository goes too, so the provider stops calling a hook that no longer exists.
+  await removeWebhook(row);
 
-    // Its domains go with it: each one's tunnel hostname (and a tunnel made for
-    // it), or its DNS record, nginx site and certificate.
-    const domainDone = [];
-    const doms = await all('SELECT * FROM app_domains WHERE app_id = ? ORDER BY id', [row.id]);
-    for (const dom of doms) {
+  // Its domains go with it: each one's tunnel hostname (and a tunnel made for
+  // it), or its DNS record, nginx site and certificate.
+  const domainDone = [];
+  const doms = await all('SELECT * FROM app_domains WHERE app_id = ? ORDER BY id', [row.id]);
+  for (const dom of doms) {
+    try {
       const d = await removeAppDomain(domainView(row, dom), server);
       domainDone.push(...d.done);
       warnings.push(...d.warnings);
+    } catch (err) {
+      warnings.push(`Could not remove ${dom.domain}: ${err.message}`);
     }
+  }
 
-    await run('DELETE FROM apps WHERE id = ?', [row.id]);
-    await logActivity('app', null, 'app_removed',
-      `Removed the app "${row.name}"${doms.length ? ` and its domain${doms.length > 1 ? 's' : ''} ${doms.map((d) => d.domain).join(', ')}` : ''}${domainDone.length ? `: ${domainDone.join(', ')}` : ''}`);
-    res.json({ ok: true, warnings, domainRemoved: domainDone });
-  } catch (err) { next(err); }
-});
+  await run('DELETE FROM apps WHERE id = ?', [row.id]);
+  await logActivity('app', null, 'app_removed',
+    `Removed the app "${row.name}"${doms.length ? ` and its domain${doms.length > 1 ? 's' : ''} ${doms.map((d) => d.domain).join(', ')}` : ''}`
+    + `${domainDone.length ? `: ${domainDone.join(', ')}` : ''}${warnings.length ? ` — with warnings: ${warnings.join(' · ')}` : ''}`,
+    warnings.length ? 'warn' : 'info');
+}
