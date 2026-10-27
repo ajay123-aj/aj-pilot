@@ -132,6 +132,8 @@ ${runCommand(spec, c, image)} >/dev/null 2>&1 || { echo "${c.name} did not start
   const step = (key, label) => `echo ${q(`::step::${key}::${label}::`)}"$(date +%s)"`;
 
   const script = `set -uo pipefail
+# Stopping a deploy from the panel kills this shell and everything under it.
+echo $$ > ${q(pidFile(spec.name))}
 export DEBIAN_FRONTEND=noninteractive
 DIR=${q(dir)}
 NEW="$DIR.new"
@@ -234,7 +236,7 @@ docker logs --tail 30 ${q(containers[0].name)} 2>&1 | tail -n 30`;
     if (text) spec.onProgress(scrub(text));
   } : null;
 
-  const result = await rootExec(conn, server, script, { timeout: 25 * 60 * 1000, onOutput });
+  const result = await rootExec(conn, server, `${script}\nrm -f ${q(pidFile(spec.name))}`, { timeout: 25 * 60 * 1000, onOutput });
   const sections = splitSections(result.stdout);
   const log = scrub(`${result.stdout.split('@@@')[0]}\n${result.stderr}`).trim();
   const logs = lines(sections.logs).map(scrub);
@@ -350,6 +352,40 @@ echo "removed ${spec.name} (${names.length} container(s)${volumes.length ? `, ${
 
   const result = await rootExec(conn, server, script, { timeout: 120000 });
   return { ok: result.code === 0, log: `${result.stdout}\n${result.stderr}`.trim() };
+}
+
+/** Where a running deploy's script writes its PID, so it can be stopped. */
+const pidFile = (name) => `/tmp/aj-pilot-deploy-${name}.pid`;
+
+/**
+ * Stop a deploy that is running on the server: kill its script and everything
+ * it started (git, docker build), drop the half-made clone and report what the
+ * app's first container is doing now. A stop before "Starting containers"
+ * leaves the previous release running untouched.
+ */
+export async function stopDeploy(conn, server, spec) {
+  const first = plannedContainers(spec)[0].name;
+  const script = `set -u
+PIDFILE=${q(pidFile(spec.name))}
+tree() { local c; echo "$1"; for c in $(pgrep -P "$1" 2>/dev/null); do tree "$c"; done; }
+if [ -f "$PIDFILE" ]; then
+  PID="$(cat "$PIDFILE" 2>/dev/null)"
+  # Only a shell is ours — a PID left behind by a crash may belong to something else by now.
+  if [ -n "$PID" ] && grep -qa bash "/proc/$PID/cmdline" 2>/dev/null; then
+    PIDS="$(tree "$PID")"
+    kill -TERM $PIDS 2>/dev/null || true
+    sleep 2
+    kill -KILL $PIDS 2>/dev/null || true
+    echo "killed=$(echo "$PIDS" | wc -w)"
+  fi
+  rm -f "$PIDFILE"
+fi
+rm -rf ${q(`${APP_ROOT}/${spec.name}.new`)}
+echo "state=$(docker inspect -f '{{.State.Status}}' ${q(first)} 2>/dev/null || echo missing)"`;
+
+  const result = await rootExec(conn, server, script, { timeout: 60000 });
+  const state = /^state=(\S+)/m.exec(result.stdout)?.[1] || 'unknown';
+  return { state, killed: Number(/^killed=(\d+)/m.exec(result.stdout)?.[1] || 0) };
 }
 
 /** start / stop / restart every container of one app. */

@@ -19,7 +19,7 @@ import {
   inspectProject, validateAppSpec, NODE_VERSIONS, safeName, publicAppTypes, appType,
   validatePorts, MAX_CONTAINERS, MAX_VOLUMES, DEFAULT_VOLUME_PATH, cleanRootDir,
 } from '../lib/nodeApp.js';
-import { deployApp, removeApp, appAction, applyContainers, plannedContainers } from '../lib/deploy.js';
+import { deployApp, removeApp, appAction, applyContainers, plannedContainers, stopDeploy } from '../lib/deploy.js';
 import { parseEnvInput, formatEnvText, RESERVED, MAX_VARS } from '../lib/envVars.js';
 import { requirePermission } from '../lib/authGuard.js';
 import { resolveEnvironmentChoice } from '../lib/environments.js';
@@ -663,6 +663,80 @@ appsRouter.post('/:id/deploy', async (req, res, next) => {
 });
 
 /**
+ * Deploys running in this process, by app id. A stop sets `stopped` (the
+ * reason) and the deploy, seeing it, records itself as stopped instead of failed.
+ */
+const activeDeploys = new Map();
+
+/**
+ * Stop the running deploy of an app: kill its script on the server, then let
+ * the deploy (or, after a panel restart, this) record it as stopped. The app's
+ * status becomes what its container is really doing.
+ */
+async function stopRunningDeploy(row, server, who) {
+  const message = `Stopped by ${who}`;
+  const ctl = activeDeploys.get(row.id);
+  if (ctl) ctl.stopped = message;
+
+  let state = 'unknown';
+  try {
+    ({ state } = await withConnection(connectionFromRow(server), (conn) => stopDeploy(conn, server, containerSpecOf(row))));
+  } catch (err) {
+    // The server cannot be reached: dropping our end of the deploy's SSH session still ends it.
+    if (!ctl) throw err;
+  }
+  // Before the script started (or if the kill missed it), closing the session ends it.
+  try { ctl?.conn?.end(); } catch { /* already closed */ }
+  if (ctl) await ctl.done;
+
+  const status = state === 'missing' || state === 'unknown' ? 'error' : state;
+  await run('UPDATE apps SET status = ?, last_error = ? WHERE id = ?',
+    [status, status === 'error' ? `${message} — the app has no running container; deploy it again.` : null, row.id]);
+  // A deploy with nothing left in this process (a panel restart) is closed here.
+  await run("UPDATE deployments SET status = 'cancelled', error = ?, finished_at = NOW() WHERE app_id = ? AND status = 'running'",
+    [message, row.id]);
+  await logActivity('app', row.id, 'deploy_stopped', `Stopped the deploy of ${row.name} on ${server.name} → ${state}`, 'warn');
+  return state;
+}
+
+/** Stop a deploy that is running — a manual one or an auto deploy. */
+appsRouter.post('/:id/deploy/stop', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    if (row.status !== 'deploying') return res.status(409).json({ error: `${row.name} is not being deployed.` });
+    const server = await getServer(row.server_id, req.orgId);
+    if (!server) return res.status(400).json({ error: 'The server this runs on no longer exists' });
+    try {
+      const state = await stopRunningDeploy(row, server, req.user?.name || 'someone');
+      res.json({ ok: true, state, ...(await publicApp(await getRow(row.id, req.orgId))) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: `Could not stop the deploy: ${err.message}` });
+    }
+  } catch (err) { next(err); }
+});
+
+/** Stop the running deploy and start a fresh one from the branch as it is now. */
+appsRouter.post('/:id/deploy/restart', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    const server = await getServer(row.server_id, req.orgId);
+    if (!server) return res.status(400).json({ error: 'The server this runs on no longer exists' });
+    if (row.status === 'deploying') {
+      try {
+        await stopRunningDeploy(row, server, req.user?.name || 'someone');
+      } catch (err) {
+        return res.status(400).json({ ok: false, error: `Could not stop the running deploy: ${err.message}` });
+      }
+    }
+    await run("UPDATE apps SET status = 'deploying', deploy_started_at = NOW(), last_error = NULL WHERE id = ?", [row.id]);
+    res.status(202).json({ ok: true, started: true, ...(await publicApp(await getRow(row.id, req.orgId))) });
+    startDeployment(row.id, { first: false, reason: 'Restarted the deploy' });
+  } catch (err) { next(err); }
+});
+
+/**
  * Everything both deploys share: gather the pieces, run the script, record
  * what came back. The row already exists and is marked `deploying`.
  *
@@ -670,12 +744,18 @@ appsRouter.post('/:id/deploy', async (req, res, next) => {
  * reports only by updating the row, which the browser polls.
  */
 function startDeployment(id, options) {
-  runDeployment(id, options).catch(async (err) => {
+  const ctl = { stopped: null, conn: null };
+  activeDeploys.set(id, ctl);
+  ctl.done = runDeployment(id, options, ctl).catch(async (err) => {
+    // A stop closes the session under the deploy; whoever stopped it records the outcome.
+    if (ctl.stopped) return;
     console.error('[apps] deployment crashed:', err);
     await run("UPDATE apps SET status = 'error', last_error = ? WHERE id = ?",
       [`The deployment stopped unexpectedly: ${err.message}`, id]).catch(() => {});
     await run("UPDATE deployments SET status = 'failed', error = ?, finished_at = NOW() WHERE app_id = ? AND status = 'running'",
       [`The deployment stopped unexpectedly: ${err.message}`, id]).catch(() => {});
+  }).finally(() => {
+    if (activeDeploys.get(id) === ctl) activeDeploys.delete(id);
   });
 }
 
@@ -725,7 +805,7 @@ async function closeDeployment(deployId, { status, error = null, log }) {
   );
 }
 
-async function runDeployment(id, { first, reason = '', meta = null }) {
+async function runDeployment(id, { first, reason = '', meta = null }, ctl = {}) {
   const row = await one('SELECT * FROM apps WHERE id = ?', [id]);
   const server = await one('SELECT * FROM servers WHERE id = ?', [row.server_id]);
 
@@ -749,7 +829,20 @@ async function runDeployment(id, { first, reason = '', meta = null }) {
   await run("UPDATE deployments SET status = 'interrupted', finished_at = NOW() WHERE app_id = ? AND status = 'running'", [id]);
   const deployId = await openDeployment(row, { first, reason, meta });
 
+  // Stopped from the panel: the log and the history say so. The app's status is
+  // set by the stop, from what the container is doing.
+  const stopped = async () => {
+    await flush();
+    const text = `${live}\n::failed::${ctl.stopped}::${now()}\n`;
+    await run('UPDATE apps SET deploy_log = ? WHERE id = ?', [text.slice(-120000), id]);
+    // Auto deploy does not start the stopped commit again by itself — the next push does.
+    const tried = builtCommit(live);
+    if (tried) await run('UPDATE apps SET auto_seen_sha = ? WHERE id = ?', [tried.sha, id]);
+    await closeDeployment(deployId, { status: 'cancelled', error: ctl.stopped, log: text });
+  };
+
   const fail = async (message, detail = null) => {
+    if (ctl.stopped) return stopped();
     await flush();
     // What streamed in, then whatever the failure adds that was not already shown.
     const extra = detail && !live.includes(String(detail).slice(0, 200)) ? `\n${detail}` : '';
@@ -825,9 +918,11 @@ async function runDeployment(id, { first, reason = '', meta = null }) {
     onProgress: progress,
   };
 
+  if (ctl.stopped) return stopped();
   try {
     note('connect', `Connecting to ${server.name}`, `SSH ${server.username}@${server.host}:${server.port}`);
     const result = await withConnection(connectionFromRow(server), async (conn) => {
+      ctl.conn = conn;
       progress(`Connected to ${server.name}.\n`);
       await requireDocker(conn, server);
       return deployApp(conn, server, spec);

@@ -705,15 +705,125 @@ td .badge { vertical-align: middle; }
 
 /* ------------------------------------------------------- the live view */
 
-/* A sparkline is read beside the number above it, never instead of it. */
-.spark-box { margin-top: 8px; height: 34px; }
-.spark { width: 100%; height: 34px; display: block; overflow: visible; }
+.live-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 14px; }
+.live-title { margin: 0 0 3px; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
 
-.core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px; }
-.core .meter { margin-top: 4px; }
+/* The connection state: a dot that breathes while samples arrive. */
+.live-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+}
+.live-pill.ok { background: var(--ok-soft); color: var(--ok); border-color: var(--ok-line); }
+.live-pill.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+.live-pill.err { background: var(--err-soft); color: var(--err); border-color: var(--err-line); }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.live-pill.ok .live-dot, .live-healthy .live-dot { animation: live-pulse 2s ease-in-out infinite; }
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ok-line); }
+  50% { box-shadow: 0 0 0 4px transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none !important; } }
 
-.alert-stack { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
-.alert-stack .msg { white-space: normal; }
+.live-healthy {
+  display: flex; align-items: center; gap: 9px; margin-bottom: 14px;
+  padding: 9px 14px; border-radius: var(--radius-sm); font-size: 13px;
+  background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line);
+}
+
+/* Alerts: one card, a row each, instead of a stack of banners. */
+.live-alerts { margin-bottom: 14px; border-radius: var(--radius); border: 1px solid var(--err-line); background: var(--card); overflow: hidden; }
+.live-alerts.warn { border-color: var(--warn-line); }
+.live-alerts-head { padding: 9px 14px; font-size: 13px; background: var(--err-soft); color: var(--err); }
+.live-alerts.warn .live-alerts-head { background: var(--warn-soft); color: var(--warn); }
+.live-alert {
+  display: flex; align-items: baseline; gap: 6px 10px; flex-wrap: wrap;
+  padding: 9px 14px 9px 12px; border-top: 1px solid var(--line-soft); border-left: 3px solid var(--err); font-size: 13px;
+}
+.live-alert.warn { border-left-color: var(--warn); }
+
+/* The four headline numbers: always one row on a wide screen, all the same height. */
+.live-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.live-kpi {
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px 0; box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.live-kpi-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.live-kpi-tag { padding: 1px 7px; border-radius: 999px; background: var(--surface-2); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.live-kpi-value { font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 6px 0 4px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.live-kpi-value.warn { color: var(--warn); }
+.live-kpi-value.err { color: var(--err); }
+.live-kpi-sub { color: var(--text-2); font-size: 12px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.live-kpi-sub + .live-kpi-sub { color: var(--muted); }
+/* The sparkline runs to the tile's edges and sits on its floor. */
+.live-spark { margin: auto -16px 0; padding-top: 10px; height: 50px; }
+.spark { width: 100%; height: 40px; display: block; overflow: visible; }
+
+.live-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+
+.live-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm); padding: 0 16px 14px; min-width: 0; margin-bottom: 14px;
+}
+.live-split > .live-card { margin-bottom: 0; display: flex; flex-direction: column; }
+/* Side by side with the filesystems, the cores spread over the same height. */
+.live-split > .live-card > .live-cores { flex: 1; align-content: space-evenly; }
+.live-card.flush { padding: 0; }
+.live-card-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; flex-wrap: wrap;
+  min-height: 46px; padding: 8px 0; margin-bottom: 4px; border-bottom: 1px solid var(--line-soft);
+}
+.live-card.flush .live-card-head { padding: 8px 16px; margin-bottom: 0; }
+.live-card-head h3 { margin: 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.live-empty { margin: 0; padding: 16px; }
+
+/* Cores: a compact two-column list of bars. */
+.live-cores { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 22px; padding-top: 10px; }
+.live-core { display: grid; grid-template-columns: 22px 1fr 40px; align-items: center; gap: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.live-core-name { color: var(--muted); text-align: right; }
+.live-core .meter { margin: 0; }
+.live-core b, .live-disk-top b { text-align: right; }
+.live-core b.warn, .live-disk-top b.warn { color: var(--warn); }
+.live-core b.err, .live-disk-top b.err { color: var(--err); }
+
+.live-disks { display: flex; flex-direction: column; }
+.live-disk { padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.live-disk:last-child { border-bottom: 0; padding-bottom: 0; }
+.live-disk-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 13px; }
+.live-disk-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-disk-name code { font-size: 11px; color: var(--muted); background: none; padding: 0; margin-left: 4px; }
+.live-disk .meter { margin: 6px 0 5px; }
+.live-free { color: var(--text-2); font-weight: 600; }
+
+/* Tables inside a live card: no card of their own, and a scroll on a narrow screen. */
+.live-scroll { overflow-x: auto; }
+.live-table { width: 100%; }
+.live-table th { white-space: nowrap; }
+.live-table td { vertical-align: middle; }
+.live-table th:first-child, .live-table td:first-child { padding-left: 16px; }
+.live-table th:last-child, .live-table td:last-child { padding-right: 16px; }
+.live-table tbody tr:last-child td { border-bottom: 0; }
+.live-proc { font-family: var(--mono); font-size: 12px; }
+
+.live-ct { display: flex; align-items: flex-start; gap: 10px; min-width: 180px; }
+.live-ct-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--muted); opacity: .6; }
+.live-ct-dot.ok { background: var(--ok); opacity: 1; box-shadow: 0 0 0 3px var(--ok-soft); }
+.live-ct-dot.warn { background: var(--warn); opacity: 1; }
+.live-ct-dot.err { background: var(--err); opacity: 1; box-shadow: 0 0 0 3px var(--err-soft); }
+.live-ct-image { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+.live-ct-actions { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: nowrap; }
+
+@media (max-width: 1100px) {
+  .live-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 860px) {
+  .live-split { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .live-kpis { grid-template-columns: minmax(0, 1fr); }
+  .live-cores { grid-template-columns: minmax(0, 1fr); }
+}
 
 .empty {
   color: var(--muted); padding: 40px; text-align: center;

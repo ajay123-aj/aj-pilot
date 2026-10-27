@@ -612,10 +612,14 @@ credentialsRouter.post('/cloudflare/connect', async (req, res, next) => {
       return res.status(400).json({ ok: false, error: err.message });
     }
 
-    const name = (req.body.name || '').trim() || cloudflareLabel(account);
     const rows = await all("SELECT id, name, extra FROM credentials WHERE provider = 'cloudflare' AND org_id = ?", [req.orgId]);
-    const existing = rows.find((r) => account.tokenId && asJson(r.extra).account?.tokenId === account.tokenId)
-      || rows.find((r) => r.name === name);
+    // Only the same token counts as a re-connect. Another token for the same
+    // login is added alongside it, under a name that does not clash.
+    const existing = account.tokenId && rows.find((r) => asJson(r.extra).account?.tokenId === account.tokenId);
+    const wanted = (req.body.name || '').trim() || cloudflareLabel(account);
+    const taken = new Set(rows.filter((r) => r.id !== existing?.id).map((r) => r.name));
+    let name = wanted;
+    for (let n = 2; taken.has(name); n++) name = `${wanted} (${n})`;
 
     let id;
     if (existing) {

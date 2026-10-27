@@ -16,7 +16,7 @@ import {
   currentSubscription, pendingRequest, usageOf, setSubscription, asJson, money, trialState, usedFreeTrial, FREE_TRIAL_DAYS,
 } from '../lib/plans.js';
 import {
-  razorpayEnabled, createPlanOrder, verifyCheckout, markFailed, PaymentError,
+  razorpayEnabled, createPlanOrder, verifyCheckout, markFailed, reconcileOrders, PaymentError,
 } from '../lib/razorpay.js';
 
 export const billingRouter = Router();
@@ -30,6 +30,8 @@ const subView = (s) => (s ? {
 
 billingRouter.get('/', async (req, res, next) => {
   try {
+    // A payment that went through but whose confirmation was lost is switched on here.
+    const recovered = await reconcileOrders(req.orgId).catch(() => []);
     const sub = await currentSubscription(req.orgId);
     const pending = await pendingRequest(req.orgId);
     const plans = await all("SELECT * FROM plans WHERE status = 'active' AND is_public = 1 ORDER BY sort_order, price_monthly");
@@ -48,6 +50,7 @@ billingRouter.get('/', async (req, res, next) => {
       canChoose: can(req.user, 'members'),
       // Paid plans are paid for online when Razorpay is set up; otherwise they are requests.
       payOnline: razorpayEnabled(),
+      recovered,
     });
   } catch (err) { next(err); }
 });
@@ -128,6 +131,20 @@ billingRouter.post('/checkout/verify', async (req, res, next) => {
       signature: req.body.razorpay_signature,
     });
     res.json({ ok: true, activated: true, message: `Payment received — ${result.plan} is active.` });
+  } catch (err) {
+    if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+});
+
+/**
+ * Checkout closed without a confirmed answer: ask Razorpay whether the money
+ * went through anyway, and switch the plan on if it did.
+ */
+billingRouter.post('/checkout/recheck', async (req, res, next) => {
+  try {
+    const recovered = await reconcileOrders(req.orgId, { force: true });
+    res.json({ ok: true, recovered, message: recovered.length ? `Payment received — ${recovered[0]} is active.` : null });
   } catch (err) {
     if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
     next(err);

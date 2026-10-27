@@ -8816,6 +8816,7 @@ function appCard(a) {
       <div class="muted small"><span class="spinner"></span>${a.currentStep ? `${esc(a.currentStep)}…` : 'Starting…'}
         <span data-since="${esc(a.deploy_started_at || '')}"></span></div>
       <div class="meter indeterminate"><span></span></div>
+      <div class="card-actions">${deployControls(a)}</div>
     </div>` : ''}
     <dl class="kv">
       <dt>Server</dt><dd>${a.server ? `<b>${esc(a.server.name)}</b> <span class="muted small">${esc(a.server.host)}</span>` : '—'}</dd>
@@ -9259,6 +9260,7 @@ function renderAppDetails(a) {
     ${busyNow ? '' : ifCan('create', btn('deploy', 'Redeploy', 'primary'))}
     ${busyNow ? '' : ifCan('create', `<button class="btn tiny" data-app-action="${a.status === 'running' ? 'stop' : 'start'}" data-id="${a.id}">${a.status === 'running' ? 'Stop' : 'Start'}</button>`)}
     ${busyNow ? '' : ifCan('create', `<button class="btn tiny" data-app-action="restart" data-id="${a.id}">Restart</button>`)}
+    ${busyNow && !a.currentDeploy ? deployControls(a) : ''}
     <button class="btn tiny" data-ad-refresh="1">Refresh</button>
     ${ifCan('delete', `<button class="btn tiny danger" data-app-action="delete" data-id="${a.id}" data-name="${n}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">Remove</button>`)}`;
 
@@ -9542,6 +9544,21 @@ async function appCardAction(btn, reload) {
         leaveAppDetails();
         return;
       }
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+    return reload();
+  }
+
+  if (action === 'deploy-stop' || action === 'deploy-restart') {
+    const restart = action === 'deploy-restart';
+    if (!await askConfirm(restart
+      ? `Restart the deploy of "${name}"?\n\nThe running deploy is stopped and a new one starts from the latest commit on the branch.`
+      : `Stop the deploy of "${name}"?\n\nThe build is cancelled on the server. If the new containers have not started yet, the current release keeps running.`)) return;
+    busy(btn, true, restart ? 'Restarting…' : 'Stopping…');
+    try {
+      const r = await api(`/apps/${id}/deploy/${restart ? 'restart' : 'stop'}`, { method: 'POST' });
+      toast(restart ? `Deploying ${name} again — the card shows its progress` : `Deploy of ${name} stopped — the app is ${r.status}`);
     } catch (err) {
       toast(err.message, 'err');
     }
@@ -11447,153 +11464,195 @@ function setLiveState(kind, text) {
   const el = $('#live-state');
   if (!el) return;
   const tone = { live: 'ok', connecting: '', reconnecting: 'warn', problem: 'err' }[kind] ?? '';
-  el.innerHTML = `<span class="badge ${tone}">${kind === 'live' ? 'live' : esc(kind)}</span>
+  el.innerHTML = `<span class="live-pill ${tone}"><i class="live-dot"></i>${kind === 'live' ? 'Live' : esc(kind)}</span>
     <span class="muted small">${esc(text)}</span>`;
 }
+
+/** The colour a percentage is drawn in: calm, then amber from 75%, red from 90%. */
+const toneColor = (p) => ({ err: 'var(--err)', warn: 'var(--warn)' }[meterClass(p)] || 'var(--accent)');
+
+/** One of the four headline numbers, with room for a sparkline under it. */
+const liveKpi = (key, label) => `
+  <div class="live-kpi">
+    <div class="live-kpi-head"><span>${label}</span><span class="live-kpi-tag" id="live-${key}-tag"></span></div>
+    <div class="live-kpi-value" id="live-${key}">—</div>
+    <div class="live-kpi-sub" id="live-${key}-sub">&nbsp;</div>
+    <div class="live-kpi-sub" id="live-${key}-sub2">&nbsp;</div>
+    <div class="live-spark" id="live-${key}-spark"></div>
+  </div>`;
 
 /** The frame, drawn once; every id in here is patched by drawLiveSample. */
 function liveFrame() {
   return `
-    <div class="section-head">
-      <h2>Live</h2>
+    <div class="live-head">
+      <div>
+        <h2 class="live-title">Live monitor</h2>
+        <div class="muted small" id="live-footer">&nbsp;</div>
+      </div>
       <div class="section-tools" id="live-state"></div>
     </div>
 
     <div id="live-alerts"></div>
 
-    <div class="tiles" style="margin-bottom:14px">
-      <div class="tile">
-        <div class="label">CPU</div>
-        <div class="value" id="live-cpu">—</div>
-        <div class="sub" id="live-cpu-sub">&nbsp;</div>
-        <div class="meter"><span id="live-cpu-meter" style="width:0"></span></div>
-        <div id="live-cpu-spark" class="spark-box"></div>
+    <div class="live-kpis">
+      ${liveKpi('cpu', 'CPU')}
+      ${liveKpi('mem', 'Memory')}
+      ${liveKpi('load', 'Load average')}
+      ${liveKpi('net', 'Network')}
+    </div>
+
+    <div class="live-split">
+      <div class="live-card">
+        <div class="live-card-head"><h3>Processor cores</h3><span class="muted small" id="live-cores-sum"></span></div>
+        <div id="live-cores" class="live-cores"></div>
       </div>
-      <div class="tile">
-        <div class="label">Memory</div>
-        <div class="value" id="live-mem">—</div>
-        <div class="sub" id="live-mem-sub">&nbsp;</div>
-        <div class="meter"><span id="live-mem-meter" style="width:0"></span></div>
-        <div id="live-mem-spark" class="spark-box"></div>
-      </div>
-      <div class="tile">
-        <div class="label">Load average</div>
-        <div class="value" id="live-load">—</div>
-        <div class="sub" id="live-load-sub">&nbsp;</div>
-        <div class="meter"><span id="live-load-meter" style="width:0"></span></div>
-      </div>
-      <div class="tile">
-        <div class="label">Throughput</div>
-        <div class="value" id="live-net">—</div>
-        <div class="sub" id="live-net-sub">&nbsp;</div>
-        <div class="sub" id="live-io">&nbsp;</div>
+      <div class="live-card">
+        <div class="live-card-head"><h3>Filesystems</h3><span class="muted small" id="live-io"></span></div>
+        <div id="live-disks" class="live-disks"></div>
       </div>
     </div>
 
-    <div class="section"><h2>Processor cores</h2><div id="live-cores" class="core-grid"></div></div>
-    <div class="section"><h2>Filesystems</h2><div id="live-disks"></div></div>
-    <div class="section">
-      <div class="section-head"><h2>Containers</h2><div class="section-tools" id="live-docker-counts"></div></div>
+    <div class="live-card flush">
+      <div class="live-card-head"><h3>Containers</h3><div class="section-tools" id="live-docker-counts"></div></div>
       <div id="live-docker"></div>
     </div>
-    <div class="two-col">
-      <div class="section"><h2>Top by CPU</h2><div id="live-top-cpu"></div></div>
-      <div class="section"><h2>Top by memory</h2><div id="live-top-mem"></div></div>
-    </div>
-    <p class="muted small" id="live-footer">&nbsp;</p>`;
+
+    <div class="live-split">
+      <div class="live-card flush"><div class="live-card-head"><h3>Top by CPU</h3></div><div id="live-top-cpu"></div></div>
+      <div class="live-card flush"><div class="live-card-head"><h3>Top by memory</h3></div><div id="live-top-mem"></div></div>
+    </div>`;
 }
 
 /**
- * One series over time, in a tile. The number above it carries the value, so
- * the line is only there to show the shape — no axis, no legend, no tooltip.
+ * One or two series over time, in a tile. The number above it carries the
+ * value, so the line only shows the shape — no axis, no legend, no tooltip.
+ * A second series (`values2`) is drawn as a thinner, dashed line.
  */
-function sparkline(values, { max = 100, color = 'var(--accent)', label = '' }) {
+function sparkline(values, { max = 100, color = 'var(--accent)', label = '', values2 = null }) {
   if (values.length < 2) return '';
   const w = 200;
-  const h = 34;
+  const h = 40;
   const step = w / (values.length - 1);
-  const y = (v) => h - 2 - (Math.max(0, Math.min(v, max)) / max) * (h - 4);
-  const line = values.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' L');
+  const y = (v) => h - 2 - (Math.max(0, Math.min(v, max)) / max) * (h - 6);
+  const points = (list) => list.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' L');
+  const line = points(values);
 
-  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img"
-      aria-label="${esc(label)}">
-    <path d="M${line} L${w},${h} L0,${h} Z" fill="${color}" opacity=".13" />
-    <path d="M${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(label)}">
+    <path d="M${line} L${w},${h} L0,${h} Z" fill="${color}" opacity=".12" />
+    ${values2 ? `<path d="M${points(values2)}" fill="none" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="3 3" vector-effect="non-scaling-stroke" />` : ''}
+    <path d="M${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" />
   </svg>`;
 }
 
 const rate = (n) => `${bytes(n)}/s`;
 
+/** A small bar with its percentage, toned by how full it is. */
+const liveBar = (p) => `<div class="meter"><span class="${meterClass(p)}" style="width:${Math.min(100, Math.max(0, p))}%"></span></div>`;
+
+/** Fill one headline tile. */
+function setKpi(key, { value, tone = '', tag = '', sub = '', sub2 = '', spark = '' }) {
+  const v = $(`#live-${key}`);
+  if (!v) return;
+  v.textContent = value;
+  v.className = `live-kpi-value ${tone}`;
+  $(`#live-${key}-tag`).innerHTML = tag;
+  $(`#live-${key}-sub`).innerHTML = sub || '&nbsp;';
+  $(`#live-${key}-sub2`).innerHTML = sub2 || '&nbsp;';
+  $(`#live-${key}-spark`).innerHTML = spark;
+}
+
+const liveTable = (headers, rows, emptyText) => (rows.length
+  ? `<div class="live-scroll"><table class="live-table">
+      <thead><tr>${headers.map((h) => `<th class="${h.num ? 'num' : ''}">${esc(h.label)}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r) => `<tr>${r.map((c, i) => `<td class="${headers[i].num ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table></div>`
+  : `<p class="muted small live-empty">${esc(emptyText)}</p>`);
+
 function drawLiveSample(s) {
   statsHistory.push(s);
   if (statsHistory.length > HISTORY) statsHistory.shift();
 
-  setLiveState('live', `every 5s · updated ${new Date(s.at).toLocaleTimeString()}`);
+  setLiveState('live', `every 5s · ${new Date(s.at).toLocaleTimeString()}`);
   setTabCount('live', s.worst === 'ok' ? `${Math.round(s.cpu.usedPct)}%` : '!',
     s.worst === 'critical' ? 'err' : s.worst === 'warning' ? 'warn' : '');
 
   /* --- the four tiles --- */
   const cpuHistory = statsHistory.map((h) => h.cpu.usedPct);
-  $('#live-cpu').textContent = `${s.cpu.usedPct}%`;
-  $('#live-cpu-sub').textContent = `${s.load.cores} core(s) · ${s.cpu.iowaitPct}% waiting on disk`
-    + `${s.cpu.stealPct ? ` · ${s.cpu.stealPct}% stolen` : ''}`;
-  $('#live-cpu-meter').style.width = `${Math.min(100, s.cpu.usedPct)}%`;
-  $('#live-cpu-meter').className = meterClass(s.cpu.usedPct);
-  $('#live-cpu-spark').innerHTML = sparkline(cpuHistory, {
-    label: `CPU over the last ${cpuHistory.length} samples, now ${s.cpu.usedPct}%`,
+  setKpi('cpu', {
+    value: `${s.cpu.usedPct}%`,
+    tone: meterClass(s.cpu.usedPct),
+    tag: `${s.load.cores} cores`,
+    sub: `${s.cpu.iowaitPct}% waiting on disk${s.cpu.stealPct ? ` · ${s.cpu.stealPct}% stolen` : ''}`,
+    sub2: `peak ${Math.max(...cpuHistory)}% · last ${uptimeWords(cpuHistory.length * 5)}`,
+    spark: sparkline(cpuHistory, { color: toneColor(s.cpu.usedPct), label: `CPU over the last ${cpuHistory.length} samples, now ${s.cpu.usedPct}%` }),
   });
 
   const memHistory = statsHistory.map((h) => h.memory.usedPct);
-  $('#live-mem').textContent = `${s.memory.usedPct}%`;
-  $('#live-mem-sub').textContent = `${bytes(s.memory.usedBytes)} of ${bytes(s.memory.totalBytes)}`
-    + `${s.memory.swapTotalBytes ? ` · swap ${s.memory.swapUsedPct}%` : ''}`;
-  $('#live-mem-meter').style.width = `${Math.min(100, s.memory.usedPct)}%`;
-  $('#live-mem-meter').className = meterClass(s.memory.usedPct);
-  $('#live-mem-spark').innerHTML = sparkline(memHistory, {
-    color: 'var(--accent-2)',
-    label: `Memory over the last ${memHistory.length} samples, now ${s.memory.usedPct}%`,
+  setKpi('mem', {
+    value: `${s.memory.usedPct}%`,
+    tone: meterClass(s.memory.usedPct),
+    tag: bytes(s.memory.totalBytes),
+    sub: `${bytes(s.memory.usedBytes)} used · ${bytes(Math.max(0, s.memory.totalBytes - s.memory.usedBytes))} free`,
+    sub2: s.memory.swapTotalBytes ? `swap ${s.memory.swapUsedPct}% of ${bytes(s.memory.swapTotalBytes)}` : 'no swap',
+    spark: sparkline(memHistory, { color: toneColor(s.memory.usedPct), label: `Memory over the last ${memHistory.length} samples, now ${s.memory.usedPct}%` }),
   });
 
-  $('#live-load').textContent = s.load.one.toFixed(2);
-  $('#live-load-sub').textContent = `${s.load.five} / ${s.load.fifteen} over 5 and 15 min · ${s.load.perCore} per core`
-    + `${s.load.processes ? ` · ${s.load.processes} processes` : ''}`;
-  $('#live-load-meter').style.width = `${Math.min(100, (s.load.perCore / 4) * 100)}%`;
-  $('#live-load-meter').className = meterClass((s.load.perCore / 4) * 100);
+  // A load of 1 per core is a busy machine; 4 per core is the meter's end.
+  const loadPct = (s.load.perCore / 4) * 100;
+  const loadHistory = statsHistory.map((h) => h.load.one);
+  setKpi('load', {
+    value: s.load.one.toFixed(2),
+    tone: meterClass(loadPct),
+    tag: `${s.load.perCore} / core`,
+    sub: `${s.load.five} · ${s.load.fifteen} <span class="muted">over 5 / 15 min</span>`,
+    sub2: s.load.processes ? `${s.load.processes} processes` : '',
+    spark: sparkline(loadHistory, {
+      max: Math.max(s.load.cores, ...loadHistory) || 1, color: toneColor(loadPct),
+      label: `Load average over the last ${loadHistory.length} samples, now ${s.load.one}`,
+    }),
+  });
 
-  $('#live-net').textContent = `↓ ${rate(s.network.rxBytesPerSec)}`;
-  $('#live-net-sub').textContent = `↑ ${rate(s.network.txBytesPerSec)} out`;
-  $('#live-io').textContent = `disk ${rate(s.diskIo.readBytesPerSec)} read · ${rate(s.diskIo.writeBytesPerSec)} write`;
+  const rx = statsHistory.map((h) => h.network.rxBytesPerSec);
+  const tx = statsHistory.map((h) => h.network.txBytesPerSec);
+  setKpi('net', {
+    value: `↓ ${rate(s.network.rxBytesPerSec)}`,
+    tag: 'in / out',
+    sub: `↑ ${rate(s.network.txBytesPerSec)} <span class="muted">out</span>`,
+    sub2: `disk ${rate(s.diskIo.readBytesPerSec)} read · ${rate(s.diskIo.writeBytesPerSec)} write`,
+    spark: sparkline(rx, { max: Math.max(...rx, ...tx) || 1, values2: tx, label: `Network in (solid) and out (dashed) over the last ${rx.length} samples` }),
+  });
 
   /* --- per core --- */
+  const busiest = s.cpu.cores.reduce((a, c) => (c.usedPct > (a?.usedPct ?? -1) ? c : a), null);
+  $('#live-cores-sum').textContent = busiest ? `busiest: core ${busiest.core} at ${busiest.usedPct}%` : '';
   $('#live-cores').innerHTML = s.cpu.cores.map((c) => `
-    <div class="core">
-      <div class="muted small">core ${c.core} <b style="color:var(--text)">${c.usedPct}%</b></div>
-      <div class="meter"><span class="${meterClass(c.usedPct)}" style="width:${Math.min(100, c.usedPct)}%"></span></div>
+    <div class="live-core" title="core ${c.core}: ${c.usedPct}%">
+      <span class="live-core-name">${c.core}</span>
+      ${liveBar(c.usedPct)}
+      <b class="${meterClass(c.usedPct)}">${Math.round(c.usedPct)}%</b>
     </div>`).join('');
 
   /* --- filesystems --- */
-  $('#live-disks').innerHTML = table(
-    [{ label: 'Mounted on' }, { label: 'Device' }, { label: 'Used', num: true }, { label: 'Free', num: true }, { label: '' }],
-    s.disks.map((d) => [
-      `<b>${esc(d.mount)}</b>`,
-      `<code class="small">${esc(d.device)}</code>`,
-      `${bytes(d.usedBytes)} of ${bytes(d.sizeBytes)}`,
-      bytes(d.availableBytes),
-      `<div style="min-width:120px"><div class="meter"><span class="${meterClass(d.usedPct)}" style="width:${d.usedPct}%"></span></div>
-       <div class="muted small">${d.usedPct}%</div></div>`,
-    ]),
-    'No filesystems reported'
-  );
+  $('#live-io').textContent = `↓ ${rate(s.diskIo.readBytesPerSec)} · ↑ ${rate(s.diskIo.writeBytesPerSec)}`;
+  $('#live-disks').innerHTML = s.disks.length ? s.disks.map((d) => `
+    <div class="live-disk">
+      <div class="live-disk-top">
+        <span class="live-disk-name"><b>${esc(d.mount)}</b> <code>${esc(d.device)}</code></span>
+        <b class="${meterClass(d.usedPct)}">${d.usedPct}%</b>
+      </div>
+      ${liveBar(d.usedPct)}
+      <div class="muted small">${bytes(d.usedBytes)} of ${bytes(d.sizeBytes)} · <b class="live-free">${bytes(d.availableBytes)} free</b></div>
+    </div>`).join('') : '<p class="muted small" style="margin:0">No filesystems reported.</p>';
 
   /* --- containers --- */
   drawLiveDocker(s.docker);
 
   /* --- processes --- */
-  const procRows = (list) => table(
+  const procRows = (list) => liveTable(
     [{ label: 'Process' }, { label: 'User' }, { label: 'CPU', num: true }, { label: 'Memory', num: true }],
     list.map((p) => [
-      `<code class="small">${esc(p.command)}</code> <span class="muted small">#${p.pid}</span>`,
-      esc(p.user || ''),
+      `<span class="live-proc">${esc(p.command)}</span> <span class="muted small">#${p.pid}</span>`,
+      `<span class="muted">${esc(p.user || '')}</span>`,
       `${p.cpuPct}%`,
       `${p.memoryPct}%`,
     ]),
@@ -11602,7 +11661,7 @@ function drawLiveSample(s) {
   $('#live-top-cpu').innerHTML = procRows(s.topCpu);
   $('#live-top-mem').innerHTML = procRows(s.topMemory);
 
-  $('#live-footer').textContent = `Up ${uptimeWords(s.uptimeSeconds)} · ${s.sessions} logged in`;
+  $('#live-footer').textContent = `Up ${uptimeWords(s.uptimeSeconds)} · ${s.sessions} logged in · ${s.load.cores} cores · ${bytes(s.memory.totalBytes)} memory`;
 
   drawLiveAlerts(s);
 }
@@ -11623,12 +11682,12 @@ function drawLiveDocker(d) {
 
   if (!d.installed) {
     counts.innerHTML = '';
-    box.innerHTML = '<div class="card"><p class="muted small" style="margin:0">Docker is not installed on this server.</p></div>';
+    box.innerHTML = '<p class="muted small live-empty">Docker is not installed on this server.</p>';
     return;
   }
   if (!d.running) {
     counts.innerHTML = '<span class="badge err">daemon stopped</span>';
-    box.innerHTML = '<div class="card"><p class="muted small" style="margin:0">The Docker daemon is not running, so every container is down with it.</p></div>';
+    box.innerHTML = '<p class="muted small live-empty">The Docker daemon is not running, so every container is down with it.</p>';
     return;
   }
 
@@ -11643,22 +11702,25 @@ function drawLiveDocker(d) {
   // A container being acted on keeps its row still until the action comes back.
   if (statsBusyContainer) return;
 
-  box.innerHTML = table(
+  box.innerHTML = liveTable(
     [{ label: 'Container' }, { label: 'State' }, { label: 'CPU', num: true }, { label: 'Memory', num: true }, { label: 'Network', num: true }, { label: '' }],
     d.containers.map((c) => [
-      `<b>${esc(c.name)}</b><div class="muted small"><code>${esc(c.image)}</code></div>
-       ${c.ports ? `<div class="muted small">${esc(c.ports)}</div>` : ''}`,
+      `<div class="live-ct">
+         <i class="live-ct-dot ${CONTAINER_TONE[c.state] ?? ''}"></i>
+         <div><b>${esc(c.name)}</b>
+           <div class="muted small live-ct-image">${esc(c.image)}${c.ports ? ` · ${esc(c.ports)}` : ''}</div></div>
+       </div>`,
       `<span class="badge ${CONTAINER_TONE[c.state] ?? ''}">${esc(c.state)}</span>
-       ${c.health === 'unhealthy' ? '<div><span class="badge err">unhealthy</span></div>' : ''}
+       ${c.health === 'unhealthy' ? '<span class="badge err">unhealthy</span>' : ''}
        <div class="muted small">${esc(c.status)}</div>`,
-      c.cpuPct === undefined ? '—' : `${c.cpuPct}%`,
+      c.cpuPct === undefined ? '<span class="muted">—</span>' : `${c.cpuPct}%`,
       c.memoryBytes === undefined || c.memoryBytes === null
-        ? '—'
+        ? '<span class="muted">—</span>'
         : `${bytes(c.memoryBytes)}<div class="muted small">${c.memoryPct}%</div>`,
       c.netRxBytes === undefined || c.netRxBytes === null
-        ? '—'
+        ? '<span class="muted">—</span>'
         : `↓ ${bytes(c.netRxBytes)}<div class="muted small">↑ ${bytes(c.netTxBytes)}</div>`,
-      `<div class="row-actions">
+      `<div class="live-ct-actions">
         <button class="btn tiny" data-container="logs" data-name="${esc(c.name)}">Logs</button>
         ${ifCan('create', `<button class="btn tiny" data-container="${c.state === 'running' ? 'stop' : 'start'}" data-name="${esc(c.name)}">${c.state === 'running' ? 'Stop' : 'Start'}</button>`)}
         ${ifCan('create', `<button class="btn tiny" data-container="restart" data-name="${esc(c.name)}">Restart</button>`)}
@@ -11687,15 +11749,20 @@ function drawLiveAlerts(s) {
   }
 
   if (!s.alerts.length) {
-    box.innerHTML = '<div class="msg ok" style="margin:0 0 14px">Nothing is in trouble — CPU, memory, disks and containers are all within their thresholds.</div>';
+    box.innerHTML = '<div class="live-healthy"><i class="live-dot"></i>All healthy — CPU, memory, disks and containers are within their thresholds.</div>';
     return;
   }
 
-  box.innerHTML = `<div class="alert-stack">${s.alerts.map((a) => `
-    <div class="msg ${a.level === 'critical' ? 'err' : 'warn'}" style="margin:0">
-      <b>${a.level === 'critical' ? '⛔' : '⚠️'} ${esc(a.title)}</b>
-      ${a.detail ? `<div class="small" style="margin-top:2px">${esc(a.detail)}</div>` : ''}
-    </div>`).join('')}</div>`;
+  const critical = s.alerts.filter((a) => a.level === 'critical').length;
+  box.innerHTML = `<div class="live-alerts ${critical ? 'err' : 'warn'}">
+    <div class="live-alerts-head">${critical ? '⛔' : '⚠️'} <b>${s.alerts.length} ${s.alerts.length === 1 ? 'thing needs' : 'things need'} attention</b></div>
+    ${s.alerts.map((a) => `
+      <div class="live-alert ${a.level === 'critical' ? 'err' : 'warn'}">
+        <span class="badge ${a.level === 'critical' ? 'err' : 'warn'}">${a.level === 'critical' ? 'critical' : 'warning'}</span>
+        <b>${esc(a.title)}</b>
+        ${a.detail ? `<span class="muted small">${esc(a.detail)}</span>` : ''}
+      </div>`).join('')}
+  </div>`;
 }
 
 /** Start / stop / restart / logs for any container on the machine. */
@@ -16117,6 +16184,8 @@ let billingCycle = 'monthly';
 async function refreshBilling() {
   try {
     session.billing = await api('/billing');
+    // A payment whose confirmation was lost earlier, found and switched on just now.
+    if (session.billing?.recovered?.length) toast(`Payment received — ${session.billing.recovered[0]} is active.`);
   } catch {
     session.billing = null;
   }
@@ -16428,14 +16497,27 @@ async function payForPlan(plan, cycle, btn) {
       loadRazorpay(),
     ]);
     const paid = await openCheckout(checkout);
-    if (!paid) {
-      toast('Payment cancelled — your plan has not changed');
-      return busy(btn, false);
+    let message;
+    if (paid) {
+      busy(btn, true, 'Confirming payment…');
+      try {
+        message = (await api('/billing/checkout/verify', { method: 'POST', body: paid })).message;
+      } catch (err) {
+        // Razorpay may still have the money; the re-check below finds it if so.
+        message = await recheckPayment();
+        if (!message) throw err;
+      }
+    } else {
+      // Closed without an answer — a bank or UPI popup can finish after Checkout gives up.
+      busy(btn, true, 'Checking payment…');
+      message = await recheckPayment();
+      if (!message) {
+        toast('Payment not completed — your plan has not changed. If money was taken, it is switched on within a minute of Razorpay confirming it.');
+        return busy(btn, false);
+      }
     }
 
-    busy(btn, true, 'Confirming payment…');
-    const r = await api('/billing/checkout/verify', { method: 'POST', body: paid });
-    toast(r.message);
+    toast(message);
     const wasGated = document.body.classList.contains('needs-plan');
     await refreshBilling();
     // A plan that is on right away opens the rest of the app.
@@ -16446,6 +16528,15 @@ async function payForPlan(plan, cycle, btn) {
     busy(btn, false);
   }
   return undefined;
+}
+
+/** Ask the server whether Razorpay took a payment the browser never heard about. */
+async function recheckPayment() {
+  try {
+    return (await api('/billing/checkout/recheck', { method: 'POST' })).message || null;
+  } catch {
+    return null;
+  }
 }
 
 /* ================================================================ docs */
@@ -17305,7 +17396,7 @@ $('#btn-app-auto-branch').addEventListener('click', () => appStep('pick'));
  */
 
 const TRIGGER_WORD = { auto: '⚡ Auto deploy', manual: 'Redeploy', first: 'First deploy' };
-const DEPLOY_STATE = { running: ['in progress', 'warn'], success: ['deployed', 'ok'], failed: ['failed', 'err'], interrupted: ['interrupted', ''] };
+const DEPLOY_STATE = { running: ['in progress', 'warn'], success: ['deployed', 'ok'], failed: ['failed', 'err'], interrupted: ['interrupted', ''], cancelled: ['stopped', ''] };
 
 /** "Merge #42 from dev" / "Commit" — what kind of change was deployed. */
 function changeKindHtml(d) {
@@ -17349,6 +17440,13 @@ function deployProgressHtml(a) {
   </div>`;
 }
 
+/** Stop the running deploy, or stop it and start again from the latest commit. */
+function deployControls(a) {
+  const n = esc(a.name);
+  return ifCan('create', `<button class="btn tiny" data-app-action="deploy-restart" data-id="${a.id}" data-name="${n}" title="Stop this deploy and start a new one from the latest commit">↻ Restart</button>
+      <button class="btn tiny danger" data-app-action="deploy-stop" data-id="${a.id}" data-name="${n}" title="Stop this deploy — the running release stays up if it has not been replaced yet">■ Stop</button>`);
+}
+
 /** The banner on a card or page while a deploy runs: why, which change, and the live log. */
 function deployBanner(a, { compact = false } = {}) {
   const d = a.currentDeploy;
@@ -17367,6 +17465,7 @@ function deployBanner(a, { compact = false } = {}) {
     <div class="deploy-banner-actions">
       <button class="btn tiny primary" data-app-action="progress" data-id="${a.id}" data-name="${esc(a.name)}"><span class="spinner"></span>View live logs</button>
       ${compact ? '' : `<button class="btn tiny" data-app-action="history" data-id="${a.id}" data-name="${esc(a.name)}">All deploys</button>`}
+      ${deployControls(a)}
     </div>
     ${deployProgressHtml(a)}
   </div>`;

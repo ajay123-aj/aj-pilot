@@ -206,7 +206,7 @@ async function createSchema() {
       verified_at DATETIME NULL,
       created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uq_provider_name (provider, name),
+      -- Names are unique per organisation: uq_cred_org_provider_name is added once org_id exists.
       CONSTRAINT fk_cred_server FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 

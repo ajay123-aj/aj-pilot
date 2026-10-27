@@ -14,13 +14,15 @@ import { config } from '../config.js';
 const CSP = [
   "default-src 'self'",
   // Razorpay Checkout: its script, the payment window it frames, and its telemetry.
-  "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com",
-  "frame-src https://api.razorpay.com https://checkout.razorpay.com",
+  // Checkout spreads these over several razorpay.com hosts (checkout-static-next,
+  // lumberjack, api, …) and adds new ones, so the whole domain is allowed.
+  "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://*.razorpay.com",
+  "frame-src https://api.razorpay.com https://checkout.razorpay.com https://*.razorpay.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' blob:",
-  "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com",
+  "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com https://*.razorpay.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -32,8 +34,12 @@ export function securityHeaders(req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  // Razorpay's frame uses the Payment Request API (Google Pay, UPI intent).
+  res.setHeader('Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=(self "https://api.razorpay.com" "https://checkout.razorpay.com")');
+  // Netbanking, card OTP (3-D Secure) and UPI open a Razorpay popup that reports back through
+  // window.opener; plain "same-origin" cuts that link and Checkout never hears the payment finish.
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
   res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
   // Only meaningful over HTTPS, and only promised once the cookie is HTTPS-only too.
   if (config.auth.secureCookie) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

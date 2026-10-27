@@ -17,7 +17,7 @@
 
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { one, run, logActivity } from '../db/index.js';
+import { all, one, run, logActivity } from '../db/index.js';
 import { setSubscription, pendingRequest, activateRequest, money } from './plans.js';
 
 export class PaymentError extends Error {
@@ -200,6 +200,40 @@ export async function handleWebhook(rawBody, signature) {
     return { mismatch: true };
   }
   return fulfilOrder(order, payment);
+}
+
+/**
+ * Payments Razorpay took that never reached the panel — Checkout's answer was
+ * lost (tab closed, popup cut off) and the webhook cannot reach a panel on a
+ * private network. Razorpay is asked about the organisation's recent unpaid
+ * orders and any that were paid are switched on, through the same checks.
+ * At most once a minute per organisation.
+ */
+const lastReconcile = new Map();
+
+export async function reconcileOrders(orgId, { force = false } = {}) {
+  if (!razorpayEnabled() || !orgId) return [];
+  if (!force && Date.now() - (lastReconcile.get(orgId) || 0) < 60_000) return [];
+  lastReconcile.set(orgId, Date.now());
+
+  const open = await all(
+    `SELECT * FROM payment_orders WHERE org_id = ? AND status <> 'paid'
+       AND created_at > DATE_SUB(NOW(), INTERVAL 7 DAY) ORDER BY id DESC LIMIT 5`,
+    [orgId],
+  );
+  const recovered = [];
+  for (const order of open) {
+    try {
+      const { items = [] } = await razorpay(`/orders/${encodeURIComponent(order.provider_order_id)}/payments`);
+      const paid = items.find((p) => p.status === 'captured') || items.find((p) => p.status === 'authorized');
+      if (!paid) continue;
+      const r = await fulfilOrder(order, await confirmedPayment(order, paid.id));
+      if (!r.alreadyDone) recovered.push(r.plan);
+    } catch (err) {
+      console.error(`[razorpay] could not check order ${order.provider_order_id}:`, err.message);
+    }
+  }
+  return recovered;
 }
 
 /** The browser reports Checkout's own failure, so the order says why. */
