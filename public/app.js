@@ -9534,8 +9534,21 @@ async function appCardAction(btn, reload) {
     const dropVolumes = volumeChoice === 'drop';
 
     busy(btn, true, 'Removing…');
+    const removeUrl = (force) => `/apps/${id}?${new URLSearchParams({ ...(dropVolumes ? { delete_volumes: '1' } : {}), ...(force ? { force: '1' } : {}) })}`;
     try {
-      const r = await api(`/apps/${id}${dropVolumes ? '?delete_volumes=1' : ''}`, { method: 'DELETE' });
+      let r;
+      try {
+        r = await api(removeUrl(false), { method: 'DELETE' });
+      } catch (err) {
+        // The server could not be cleaned up: say why, and let them take it off the panel anyway.
+        if (!err.body?.canForce) throw err;
+        const forceIt = await askChoice(`${err.message}\n\nThe app is still in the panel. Fix the server connection and try again, `
+          + 'or remove it from the panel only and clean the server up by hand.',
+        [{ label: 'Remove from panel only', value: true, kind: 'danger' }, { label: 'Keep it', value: false, kind: 'primary', main: true }],
+        { title: `Could not remove ${name}`, tone: 'danger' });
+        if (!forceIt) return busy(btn, false);
+        r = await api(removeUrl(true), { method: 'DELETE' });
+      }
       toast(r.warnings?.length ? `Removed, with warnings: ${r.warnings.join(' · ')}`
         : `${name} removed${r.domainRemoved?.length ? ` — ${r.domainRemoved.join(', ')}` : ''}`);
       // Removed from its own Details page: that page has nothing left to show.

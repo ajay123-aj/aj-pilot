@@ -347,11 +347,15 @@ ${names.map((n) => `docker rm -f ${q(n)} >/dev/null 2>&1 || true`).join('\n')}
 docker ps -aq --filter ${q(`label=auto-deploy.app=${spec.name}`)} | xargs -r docker rm -f >/dev/null 2>&1 || true
 ${keepImage ? '' : `docker image rm ${q(`${spec.image}:${spec.tag}`)} >/dev/null 2>&1 || true`}
 ${volumes.map((v) => `docker volume rm ${q(v.name)} >/dev/null 2>&1 || echo "note: the volume ${v.name} could not be removed" >&2`).join('\n')}
-rm -rf ${q(`${APP_ROOT}/${spec.name}`)}
+rm -rf ${q(`${APP_ROOT}/${spec.name}`)} ${q(`${APP_ROOT}/${spec.name}.new`)} ${q(pidFile(spec.name))}
+# Every "|| true" above hides a failure; what is still there is the real answer.
+LEFT="$( { ${names.map((n) => `docker ps -aq --filter name=^/${n}$`).join('; ')}; docker ps -aq --filter ${q(`label=auto-deploy.app=${spec.name}`)}; } 2>/dev/null | sort -u | wc -l)"
+if [ "$LEFT" -gt 0 ]; then echo "$LEFT container(s) of ${spec.name} could not be removed" >&2; exit 9; fi
 echo "removed ${spec.name} (${names.length} container(s)${volumes.length ? `, ${volumes.length} volume(s)` : ''})"`;
 
   const result = await rootExec(conn, server, script, { timeout: 120000 });
-  return { ok: result.code === 0, log: `${result.stdout}\n${result.stderr}`.trim() };
+  const log = `${result.stdout}\n${result.stderr}`.trim();
+  return { ok: result.code === 0, log, error: result.code === 0 ? null : (lines(result.stderr).slice(-2).join(' · ') || `exit ${result.code}`).slice(0, 300) };
 }
 
 /** Where a running deploy's script writes its PID, so it can be stopped. */

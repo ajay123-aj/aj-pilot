@@ -1254,11 +1254,44 @@ appsRouter.delete('/:id', async (req, res, next) => {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'App not found' });
     const server = await getServer(row.server_id, req.orgId);
+    // Remove it from the panel even though the server could not be cleaned up.
+    const force = req.query.force === '1';
+    const warnings = [];
+
+    // A deploy still running would start the containers again after they are removed.
+    if (row.status === 'deploying' && server) {
+      try {
+        await stopRunningDeploy(row, server, req.user?.name || 'someone');
+      } catch (err) {
+        if (!force) return res.status(409).json({ error: `${row.name} is being deployed and the deploy could not be stopped: ${err.message}`, canForce: true });
+        warnings.push(`The running deploy could not be stopped: ${err.message}`);
+      }
+    }
+
+    // The server first: if its containers cannot be removed, the app stays in the panel
+    // (domains, webhook and all) so it can be removed properly once the server answers.
+    if (server) {
+      let cleanup;
+      try {
+        cleanup = await withConnection(connectionFromRow(server), (conn) => removeApp(conn, server, {
+          ...containerSpecOf(row), image: row.image, tag: row.tag,
+        }, {
+          keepImage: req.query.keep_image === '1',
+          // Volumes outlive the service unless the person said otherwise.
+          keepVolumes: req.query.delete_volumes !== '1',
+        }));
+      } catch (err) {
+        cleanup = { ok: false, error: err.message };
+      }
+      if (!cleanup.ok) {
+        const why = `Could not remove ${row.name} from ${server.name}: ${cleanup.error}`;
+        if (!force) return res.status(409).json({ error: why, canForce: true });
+        warnings.push(`${why} — its containers may still be running there.`);
+      }
+    }
 
     // Its webhook on the repository goes too, so the provider stops calling a hook that no longer exists.
     await removeWebhook(row);
-
-    const warnings = [];
 
     // Its domains go with it: each one's tunnel hostname (and a tunnel made for
     // it), or its DNS record, nginx site and certificate.
@@ -1268,20 +1301,6 @@ appsRouter.delete('/:id', async (req, res, next) => {
       const d = await removeAppDomain(domainView(row, dom), server);
       domainDone.push(...d.done);
       warnings.push(...d.warnings);
-    }
-
-    if (server) {
-      try {
-        await withConnection(connectionFromRow(server), (conn) => removeApp(conn, server, {
-          ...containerSpecOf(row), image: row.image, tag: row.tag,
-        }, {
-          keepImage: req.query.keep_image === '1',
-          // Volumes outlive the service unless the person said otherwise.
-          keepVolumes: req.query.delete_volumes !== '1',
-        }));
-      } catch (err) {
-        warnings.push(`Could not clean up ${server.name}: ${err.message}`);
-      }
     }
 
     await run('DELETE FROM apps WHERE id = ?', [row.id]);
