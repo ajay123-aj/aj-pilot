@@ -1,10 +1,10 @@
 # Business Requirements Document (BRD)
 
-| | |
-|---|---|
-| **Product** | AJ Pilot — "Autopilot for your servers" |
-| **Document owner** | Product / platform owner |
-| **Status** | Living document. It describes the product as built, and marks proposals as proposals |
+|                    |                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| **Product**        | AJ Pilot — "Autopilot for your servers"                                              |
+| **Document owner** | Product / platform owner                                                             |
+| **Status**         | Living document. It describes the product as built, and marks proposals as proposals |
 
 ---
 
@@ -18,35 +18,35 @@ The platform owner runs AJ Pilot as a **multi-tenant SaaS**. Organisations sign 
 
 ## 2. Problem statement
 
-| Pain | Who feels it | Today's workaround |
-|------|--------------|--------------------|
-| Deploying means SSH, `git pull`, rebuild and restart, every time | Developers, freelancers | Shell scripts, manual steps, mistakes |
-| Domains, nginx and SSL are fiddly and easy to break | Everyone | Copying config snippets, expired certificates |
-| Secrets live in `.env` files passed around by chat | Teams, agencies | Shared documents, Slack messages |
-| No view of what is running where across many servers | Agencies, IT teams | Spreadsheets, memory |
-| Giving a client or junior developer safe access is hard | Agencies, DevOps | Sharing root passwords |
-| A PaaS is easy but expensive and locks you in | Startups | Paying the premium, or going back to scripts |
+| Pain                                                             | Who feels it            | Today's workaround                            |
+| ---------------------------------------------------------------- | ----------------------- | --------------------------------------------- |
+| Deploying means SSH, `git pull`, rebuild and restart, every time | Developers, freelancers | Shell scripts, manual steps, mistakes         |
+| Domains, nginx and SSL are fiddly and easy to break              | Everyone                | Copying config snippets, expired certificates |
+| Secrets live in `.env` files passed around by chat               | Teams, agencies         | Shared documents, Slack messages              |
+| No view of what is running where across many servers             | Agencies, IT teams      | Spreadsheets, memory                          |
+| Giving a client or junior developer safe access is hard          | Agencies, DevOps        | Sharing root passwords                        |
+| A PaaS is easy but expensive and locks you in                    | Startups                | Paying the premium, or going back to scripts  |
 
 ## 3. Vision and objectives
 
 **Vision:** anyone who can rent a VPS can run production apps on it with the convenience of a hosting platform.
 
-| Objective | How the product meets it |
-|-----------|--------------------------|
+| Objective                                       | How the product meets it                                                      |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
 | O1 — Bare server to live app without a terminal | Add server → install Docker → deploy repo → attach domain (five guided steps) |
-| O2 — Hands-off releases | Auto deploy on push or on merged pull/merge requests, by webhook or polling |
-| O3 — Safe for teams and clients | Organisations, four roles, activity log, encrypted secrets |
-| O4 — Works where servers actually are | Direct SSH, or through a *connector* on a PC that has the VPN |
-| O5 — A sustainable business | Free trial, paid plans with usage limits, online payment, lead pipeline |
+| O2 — Hands-off releases                         | Auto deploy on push or on merged pull/merge requests, by webhook or polling   |
+| O3 — Safe for teams and clients                 | Organisations, four roles, activity log, encrypted secrets                    |
+| O4 — Works where servers actually are           | Direct SSH, or through a _connector_ on a PC that has the VPN                 |
+| O5 — A sustainable business                     | Free trial, paid plans with usage limits, online payment, lead pipeline       |
 
 ## 4. Target market and personas
 
-| Persona | Situation | What they value most |
-|---------|-----------|----------------------|
-| **Agency** | Hosts many clients' apps on its own servers | One organisation per client, client logins with roles, domains and SSL per client |
-| **Startup** | Wants "push to main and it is live" without PaaS prices | Auto deploy on merge, staging and production environments, low cost |
-| **Freelancer** | Builds and hands over client projects | Fast deploys, domain and SSL done, invite the client as a viewer |
-| **IT / DevOps team** | Standardises servers and lets developers serve themselves | Permissions, audit trail, Linux user and SSH key management |
+| Persona              | Situation                                                 | What they value most                                                              |
+| -------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **Agency**           | Hosts many clients' apps on its own servers               | One organisation per client, client logins with roles, domains and SSL per client |
+| **Startup**          | Wants "push to main and it is live" without PaaS prices   | Auto deploy on merge, staging and production environments, low cost               |
+| **Freelancer**       | Builds and hands over client projects                     | Fast deploys, domain and SSL done, invite the client as a viewer                  |
+| **IT / DevOps team** | Standardises servers and lets developers serve themselves | Permissions, audit trail, Linux user and SSH key management                       |
 
 **Supported infrastructure:** any Ubuntu server reachable over SSH, from any provider (DigitalOcean, AWS, Hetzner, Linode, Hostinger and others) or on-premises.
 
@@ -82,13 +82,13 @@ The platform owner runs AJ Pilot as a **multi-tenant SaaS**. Organisations sign 
 - Plans are **created and priced by the super admin** in the platform console. Prices, limits, features, the "most popular" flag, visibility and order are data, not code.
 - Plans are differentiated by **usage limits**:
 
-  | Limit key | Counts |
-  |-----------|--------|
-  | `servers` | servers in the organisation |
-  | `apps` | deployed apps |
-  | `users` | team members |
+  | Limit key   | Counts                                                                  |
+  | ----------- | ----------------------------------------------------------------------- |
+  | `servers`   | servers in the organisation                                             |
+  | `apps`      | deployed apps                                                           |
+  | `users`     | team members                                                            |
   | `databases` | database connections (MySQL, PostgreSQL, MongoDB, Redis, Elasticsearch) |
-  | `domains` | app domains |
+  | `domains`   | app domains                                                             |
 
   A missing limit means unlimited. A request that would go over a limit is refused with a clear message (HTTP 403 with `limitReached`).
 
@@ -101,7 +101,7 @@ The platform owner runs AJ Pilot as a **multi-tenant SaaS**. Organisations sign 
 ### 6.3 Payment
 
 - **Online (Razorpay configured):** choosing a paid plan opens Razorpay Checkout immediately (card, UPI, netbanking, wallet). The plan **activates automatically once the server has verified the payment**, and a success confirmation is shown.
-- **Offline (no Razorpay keys):** a paid plan becomes a *request*. The super admin records the payment by hand and switches the plan on.
+- **Offline (no Razorpay keys):** a paid plan becomes a _request_. The super admin records the payment by hand and switches the plan on.
 - A paid plan chosen at sign-up opens Razorpay on the user's first sign-in.
 - Every organisation sees its **payment history**: online payments, payments recorded by hand, and failed or abandoned attempts.
 
@@ -112,43 +112,43 @@ The platform owner runs AJ Pilot as a **multi-tenant SaaS**. Organisations sign 
 
 ## 7. Business rules
 
-| ID | Rule |
-|----|------|
-| BR-01 | Everything an organisation owns (servers, credentials, apps, environments, connectors, payments) is visible only to that organisation, and to the super admin. |
-| BR-02 | A client organisation must have an active (or trial / past-due) subscription before anything it owns can be used. Billing stays reachable without one. |
-| BR-03 | The free plan can be used once per organisation and lasts `FREE_TRIAL_DAYS`. |
-| BR-04 | An ended plan locks the panel; no data is deleted. |
+| ID    | Rule                                                                                                                                                                                        |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BR-01 | Everything an organisation owns (servers, credentials, apps, environments, connectors, payments) is visible only to that organisation, and to the super admin.                              |
+| BR-02 | A client organisation must have an active (or trial / past-due) subscription before anything it owns can be used. Billing stays reachable without one.                                      |
+| BR-03 | The free plan can be used once per organisation and lasts `FREE_TRIAL_DAYS`.                                                                                                                |
+| BR-04 | An ended plan locks the panel; no data is deleted.                                                                                                                                          |
 | BR-05 | A paid plan activates only after the payment has been verified **with Razorpay on the server** (signature, captured status, exact amount and currency). The browser's word is never enough. |
-| BR-06 | A payment is applied **exactly once**, even if checkout, webhook and reconciliation all report it. |
-| BR-07 | A payment whose confirmation was lost (tab closed, popup blocked) is recovered automatically, by webhook or by reconciliation within a minute of the next billing page visit. |
-| BR-08 | Only an organisation admin (permission `members`) can choose or pay for a plan. |
-| BR-09 | Creating a resource over a plan limit is refused; existing resources keep working. |
-| BR-10 | Only the super admin manages plans, organisations, other admins, recorded payments and leads. |
-| BR-11 | Self sign-up requires a verified mobile OTP, a verified email link, and acceptance of the current Terms version. |
-| BR-12 | `ALLOW_SIGNUP=false` turns the product into a private panel where accounts are created only by admins. |
+| BR-06 | A payment is applied **exactly once**, even if checkout, webhook and reconciliation all report it.                                                                                          |
+| BR-07 | A payment whose confirmation was lost (tab closed, popup blocked) is recovered automatically, by webhook or by reconciliation within a minute of the next billing page visit.               |
+| BR-08 | Only an organisation admin (permission `members`) can choose or pay for a plan.                                                                                                             |
+| BR-09 | Creating a resource over a plan limit is refused; existing resources keep working.                                                                                                          |
+| BR-10 | Only the super admin manages plans, organisations, other admins, recorded payments and leads.                                                                                               |
+| BR-11 | Self sign-up requires a verified mobile OTP, a verified email link, and acceptance of the current Terms version.                                                                            |
+| BR-12 | `ALLOW_SIGNUP=false` turns the product into a private panel where accounts are created only by admins.                                                                                      |
 
 ## 8. Success metrics (proposed)
 
 The platform console already shows payments collected, this month's revenue and lead counts. The KPIs below are recommendations; they are **not yet measured by the product**.
 
-| Area | KPI |
-|------|-----|
-| Acquisition | Leads per month by source; sign-ups per month |
-| Activation | % of new organisations that deploy their first app within 7 days of sign-up |
-| Conversion | Trial → paid conversion rate; lead → won rate |
-| Revenue | MRR / ARR, ARPA (average revenue per organisation), yearly vs monthly mix |
-| Retention | Monthly logo churn; renewals after a plan expires |
-| Product health | Deploy success rate; median deploy duration; servers offline per day |
+| Area           | KPI                                                                         |
+| -------------- | --------------------------------------------------------------------------- |
+| Acquisition    | Leads per month by source; sign-ups per month                               |
+| Activation     | % of new organisations that deploy their first app within 7 days of sign-up |
+| Conversion     | Trial → paid conversion rate; lead → won rate                               |
+| Revenue        | MRR / ARR, ARPA (average revenue per organisation), yearly vs monthly mix   |
+| Retention      | Monthly logo churn; renewals after a plan expires                           |
+| Product health | Deploy success rate; median deploy duration; servers offline per day        |
 
 ## 9. Stakeholders
 
-| Role | Interest |
-|------|----------|
-| Platform owner (super admin) | Revenue, plans, clients, leads, platform health |
-| Organisation admin | Their team, their plan and payments, their infrastructure |
-| Editor / developer | Deploying and operating apps and servers |
-| Viewer (often a client) | Seeing status and logs without being able to change anything |
-| Razorpay, Cloudflare, git providers | External services the product depends on |
+| Role                                | Interest                                                     |
+| ----------------------------------- | ------------------------------------------------------------ |
+| Platform owner (super admin)        | Revenue, plans, clients, leads, platform health              |
+| Organisation admin                  | Their team, their plan and payments, their infrastructure    |
+| Editor / developer                  | Deploying and operating apps and servers                     |
+| Viewer (often a client)             | Seeing status and logs without being able to change anything |
+| Razorpay, Cloudflare, git providers | External services the product depends on                     |
 
 ## 10. Assumptions and constraints
 
@@ -159,10 +159,10 @@ The platform console already shows payments collected, this month's revenue and 
 
 ## 11. Business risks
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
+| Risk                                                                 | Impact                           | Mitigation                                                                                                                     |
+| -------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | A security incident: the panel holds root access to customer servers | Severe: reputation and liability | Encryption at rest, strict tenancy, role checks on the server, origin checks, host-key pinning; see [Security](06-security.md) |
-| Loss of the encryption key or database | All customer credentials lost | Back up the key separately from the database; restore drills |
-| A payment taken but the plan not activated | Support load, refunds | Server-side verification, webhook, automatic reconciliation |
-| Fixed OTP left on in production | Account takeover | Set `OTP_MODE=random` and connect an SMS provider before launch |
-| Dependence on a single gateway or region | Lost sales outside India | Add a second gateway when expanding (roadmap) |
+| Loss of the encryption key or database                               | All customer credentials lost    | Back up the key separately from the database; restore drills                                                                   |
+| A payment taken but the plan not activated                           | Support load, refunds            | Server-side verification, webhook, automatic reconciliation                                                                    |
+| Fixed OTP left on in production                                      | Account takeover                 | Set `OTP_MODE=random` and connect an SMS provider before launch                                                                |
+| Dependence on a single gateway or region                             | Lost sales outside India         | Add a second gateway when expanding (roadmap)                                                                                  |
