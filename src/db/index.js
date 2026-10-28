@@ -90,7 +90,7 @@ export async function logActivity(entity, entityId, action, message, level = 'in
 /* -------------------------------------------------------------- schema */
 
 /** Every kind of credential. Adding one here also widens the column on existing databases. */
-const PROVIDERS = ['git', 'dockerhub', 'cloudflare', 'mysql', 'postgres', 'mongodb', 'redis'];
+const PROVIDERS = ['git', 'dockerhub', 'cloudflare', 'mysql', 'postgres', 'mongodb', 'redis', 'elasticsearch'];
 const PROVIDER_ENUM = PROVIDERS.map((p) => `'${p}'`).join(',');
 
 async function createSchema() {
@@ -544,6 +544,24 @@ async function createSchema() {
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       KEY idx_created (created_at DESC)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // A sample every few minutes of each server and app, for the daily / weekly / monthly charts.
+    `CREATE TABLE IF NOT EXISTS metric_samples (
+      id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+      org_id      INT NULL,
+      kind        ENUM('server','app') NOT NULL,
+      target_id   INT NOT NULL,
+      at          DATETIME NOT NULL,
+      cpu_pct     DECIMAL(6,1) NULL,
+      memory_pct  DECIMAL(6,1) NULL,
+      disk_pct    DECIMAL(6,1) NULL,
+      load_pct    DECIMAL(7,1) NULL,
+      net_rx_bps  BIGINT NULL,
+      net_tx_bps  BIGINT NULL,
+      level       VARCHAR(10) NOT NULL DEFAULT 'ok',
+      KEY idx_metric_target (kind, target_id, at),
+      KEY idx_metric_at (at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   ];
 
   for (const sql of statements) await getPool().query(sql);
@@ -652,14 +670,14 @@ async function addOrgScoping() {
     console.log(`[db] Moved ${moved.affectedRows} app domain(s) into app_domains.`);
   }
 
-  // Credential kinds added later (PostgreSQL, MongoDB, Redis) widen the ENUM.
+  // Credential kinds added later (PostgreSQL, MongoDB, Redis, Elasticsearch) widen the ENUM.
   const providerType = String(await scalar(
     `SELECT COLUMN_TYPE FROM information_schema.columns
       WHERE table_schema = DATABASE() AND table_name = 'credentials' AND column_name = 'provider'`
   ) || '');
   if (PROVIDERS.some((p) => !providerType.includes(`'${p}'`))) {
     await getPool().query(`ALTER TABLE credentials MODIFY provider ENUM(${PROVIDER_ENUM}) NOT NULL`);
-    console.log('[db] Credentials can now be PostgreSQL, MongoDB and Redis connections.');
+    console.log(`[db] Credentials can now be: ${PROVIDERS.join(', ')}.`);
   }
 
   // Server names were once unique across the whole panel, which told one

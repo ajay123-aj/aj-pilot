@@ -11,7 +11,7 @@ import { one, run, scalar } from '../db/index.js';
 
 export const ACCESS_STATUSES = ['active', 'trial', 'past_due'];
 export const LIMIT_KEYS = ['servers', 'apps', 'users', 'databases', 'domains'];
-export const DB_PROVIDERS = ['mysql', 'postgres', 'mongodb', 'redis'];
+export const DB_PROVIDERS = ['mysql', 'postgres', 'mongodb', 'redis', 'elasticsearch'];
 
 const LIMIT_WORDS = {
   servers: 'servers', apps: 'apps', users: 'team members', databases: 'database connections', domains: 'domains',

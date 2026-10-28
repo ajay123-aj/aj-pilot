@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>AJ Pilot — Autopilot for Your Servers | App Deployment, Server Management &amp; Domains</title>
-<meta name="description" content="AJ Pilot is autopilot for your servers. Manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static sites from GitHub or GitLab — automatically on every merge or push — run Docker, MySQL, PostgreSQL, MongoDB and Redis, keep environment variables in one place, and put every app on your own domain with Cloudflare, Nginx and free SSL — from one self-hosted control panel." />
-<meta name="keywords" content="AJ Pilot, server autopilot, server management panel, VPS control panel, self-hosted PaaS, auto deploy on git push, deploy on merge, GitHub webhook deploy, environment variables manager, .env management, deploy Next.js app, deploy Node.js app, NestJS deployment, Docker management UI, Nginx SSL manager, Cloudflare DNS automation, Cloudflare Zero Trust tunnel, Let's Encrypt SSL, MySQL admin panel, PostgreSQL admin, MongoDB GUI, Redis GUI, GitHub Actions runner, GitLab runner, Ubuntu server dashboard, cron job manager, systemd service manager, server file manager" />
+<meta name="description" content="AJ Pilot is autopilot for your servers. Manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static sites from GitHub or GitLab — automatically on every merge or push — run Docker, MySQL, PostgreSQL, MongoDB, Redis and Elasticsearch, keep environment variables in one place, and put every app on your own domain with Cloudflare, Nginx and free SSL — from one self-hosted control panel." />
+<meta name="keywords" content="AJ Pilot, server autopilot, server management panel, VPS control panel, self-hosted PaaS, auto deploy on git push, deploy on merge, GitHub webhook deploy, environment variables manager, .env management, deploy Next.js app, deploy Node.js app, NestJS deployment, Docker management UI, Nginx SSL manager, Cloudflare DNS automation, Cloudflare Zero Trust tunnel, Let's Encrypt SSL, MySQL admin panel, PostgreSQL admin, MongoDB GUI, Redis GUI, Elasticsearch GUI, Elasticsearch index manager, GitHub Actions runner, GitLab runner, Ubuntu server dashboard, cron job manager, systemd service manager, server file manager" />
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta name="author" content="AJ Pilot" />
 <meta name="application-name" content="AJ Pilot" />
@@ -82,7 +82,7 @@
       <p class="hero-long">
         AJ Pilot connects to your Ubuntu servers over SSH and does the work you would otherwise do by hand:
         deploy <b>Next.js, NestJS, Node.js, React, Angular, Nuxt</b> and static sites straight from GitHub or GitLab,
-        run <b>Docker</b>, <b>MySQL, PostgreSQL, MongoDB and Redis</b>, publish every app on your domain with
+        run <b>Docker</b>, <b>MySQL, PostgreSQL, MongoDB, Redis and Elasticsearch</b>, publish every app on your domain with
         <b>Nginx and free SSL</b> or a <b>Cloudflare Zero Trust tunnel</b>, <b>auto deploy</b> the moment you merge or push to a branch,
         keep every <b>environment</b> in one place — and give your team exactly the access it needs.
       </p>
@@ -158,8 +158,8 @@
       </div>
       <div class="sb-card" style="--uc:#3b82f6">
         <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v13c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-13"/><path d="M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/></svg></span>
-        <dt>4</dt>
-        <dd><b>databases managed</b><small>MySQL · Postgres · Mongo · Redis</small></dd>
+        <dt>5</dt>
+        <dd><b>databases managed</b><small>MySQL · Postgres · Mongo · Redis · Elastic</small></dd>
       </div>
       <div class="sb-card" style="--uc:#f59e0b">
         <span class="sb-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span>
@@ -345,16 +345,16 @@
       <article class="uc-card ft-card" style="--uc:#10b981;--uc2:#6ee7b7">
         <div class="uc-top">
           <span class="uc-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.8"/><path d="M4.5 5.5v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V5.5"/><path d="M4.5 12v6.5c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V12"/></svg></span>
-          <span class="uc-tag">Four engines</span>
+          <span class="uc-tag">Five engines</span>
         </div>
         <h3>Databases</h3>
         <ul class="ft-list">
-          <li><b>MySQL, PostgreSQL, MongoDB &amp; Redis</b><span>Even one bound to localhost, through the server's own SSH.</span></li>
+          <li><b>MySQL, PostgreSQL, MongoDB, Redis &amp; Elasticsearch</b><span>Even one bound to localhost, through the server's own SSH.</span></li>
           <li><b>Users, grants &amp; configuration</b><span>Exactly the privileges each user needs, and server variables from a form.</span></li>
-          <li><b>Statistics &amp; queries</b><span>Sizes, connections, largest tables, and a query runner.</span></li>
+          <li><b>Statistics &amp; queries</b><span>Sizes, connections, largest tables, cluster health and indices, and a read-only query runner.</span></li>
         </ul>
         <div class="uc-visual ft-engines" aria-hidden="true">
-          <span style="--a:#4479A1">My</span><span style="--a:#4169E1">Pg</span><span style="--a:#47A248">M</span><span style="--a:#DC382D">R</span>
+          <span style="--a:#4479A1">My</span><span style="--a:#4169E1">Pg</span><span style="--a:#47A248">M</span><span style="--a:#DC382D">R</span><span style="--a:#00A9A5">Es</span>
         </div>
       </article>
 
@@ -853,10 +853,21 @@
     <form id="form-login" class="hidden" novalidate>
       <h2>Sign in</h2>
       <p class="muted small">Your servers and credentials are behind this.</p>
-      <label>Email or mobile number<input name="login" type="text" required maxlength="190" autocomplete="username" placeholder="jane@company.com or 98765 43210" /></label>
-      <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
+      <div class="seg login-method" role="tablist" aria-label="How to sign in" id="login-method">
+        <button type="button" role="tab" class="active" aria-selected="true" data-login-method="email">Email &amp; password</button>
+        <button type="button" role="tab" aria-selected="false" data-login-method="mobile">Mobile &amp; OTP</button>
+      </div>
+      <div data-login-pane="email">
+        <label>Email<input name="login" type="email" required maxlength="190" autocomplete="username" placeholder="jane@company.com" /></label>
+        <label>Password<input name="password" type="password" required autocomplete="current-password" /></label>
+      </div>
+      <div data-login-pane="mobile" hidden>
+        <label>Mobile number<input name="phone" type="tel" inputmode="tel" required maxlength="32" autocomplete="tel" placeholder="98765 43210" disabled /></label>
+        <p class="muted small" style="margin:6px 0 0">We send a 6-digit code to this number. Enter it on the next screen to sign in.</p>
+        <p class="msg info" id="login-otp-off" hidden style="margin-top:10px">Signing in with a mobile number is not available on this panel yet — use your email and password.</p>
+      </div>
       <div id="login-msg" class="msg hidden"></div>
-      <button type="submit" class="btn primary" style="width:100%;margin-top:16px">Sign in</button>
+      <button type="submit" class="btn primary" id="login-submit" style="width:100%;margin-top:16px">Sign in</button>
       <p class="muted small auth-switch" style="margin-top:14px" data-signup-only>New to AJ Pilot? <a href="#signup" data-auth-mode="signup">Create a free account</a></p>
       <p class="muted small" style="margin-top:14px" data-signup-closed hidden>No account? An admin of your organisation creates one for you.</p>
     </form>
@@ -929,8 +940,9 @@
       <h2 id="email-title">Verify your email</h2>
       <p class="muted small" id="email-sub"></p>
       <div id="email-msg" class="msg hidden"></div>
-      <button type="button" class="btn" id="email-resend" style="width:100%;margin-top:16px">Send the link again</button>
-      <button type="button" class="btn primary" data-auth-mode="login" style="width:100%;margin-top:10px">Back to sign in</button>
+      <button type="button" class="btn primary" id="email-later" style="width:100%;margin-top:16px" hidden>Verify later — continue</button>
+      <button type="button" class="btn" id="email-resend" style="width:100%;margin-top:10px">Send the link again</button>
+      <button type="button" class="btn" id="email-back" data-auth-mode="login" style="width:100%;margin-top:10px">Back to sign in</button>
     </div>
   </div>
 </div>
@@ -970,9 +982,11 @@
     <div class="health"><span class="dot" id="health-dot"></span><span id="health-text">connecting…</span></div>
   </div>
 </aside>
+<div class="nav-backdrop" id="nav-backdrop" hidden></div>
 
 <div class="shell">
   <header class="topbar">
+    <button type="button" class="icon-btn nav-menu-btn" id="btn-nav-open" aria-label="Open the menu" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     <div class="topbar-title">
       <h2 id="topbar-heading">Servers</h2>
       <span class="muted small" id="topbar-org">—</span>
@@ -1011,6 +1025,7 @@
     </div>
   </header>
   <div class="trial-banner" id="trial-banner" hidden></div>
+  <div class="verify-banner" id="verify-banner" role="status" hidden></div>
 
 <main>
   <div class="sa-banner" id="sa-banner">
@@ -1029,14 +1044,14 @@
         <input type="search" class="docs-search" id="app-docs-search" placeholder="Search the docs…" aria-label="Search the docs" />
         <nav id="app-docs-nav"></nav>
       </aside>
-      <div class="docs-main" id="app-docs-body"><div class="empty">Loading…</div></div>
+      <div class="docs-main" id="app-docs-body"><div class="sk-wrap" role="status" aria-busy="true"><span class="sr-only">Loading…</span><div class="card sk-lines"><i class="sk " style="width:72%;height:10px"></i><i class="sk " style="width:48%;height:10px"></i><i class="sk " style="width:86%;height:10px"></i><i class="sk " style="width:60%;height:10px"></i><i class="sk " style="width:38%;height:10px"></i><i class="sk " style="width:66%;height:10px"></i></div></div></div>
     </div>
   </section>
 
   <!-- ---------------------------------------------- a client's plan -->
   <section id="view-billing" class="view hidden">
     <header class="page-head"><div><h2 class="page-title">Plan &amp; billing</h2><p class="muted" id="billing-sub">Your organisation's plan and what it allows.</p></div></header>
-    <div id="billing-body"><div class="empty">Loading…</div></div>
+    <div id="billing-body"><div class="sk-wrap" role="status" aria-busy="true"><span class="sr-only">Loading…</span><div class="price-grid sk-plans"><div class="price-card"><i class="sk " style="width:40%;height:16px"></i><i class="sk " style="width:70%;height:10px"></i><i class="sk " style="width:55%;height:30px"></i><i class="sk btn" style="width:100%;height:38px"></i><i class="sk " style="width:72%;height:10px"></i><i class="sk " style="width:48%;height:10px"></i><i class="sk " style="width:86%;height:10px"></i><i class="sk " style="width:60%;height:10px"></i><i class="sk " style="width:38%;height:10px"></i></div><div class="price-card"><i class="sk " style="width:40%;height:16px"></i><i class="sk " style="width:70%;height:10px"></i><i class="sk " style="width:55%;height:30px"></i><i class="sk btn" style="width:100%;height:38px"></i><i class="sk " style="width:72%;height:10px"></i><i class="sk " style="width:48%;height:10px"></i><i class="sk " style="width:86%;height:10px"></i><i class="sk " style="width:60%;height:10px"></i><i class="sk " style="width:38%;height:10px"></i></div><div class="price-card"><i class="sk " style="width:40%;height:16px"></i><i class="sk " style="width:70%;height:10px"></i><i class="sk " style="width:55%;height:30px"></i><i class="sk btn" style="width:100%;height:38px"></i><i class="sk " style="width:72%;height:10px"></i><i class="sk " style="width:48%;height:10px"></i><i class="sk " style="width:86%;height:10px"></i><i class="sk " style="width:60%;height:10px"></i><i class="sk " style="width:38%;height:10px"></i></div></div></div></div>
   </section>
 
   <!-- ------------------------------------------------------ servers -->
@@ -1049,6 +1064,7 @@
       </div>
       <button class="btn primary" id="btn-add-server" data-needs="create">+ Add server</button>
     </header>
+    <div id="server-health-filter"></div>
     <div id="server-list" class="grid"></div>
   </section>
 
@@ -1063,6 +1079,10 @@
       </div>
       <div class="actions">
         <button class="btn" id="btn-detail-test">Test connection</button>
+        <button class="btn primary" id="btn-detail-terminal" data-needs="edit" title="Run commands on this server">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5"/><path d="M12 19h8"/></svg>
+          Open terminal
+        </button>
         <button class="btn" id="btn-detail-edit" data-needs="edit">Edit server</button>
         <button class="btn danger" id="btn-detail-reboot" data-needs="edit" title="Restart this server">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
@@ -1236,7 +1256,7 @@
   <!-- ---------------------------------------------------- databases -->
   <section id="view-databases" class="view hidden">
     <header class="page-head">
-      <div><h2 class="page-title">Databases</h2><p class="muted">MySQL, PostgreSQL, MongoDB and Redis on your machines — statistics, databases, users and configuration. Connections tied to a server are tunnelled over its SSH.</p></div>
+      <div><h2 class="page-title">Databases</h2><p class="muted">MySQL, PostgreSQL, MongoDB, Redis and Elasticsearch on your machines — statistics, databases, users and configuration. Connections tied to a server are tunnelled over its SSH.</p></div>
       <button class="btn primary" id="btn-add-mysql" data-needs="create">+ Add database connection</button>
     </header>
     <div class="chips" id="db-engine-filter" style="margin-bottom:6px"></div>
@@ -1244,7 +1264,7 @@
     <div id="mysql-list" class="grid"></div>
   </section>
 
-  <!-- ------------------------------ postgres / mongodb / redis detail -->
+  <!-- ------------------------------ postgres / mongodb / redis / elasticsearch detail -->
   <section id="view-db-detail" class="view hidden">
     <header class="page-head">
       <div>
@@ -1445,6 +1465,7 @@
             <option value="postgres">PostgreSQL</option>
             <option value="mongodb">MongoDB</option>
             <option value="redis">Redis</option>
+            <option value="elasticsearch">Elasticsearch</option>
           </select>
         </label>
         <label>Name<input name="name" placeholder="main-github" required /></label>
@@ -2837,7 +2858,7 @@
   <div class="modal" style="max-width:860px">
     <h2 id="service-detail-name">—</h2>
     <p class="muted small" id="service-detail-sub">—</p>
-    <div id="service-detail-body"><div class="empty"><span class="spinner"></span>Reading…</div></div>
+    <div id="service-detail-body"><div class="sk-wrap" role="status" aria-busy="true"><span class="sr-only">Reading…</span><div class="tiles"><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div></div><div class="card sk-lines"><i class="sk" style="width:72%;height:10px"></i><i class="sk" style="width:48%;height:10px"></i><i class="sk" style="width:86%;height:10px"></i><i class="sk" style="width:60%;height:10px"></i></div></div></div>
     <div class="modal-actions">
       <button type="button" class="btn ghost" data-close>Close</button>
     </div>
@@ -2861,7 +2882,7 @@
   </div>
 </div>
 
-<!-- ------------------------------ postgres / mongodb / redis query -->
+<!-- ------------------------------ postgres / mongodb / redis / elasticsearch query -->
 <div class="modal-backdrop hidden" id="modal-db-query">
   <div class="modal" style="max-width:860px">
     <h2>Run query</h2>

@@ -27,8 +27,10 @@ import { docsFor } from './lib/docs.js';
 import { ensureSuperAdmin } from './lib/superAdmin.js';
 import { attachUser, requireAuth, requireOrg, guardMutations } from './lib/authGuard.js';
 import { startHealthMonitor } from './lib/healthMonitor.js';
+import { startMetricsRecorder } from './lib/metrics.js';
 import { connectorsRouter } from './routes/connectors.js';
 import { attachConnectorHub } from './lib/connectorHub.js';
+import { TERMINAL_PATH, handleTerminalUpgrade } from './lib/terminal.js';
 import { securityHeaders, sameOriginOnly } from './lib/security.js';
 
 const app = express();
@@ -80,6 +82,11 @@ app.get('/sitemap.xml', (req, res) => res.type('application/xml').send(sitemapXm
 app.use(express.static(path.join(ROOT, 'public'), {
   setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
 }));
+
+// The browser terminal (xterm.js), served from node_modules so it needs no outside CDN.
+for (const pkg of ['xterm', 'addon-fit']) {
+  app.use(`/vendor/${pkg}`, express.static(path.join(ROOT, 'node_modules', '@xterm', pkg), { maxAge: '7d' }));
+}
 
 // Everything under /api knows who is asking; most of it then insists on it.
 // GitHub, GitLab and Bitbucket call this when a branch changes — no session; the token in the address is the key.
@@ -216,12 +223,13 @@ async function start() {
     console.log(`  → http://localhost:${config.port}`);
     console.log(`  DB: ${config.db.user}@${config.db.host}:${config.db.port}/${config.db.database}`);
     startHealthMonitor();
+    startMetricsRecorder();
     configureAutoDeploy({ deploy: deployNow });
     startAutoDeployPoller();
     console.log('');
   });
-  // Connectors on people's PCs dial in here over a WebSocket.
-  attachConnectorHub(server);
+  // Connectors on people's PCs dial in here over a WebSocket, and so does the server page's terminal.
+  attachConnectorHub(server, { [TERMINAL_PATH]: handleTerminalUpgrade });
 }
 
 start();

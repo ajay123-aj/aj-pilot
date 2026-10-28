@@ -68,7 +68,7 @@ const clearExpired = () => run('DELETE FROM auth_challenges WHERE expires_at < N
  * Start a one-time-code step. `user` (sign-in) or `payload` (sign-up) says what
  * the code unlocks. Returns what the browser needs to show the code form.
  */
-export async function createChallenge({ purpose, user = null, payload = null, phone = null, email = null }) {
+export async function createChallenge({ purpose, user = null, payload = null, phone = null, email = null, deliver = true }) {
   await clearExpired();
   const token = newSessionToken();
   const code = newCode();
@@ -81,7 +81,8 @@ export async function createChallenge({ purpose, user = null, payload = null, ph
     [hashToken(token), purpose, user?.id || null, payload ? encrypt(JSON.stringify(payload)) : null,
       hashToken(code), channel, to, config.otp.minutes],
   );
-  deliverCode(code, { channel, to, purpose });
+  // `deliver: false` answers exactly as if a code went out, without sending one (a number with no account).
+  if (deliver) deliverCode(code, { channel, to, purpose });
 
   return challengeView(token, { channel, to });
 }
@@ -153,7 +154,10 @@ export async function resendChallenge(token, purpose) {
        expires_at = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?`,
     [hashToken(code), config.otp.minutes, row.id],
   );
-  deliverCode(code, { channel: row.channel, to: row.sent_to, purpose });
+  // A mobile sign-in for a number with no account never sends anything — not on a resend either.
+  const unknownNumber = purpose === 'login' && !row.user_id
+    && !(await usersByPhone(row.sent_to)).some((u) => u.status === 'active');
+  if (!unknownNumber) deliverCode(code, { channel: row.channel, to: row.sent_to, purpose });
   return challengeView(token, { channel: row.channel, to: row.sent_to });
 }
 

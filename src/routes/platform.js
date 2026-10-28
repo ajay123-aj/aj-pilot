@@ -171,7 +171,7 @@ async function organisationRows() {
       (SELECT COUNT(*) FROM servers s WHERE s.org_id = o.id) AS servers,
       (SELECT COUNT(*) FROM apps a WHERE a.org_id = o.id) AS apps,
       (SELECT COUNT(*) FROM app_domains d WHERE d.org_id = o.id) AS domains,
-      (SELECT COUNT(*) FROM credentials c WHERE c.org_id = o.id AND c.provider IN ('mysql','postgres','mongodb','redis')) AS databases_,
+      (SELECT COUNT(*) FROM credentials c WHERE c.org_id = o.id AND c.provider IN ('mysql','postgres','mongodb','redis','elasticsearch')) AS databases_,
       (SELECT COALESCE(SUM(p.amount), 0) FROM payments p WHERE p.org_id = o.id) AS paid,
       (SELECT MAX(u.last_login_at) FROM users u WHERE u.org_id = o.id) AS last_active
     FROM organisations o ORDER BY o.created_at DESC`);
@@ -290,7 +290,9 @@ platformRouter.put('/organisations/:id/subscription/expiry', async (req, res, ne
     let expires = null;
     let words;
     if (b.action === 'now') {
-      expires = new Date();
+      // Whole seconds: DATETIME rounds milliseconds, and .5s or more would round *up* —
+      // leaving an "expired now" plan running for up to another second.
+      expires = new Date(Math.floor(Date.now() / 1000) * 1000);
       words = 'now';
     } else if (b.action === 'date') {
       const d = new Date(`${String(b.date || '').slice(0, 10)}T23:59:59Z`);
@@ -665,7 +667,7 @@ platformRouter.get('/dashboard', async (req, res, next) => {
         appsRunning: await count("SELECT COUNT(*) FROM apps WHERE status = 'running'"),
         domains: await count('SELECT COUNT(*) FROM app_domains'),
         domainsLive: await count("SELECT COUNT(*) FROM app_domains WHERE status = 'active'"),
-        databases: await count("SELECT COUNT(*) FROM credentials WHERE provider IN ('mysql','postgres','mongodb','redis')"),
+        databases: await count("SELECT COUNT(*) FROM credentials WHERE provider IN ('mysql','postgres','mongodb','redis','elasticsearch')"),
         installs: await count('SELECT COUNT(*) FROM installations'),
       },
       leads: await leadSummary(),

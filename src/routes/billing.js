@@ -50,10 +50,42 @@ billingRouter.get('/', async (req, res, next) => {
       canChoose: can(req.user, 'members'),
       // Paid plans are paid for online when Razorpay is set up; otherwise they are requests.
       payOnline: razorpayEnabled(),
+      payments: await paymentHistory(req.orgId),
       recovered,
     });
   } catch (err) { next(err); }
 });
+
+/**
+ * Everything the organisation has paid — online or recorded by hand — and the
+ * online attempts that did not go through, newest first.
+ */
+async function paymentHistory(orgId) {
+  const paid = await all(
+    `SELECT p.id, p.amount, p.currency, p.paid_at, p.method, p.reference, pl.name AS plan_name, s.cycle
+       FROM payments p
+       LEFT JOIN subscriptions s ON s.id = p.subscription_id
+       LEFT JOIN plans pl ON pl.id = s.plan_id
+      WHERE p.org_id = ? ORDER BY p.paid_at DESC, p.id DESC LIMIT 200`,
+    [orgId],
+  );
+  const unpaid = await all(
+    `SELECT o.id, o.amount, o.currency, o.created_at, o.status, o.error, o.provider_order_id, o.cycle, pl.name AS plan_name
+       FROM payment_orders o LEFT JOIN plans pl ON pl.id = o.plan_id
+      WHERE o.org_id = ? AND o.status <> 'paid' ORDER BY o.id DESC LIMIT 50`,
+    [orgId],
+  );
+  return [
+    ...paid.map((p) => ({
+      id: `pay-${p.id}`, status: 'paid', at: p.paid_at, amount: money(p.amount), currency: p.currency,
+      plan: p.plan_name, cycle: p.cycle, method: p.method, reference: p.reference,
+    })),
+    ...unpaid.map((o) => ({
+      id: `order-${o.id}`, status: o.status === 'failed' ? 'failed' : 'incomplete', at: o.created_at, amount: money(o.amount),
+      currency: o.currency, plan: o.plan_name, cycle: o.cycle, method: 'razorpay', reference: o.provider_order_id, error: o.error,
+    })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at));
+}
 
 /**
  * The plan and cycle asked for, checked the same way whether it is chosen or
@@ -130,7 +162,7 @@ billingRouter.post('/checkout/verify', async (req, res, next) => {
       paymentId: req.body.razorpay_payment_id,
       signature: req.body.razorpay_signature,
     });
-    res.json({ ok: true, activated: true, message: `Payment received — ${result.plan} is active.` });
+    res.json({ ok: true, activated: true, plan: result.plan, message: `Payment received — ${result.plan} is active.` });
   } catch (err) {
     if (err instanceof PaymentError) return res.status(err.status).json({ error: err.message });
     next(err);

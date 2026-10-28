@@ -7,6 +7,7 @@
  * the server you picked, pushing to Docker Hub first if you chose an account.
  */
 
+import os from 'node:os';
 import { Router } from 'express';
 import { all, one, run, logActivity } from '../db/index.js';
 import { currentUserId } from '../lib/context.js';
@@ -26,6 +27,8 @@ import { resolveEnvironmentChoice } from '../lib/environments.js';
 import { createRepoWebhook, deleteRepoWebhook, branchHead } from '../lib/git.js';
 import { newWebhookToken, webhookUrl, isPublicUrl, checkApp } from '../lib/autoDeploy.js';
 import { siteUrl } from '../lib/landing.js';
+import { collectContainerStats, appUsage } from '../lib/liveStats.js';
+import { metricSeries, latestLevels } from '../lib/metrics.js';
 import {
   domainConfigFrom, publicDomainConfig, setupAppDomains, setupDomain, removeAppDomain, domainView,
 } from '../lib/appDomain.js';
@@ -130,6 +133,9 @@ async function publicApp(row) {
     // The last "::step::key::label" in the log: what a running deploy is doing right now.
     currentStep: row.status === 'deploying' ? ([...String(deploy_log || '').matchAll(/^::step::[a-z]+::(.*?)(?:::\d+)?$/gm)].pop()?.[1] || null) : null,
     hasLog: Boolean(deploy_log),
+    // A removal running in this process: the step it is on and when it started.
+    removal: row.status === 'removing' && removals.has(row.id)
+      ? { step: removals.get(row.id).step, startedAt: removals.get(row.id).startedAt } : null,
   };
 }
 
@@ -254,10 +260,10 @@ const releaseStaleDeploys = () => Promise.all([
      WHERE status = 'deploying' AND deploy_started_at < DATE_SUB(NOW(), INTERVAL ? MINUTE)`,
     [STALE_MINUTES]
   ),
-  // A removal takes a few minutes at most; one still going after fifteen died with the panel.
+  // A removal gives up after six minutes; one still marked after ten died with the panel.
   run(`UPDATE apps SET status = 'remove_failed',
          last_error = 'The panel stopped before this app was removed — remove it again.'
-       WHERE status = 'removing' AND updated_at < DATE_SUB(NOW(), INTERVAL 15 MINUTE)`),
+       WHERE status = 'removing' AND updated_at < DATE_SUB(NOW(), INTERVAL 10 MINUTE)`),
   // Every step of a domain setup writes its log, so twenty quiet minutes means it died.
   run(`UPDATE app_domains SET status = 'error',
          error = 'The panel stopped before the domain was set up — retry it.'
@@ -270,8 +276,137 @@ appsRouter.get('/', async (req, res, next) => {
     const rows = req.query.server_id
       ? await all('SELECT * FROM apps WHERE org_id = ? AND server_id = ? ORDER BY created_at DESC', [req.orgId, Number(req.query.server_id)])
       : await all('SELECT * FROM apps WHERE org_id = ? ORDER BY created_at DESC', [req.orgId]);
-    res.json(await Promise.all(rows.map(publicApp)));
+    const health = await latestLevels('app', rows.map((r) => r.id));
+    res.json(await Promise.all(rows.map(async (row) => ({ ...(await publicApp(row)), health: health.get(row.id) || null }))));
   } catch (err) { next(err); }
+});
+
+/** CPU and memory over the last day, week or month, from the recorded samples. */
+appsRouter.get('/:id/metrics', async (req, res, next) => {
+  try {
+    if (!await getRow(req.params.id, req.orgId)) return res.status(404).json({ error: 'App not found' });
+    res.json(await metricSeries('app', Number(req.params.id), req.orgId, String(req.query.range || 'daily'), req.query.tz));
+  } catch (err) { next(err); }
+});
+
+/* --------------------------------------------------------------- usage */
+
+/** Apps that have containers worth asking about. */
+const measurable = (row) => row.server_id && !['deploying', 'removing', 'pending'].includes(row.status);
+
+/**
+ * What every app is using right now, for the cards: one SSH session per
+ * server, every app on it asked in the same pass. A server that cannot be
+ * reached says so against its own apps without holding up the rest.
+ */
+appsRouter.get('/stats', async (req, res, next) => {
+  try {
+    const rows = (req.query.server_id
+      ? await all('SELECT * FROM apps WHERE org_id = ? AND server_id = ?', [req.orgId, Number(req.query.server_id)])
+      : await all('SELECT * FROM apps WHERE org_id = ?', [req.orgId])).filter(measurable);
+
+    const byServer = new Map();
+    for (const row of rows) byServer.set(row.server_id, [...(byServer.get(row.server_id) || []), row]);
+
+    const apps = {};
+    await Promise.all([...byServer].map(async ([serverId, list]) => {
+      const server = await getServer(serverId, req.orgId);
+      if (!server) {
+        for (const row of list) apps[row.id] = { error: 'The server this runs on no longer exists' };
+        return;
+      }
+      const planned = new Map(list.map((row) => [row.id, plannedContainers(containerSpecOf(row)).map((c) => c.name)]));
+      try {
+        const sample = await withConnection(connectionFromRow(server), (conn) => collectContainerStats(conn, server, [...planned.values()].flat()));
+        for (const [id, names] of planned) {
+          const mine = sample.containers.filter((c) => names.includes(c.name));
+          apps[id] = { at: sample.at, host: sample.host, ...appUsage(mine, sample.host) };
+        }
+      } catch (err) {
+        for (const id of planned.keys()) apps[id] = { error: err.message };
+      }
+    }));
+    res.json({ apps });
+  } catch (err) { next(err); }
+});
+
+/**
+ * One app, live: a session held open on its server and a sample pushed every
+ * few seconds, the same way the server's own live view works.
+ */
+const APP_STREAMS_PER_ORG = Number(process.env.APP_STATS_STREAMS_PER_ORG || 4);
+const APP_STREAM_MINUTES = Number(process.env.STATS_STREAM_MINUTES || 15);
+const appStreamsByOrg = new Map(); // orgId → open app live views
+
+appsRouter.get('/:id/stats/stream', async (req, res, next) => {
+  let row;
+  let server;
+  try {
+    row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'App not found' });
+    server = await getServer(row.server_id, req.orgId);
+    if (!server) return res.status(400).json({ error: 'The server this runs on no longer exists' });
+  } catch (err) {
+    return next(err);
+  }
+  const orgId = req.orgId;
+  if ((appStreamsByOrg.get(orgId) || 0) >= APP_STREAMS_PER_ORG) {
+    return res.status(429).json({ error: 'Too many live views are open at once. Close one and try again.' });
+  }
+  appStreamsByOrg.set(orgId, (appStreamsByOrg.get(orgId) || 0) + 1);
+
+  try {
+    const intervalMs = Math.max(2000, Math.min(60000, Number(req.query.every) || 5000));
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('retry: 5000\n\n');
+    res.flushHeaders?.();
+
+    let open = true;
+    req.on('close', () => { open = false; });
+    const send = (event, payload) => {
+      if (open) res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const names = plannedContainers(containerSpecOf(row)).map((c) => c.name);
+    const endAt = Date.now() + APP_STREAM_MINUTES * 60000;
+    try {
+      await withConnection(connectionFromRow(server), async (conn) => {
+        let failures = 0;
+        while (open && Date.now() < endAt) {
+          const started = Date.now();
+          try {
+            const sample = await collectContainerStats(conn, server, names);
+            failures = 0;
+            send('sample', { ...sample, usage: appUsage(sample.containers, sample.host) });
+          } catch (err) {
+            failures += 1;
+            send('problem', { error: err.message });
+            if (failures >= 3) break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, intervalMs - (Date.now() - started))));
+        }
+      });
+    } catch (err) {
+      send('problem', { error: err.message, fatal: true });
+    }
+    send('end', { reason: open ? 'The live view timed out — it will reconnect.' : 'closed' });
+    res.end();
+  } catch (err) {
+    if (res.headersSent) {
+      res.write(`event: problem\ndata: ${JSON.stringify({ error: err.message, fatal: true })}\n\n`);
+      res.end();
+    } else {
+      next(err);
+    }
+  } finally {
+    const left = (appStreamsByOrg.get(orgId) || 1) - 1;
+    if (left > 0) appStreamsByOrg.set(orgId, left); else appStreamsByOrg.delete(orgId);
+  }
 });
 
 appsRouter.get('/:id', async (req, res, next) => {
@@ -1266,11 +1401,19 @@ appsRouter.delete('/:id', async (req, res, next) => {
   try {
     const row = await getRow(req.params.id, req.orgId);
     if (!row) return res.status(404).json({ error: 'App not found' });
-    if (row.status === 'removing') return res.status(409).json({ error: `${row.name} is already being removed.` });
+    // Remove it from the panel even though the server could not be cleaned up — also
+    // the way out of a removal that is stuck.
+    const force = req.query.force === '1';
+    if (row.status === 'removing' && !force) return res.status(409).json({ error: `${row.name} is already being removed.` });
+    if (isThisPanel(row)) {
+      return res.status(400).json({
+        error: `${row.name} is the container this panel is running in — removing it would shut the panel down halfway. `
+          + 'Stop or remove it from the server itself (docker rm -f), or from another panel.',
+      });
+    }
     const server = await getServer(row.server_id, req.orgId);
     const options = {
-      // Remove it from the panel even though the server could not be cleaned up.
-      force: req.query.force === '1',
+      force,
       keepImage: req.query.keep_image === '1',
       // Volumes outlive the service unless the person said otherwise.
       keepVolumes: req.query.delete_volumes !== '1',
@@ -1280,16 +1423,43 @@ appsRouter.delete('/:id', async (req, res, next) => {
     await run("UPDATE apps SET status = 'removing', last_error = NULL WHERE id = ?", [row.id]);
     res.status(202).json({ ok: true, removing: true });
 
-    removeApplication(row, server, options).catch(async (err) => {
-      console.error('[apps] removing crashed:', err);
-      await run("UPDATE apps SET status = 'remove_failed', last_error = ? WHERE id = ?",
+    const removal = { step: 'Starting', startedAt: new Date() };
+    removals.set(row.id, removal);
+    // Every step has its own timeout; this is the backstop, so the card never spins for ever.
+    let timer;
+    const cap = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`it was still "${removal.step}" after ${REMOVE_LIMIT_MIN} minutes`)), REMOVE_LIMIT_MIN * 60000);
+    });
+    Promise.race([removeApplication(row, server, options, removal), cap]).catch(async (err) => {
+      console.error(`[apps] removing ${row.name} failed:`, err.message);
+      await run("UPDATE apps SET status = 'remove_failed', last_error = ? WHERE id = ? AND status = 'removing'",
         [`Could not remove ${row.name}: ${err.message}`, row.id]).catch(() => {});
+    }).finally(() => {
+      clearTimeout(timer);
+      if (removals.get(row.id) === removal) removals.delete(row.id);
     });
   } catch (err) { next(err); }
 });
 
-async function removeApplication(row, server, { force, keepImage, keepVolumes, who }) {
+/** Removals running in this process, by app id: the step each is on, for the card. */
+const removals = new Map();
+const REMOVE_LIMIT_MIN = 6;
+
+/**
+ * Is this app the very container the panel runs in? Inside Docker the
+ * hostname is the container's short id, or the name it was given.
+ */
+function isThisPanel(row) {
+  const me = os.hostname().toLowerCase();
+  if (!me) return false;
+  const ids = [row.container_id, ...((asJson(row.containers) || []).flatMap((c) => [c.id, c.name]))]
+    .filter(Boolean).map((v) => String(v).toLowerCase());
+  return ids.some((id) => id === me || (id.length >= 12 && me.length >= 12 && (id.startsWith(me) || me.startsWith(id))));
+}
+
+async function removeApplication(row, server, { force, keepImage, keepVolumes, who }, removal = {}) {
   const warnings = [];
+  const step = (text) => { removal.step = text; };
   // The app stays in the panel, domains, webhook and all, so it can be removed properly once the server answers.
   const failed = async (why) => {
     await run("UPDATE apps SET status = 'remove_failed', last_error = ? WHERE id = ?", [why, row.id]);
@@ -1298,6 +1468,7 @@ async function removeApplication(row, server, { force, keepImage, keepVolumes, w
 
   // A deploy still running would start the containers again after they are removed.
   if (row.status === 'deploying' && server) {
+    step('Stopping the running deploy');
     try {
       await stopRunningDeploy(row, server, who);
     } catch (err) {
@@ -1310,6 +1481,7 @@ async function removeApplication(row, server, { force, keepImage, keepVolumes, w
 
   // The server first: its containers, image, volumes and the clone.
   if (server) {
+    step(`Removing the containers on ${server.name}`);
     let cleanup;
     try {
       cleanup = await withConnection(connectionFromRow(server), (conn) => removeApp(conn, server, {
@@ -1326,6 +1498,7 @@ async function removeApplication(row, server, { force, keepImage, keepVolumes, w
   }
 
   // Its webhook on the repository goes too, so the provider stops calling a hook that no longer exists.
+  step('Removing the repository webhook');
   await removeWebhook(row);
 
   // Its domains go with it: each one's tunnel hostname (and a tunnel made for
@@ -1333,6 +1506,7 @@ async function removeApplication(row, server, { force, keepImage, keepVolumes, w
   const domainDone = [];
   const doms = await all('SELECT * FROM app_domains WHERE app_id = ? ORDER BY id', [row.id]);
   for (const dom of doms) {
+    step(`Removing the domain ${dom.domain}`);
     try {
       const d = await removeAppDomain(domainView(row, dom), server);
       domainDone.push(...d.done);

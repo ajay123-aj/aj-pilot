@@ -58,11 +58,16 @@ export function dropConnector(id, reason = 'revoked') {
 }
 
 /** Take WebSocket upgrades on CONNECTOR_PATH off the HTTP server. */
-export function attachConnectorHub(httpServer) {
+export function attachConnectorHub(httpServer, otherPaths = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
   httpServer.on('upgrade', (req, socket, head) => {
     let pathname = '';
     try { pathname = new URL(req.url, 'http://panel').pathname; } catch { /* bad url */ }
+    // Other live features (the server terminal) share this one upgrade listener.
+    if (otherPaths[pathname]) {
+      otherPaths[pathname](req, socket, head).catch(() => socket.destroy());
+      return;
+    }
     if (pathname !== CONNECTOR_PATH) {
       socket.destroy();
       return;

@@ -132,6 +132,8 @@ const DIALOG_ICONS = {
   info: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>',
   power: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>',
   input: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m7.5 12.5 3 3 6-6.5"/></svg>',
+  pay: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/></svg>',
 };
 const DANGER_WORDS = /^(delete|remove|revoke|disconnect|drop|expire|cancel|decline|sign this|lock|stop|pause|withdraw|replace)/i;
 
@@ -144,7 +146,7 @@ function dialogEsc(v) {
  * buttons: [{ label, value, kind: 'primary'|'danger'|'' }]; dismissing
  * (Esc, backdrop, ×) resolves to `dismiss`.
  */
-function openAsk({ message, title, tone, buttons, dismiss, input, icon }) {
+function openAsk({ message, title, tone, buttons, dismiss, input, icon, html }) {
   return new Promise((resolve) => {
     const text = String(message || '').trim();
     let [first, ...rest] = text.split(/\n\s*\n/);
@@ -160,7 +162,8 @@ function openAsk({ message, title, tone, buttons, dismiss, input, icon }) {
         <button type="button" class="ask-x" aria-label="Close" data-dismiss>×</button>
         <div class="ask-icon">${DIALOG_ICONS[icon] || DIALOG_ICONS[tone] || DIALOG_ICONS.info}</div>
         <h3 id="ask-title">${dialogEsc(head)}</h3>
-        ${body ? `<div class="ask-body">${body.split(/\n\s*\n/).map((p) => `<p>${dialogEsc(p).replace(/\n/g, '<br>')}</p>`).join('')}</div>` : ''}
+        ${html ? `<div class="ask-body">${html}</div>` /* already escaped by the caller */
+    : body ? `<div class="ask-body">${body.split(/\n\s*\n/).map((p) => `<p>${dialogEsc(p).replace(/\n/g, '<br>')}</p>`).join('')}</div>` : ''}
         ${input ? `<input class="ask-input" type="text" autocomplete="off" spellcheck="false" value="${dialogEsc(input.value || '')}" placeholder="${dialogEsc(input.placeholder || '')}">` : ''}
         <div class="ask-actions">${buttons.map((b, i) => `<button type="button" class="btn ${b.kind || ''}" data-i="${i}">${dialogEsc(b.label)}</button>`).join('')}</div>
       </div>`;
@@ -279,13 +282,20 @@ requestAnimationFrame(() => document.body.classList.add('theme-ready'));
 
 function show(view) {
   // Leaving the server page drops the live view's connection with it.
-  if (view !== 'server-detail') stopLiveStats();
+  if (view !== 'server-detail') { stopLiveStats(); closeTerminal(); }
+  if (view !== 'app-detail') stopAppLive();
   $$('.view').forEach((v) => v.classList.add('hidden'));
   $(`#view-${view}`).classList.remove('hidden');
-  // A connection's own page still belongs under Databases in the menu.
-  const navView = view === 'mysql-detail' || view === 'db-detail' ? 'databases' : view === 'app-detail' ? 'apps' : view;
+  // A detail page still belongs under its list in the menu.
+  const navView = {
+    'mysql-detail': 'databases', 'db-detail': 'databases', 'app-detail': 'apps', 'server-detail': 'servers',
+    'git-detail': 'accounts', 'cf-detail': 'accounts', 'dh-detail': 'accounts',
+  }[view] || view;
   $$('.nav-item').forEach((b) => b.classList.toggle('active',
     b.dataset.view === navView && (!b.dataset.pftab || pfNavIs(b, pf.tab))));
+  // The top bar names the section, also when the page was opened from its address rather than the menu.
+  const navLabel = navView !== 'platform' && $(`.nav-item.client-nav[data-view="${navView}"] .nav-label`);
+  if (navLabel) setHeading(navLabel.textContent);
   syncRoute();
 }
 
@@ -535,6 +545,7 @@ function applyIdentity() {
   document.body.classList.remove('booting');
   document.body.classList.toggle('signed-in', Boolean(user));
   document.body.classList.toggle('signed-out', !user);
+  renderVerifyBanner();
 
   if (!user) {
     document.body.classList.remove('platform-mode', 'sa-in-org', 'needs-plan');
@@ -583,8 +594,29 @@ $('#btn-nav-toggle').addEventListener('click', () => {
   try { localStorage.setItem(NAV_KEY, collapsed ? '1' : '0'); } catch { /* private mode */ }
 });
 
-// Restore the choice before anything is painted.
-try { applyNavState(localStorage.getItem(NAV_KEY) === '1'); } catch { applyNavState(false); }
+// Restore the choice before anything is painted. Without one, a tablet-sized screen
+// starts with the narrow rail so the page keeps most of the width.
+const narrowScreen = window.matchMedia('(max-width: 1100px)').matches;
+try {
+  const saved = localStorage.getItem(NAV_KEY);
+  applyNavState(saved === null ? narrowScreen : saved === '1');
+} catch { applyNavState(narrowScreen); }
+
+/* On a phone the sidebar is a drawer, opened from the menu button in the top bar. */
+const PHONE = window.matchMedia('(max-width: 720px)');
+
+function setDrawer(open) {
+  document.body.classList.toggle('nav-open', open);
+  $('#nav-backdrop').hidden = !open;
+  $('#btn-nav-open').setAttribute('aria-expanded', String(open));
+}
+
+$('#btn-nav-open').addEventListener('click', () => setDrawer(!document.body.classList.contains('nav-open')));
+$('#nav-backdrop').addEventListener('click', () => setDrawer(false));
+// Picking a page closes the drawer, so the page is what you see next.
+$('#sidebar nav').addEventListener('click', (e) => { if (e.target.closest('.nav-item') && PHONE.matches) setDrawer(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) setDrawer(false); });
+PHONE.addEventListener('change', () => setDrawer(false));
 
 /* --------------------------------------------- the landing page's gate */
 
@@ -592,6 +624,7 @@ let needsSetup = false;
 
 /** Show the sign-in card over the landing page. */
 let signupOpen = false;   // from /auth/state: can a visitor create their own account?
+let otpLoginOn = false;   // from /auth/state: is "Mobile & OTP" sign-in available?
 
 /** The sign-in card, in one of its three forms: set up (first run), sign in, or sign up. */
 function openAuth(mode = 'login') {
@@ -1048,7 +1081,14 @@ signupForm.addEventListener('submit', async (e) => {
     // Already has an account: offer the sign-in form with the email filled in.
     if (err.body?.signIn) {
       msg.innerHTML += ' <a href="#signin" data-auth-mode="login">Sign in</a>';
-      $('#form-login').login.value = err.body.field === 'phone' ? body.phone : body.email;
+      // Already has an account: the sign-in card opens on the matching way in, filled in.
+      if (err.body.field === 'phone' && otpLoginOn) {
+        setLoginMethod('mobile');
+        $('#form-login').phone.value = body.phone;
+      } else {
+        setLoginMethod('email');
+        $('#form-login').login.value = body.email;
+      }
     }
   }
   busy(btn, false);
@@ -1063,25 +1103,63 @@ function syncSignupButton() {
 }
 signupForm.terms.addEventListener('change', syncSignupButton);
 
+/* Two ways in: an email and password, or a code sent to the mobile number. */
+let loginMethod = 'email';
+
+function setLoginMethod(method) {
+  loginMethod = method;
+  const form = $('#form-login');
+  $$('#login-method [data-login-method]').forEach((b) => {
+    const on = b.dataset.loginMethod === method;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  // The other pane's fields are disabled, so they are neither sent nor checked.
+  $$('[data-login-pane]', form).forEach((pane) => {
+    pane.hidden = pane.dataset.loginPane !== method;
+    $$('input', pane).forEach((i) => { i.disabled = pane.hidden; });
+  });
+  const off = method === 'mobile' && !otpLoginOn;
+  $('#login-otp-off').hidden = !off;
+  if (off) form.phone.disabled = true;
+  const submit = $('#login-submit');
+  submit.disabled = off;
+  submit.textContent = method === 'mobile' ? 'Send code' : 'Sign in';
+  $('#login-msg').classList.add('hidden');
+}
+
+$('#login-method').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-login-method]');
+  if (!b) return;
+  setLoginMethod(b.dataset.loginMethod);
+  $(`#form-login [data-login-pane="${loginMethod}"] input:not([disabled])`)?.focus();
+});
+
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const btn = e.submitter || $('button[type=submit]', e.target);
+  const form = e.target;
+  const btn = e.submitter || $('button[type=submit]', form);
   const msg = $('#login-msg');
-  if (!validateAuthForm(e.target)) return msg.classList.add('hidden');
-  busy(btn, true, 'Signing in…');
+  if (!validateAuthForm(form)) return msg.classList.add('hidden');
   try {
-    const r = await api('/auth/login', { method: 'POST', body: Object.fromEntries(new FormData(e.target).entries()) });
-    msg.classList.add('hidden');
-    startOtp('login', r);
-  } catch (err) {
-    if (err.body?.needsEmailVerification) {
-      showEmailPanel('unverified', err.body.email);
+    if (loginMethod === 'mobile') {
+      busy(btn, true, 'Sending code…');
+      const r = await api('/auth/login/otp', { method: 'POST', body: { phone: form.phone.value } });
+      msg.classList.add('hidden');
+      startOtp('login', r);
     } else {
-      showServerFieldError(e.target, err);
-      formMsg(msg, err.message, 'err');
+      busy(btn, true, 'Signing in…');
+      const r = await api('/auth/login', { method: 'POST', body: { login: form.login.value, password: form.password.value } });
+      session.user = r.user;
+      form.reset();
+      await enterApp();
     }
+  } catch (err) {
+    showServerFieldError(form, err);
+    formMsg(msg, err.message, 'err');
   }
   busy(btn, false);
+  return undefined;
 });
 
 /* ------------------------------------------------- sign-in field checks */
@@ -1146,7 +1224,7 @@ function checkAuthField(input) {
 
 /** Every field at once; the first one that fails gets the focus. */
 function validateAuthForm(form) {
-  const fields = $$('input[name]', form).filter((i) => AUTH_RULES[i.name] && !i.closest('.hp'));
+  const fields = $$('input[name]', form).filter((i) => AUTH_RULES[i.name] && !i.disabled && !i.closest('.hp'));
   const bad = fields.filter((i) => !checkAuthField(i));
   bad[0]?.focus();
   return !bad.length;
@@ -1262,6 +1340,8 @@ $('#form-otp').addEventListener('submit', async (e) => {
       $('#form-login').reset();
       await enterApp();
     } else {
+      // Signed up and signed in: the email can be verified now or later.
+      session.user = r.user;
       signupForm.reset();
       syncSignupButton();
       $('.pw-meter', signupForm).dataset.score = '';
@@ -1322,21 +1402,31 @@ function showEmailPanel(kind, email, extra = {}) {
   emailPanelAddress = email || '';
   const who = `<b>${esc(email || 'your email')}</b>`;
   const plan = extra.requested
-    ? ` Your ${esc(extra.requested.name)} request is with our team.`
+    ? ` Next: pay for ${esc(extra.requested.name)} to start it.`
     : extra.plan ? ` Your workspace is ready on the ${esc(extra.plan.name)} plan.` : '';
   const copy = {
-    sent: ['Check your email', `Your mobile number is verified and your account is created. We sent a link to ${who} — click it to verify your email, then sign in.${plan}`],
+    sent: ['Verify your email', `Your mobile number is verified and your account is ready. We sent a link to ${who} — click it to verify your email, now or later.${plan}`],
     unverified: ['Verify your email first', `Your account is waiting for its email to be confirmed. Click the link we sent to ${who}, then sign in.`],
     expired: ['That link has expired', `Verification links work for a limited time. Send a new one to ${who} and click it.`],
   }[kind];
   $('#email-title').textContent = copy[0];
   $('#email-sub').innerHTML = copy[1];
   $('#email-resend').hidden = !email;
+  // Signed in already (just signed up): carry on and verify later. Otherwise back to sign in.
+  $('#email-later').hidden = !session.user;
+  $('#email-back').hidden = Boolean(session.user);
   openAuth('email');
   if (kind === 'sent' && extra.emailSent === false) {
     formMsg($('#email-msg'), 'Email is not set up on this server yet, so the link was written to the server log instead.', 'info');
   }
 }
+
+// Into the panel: a paid plan picked at sign-up opens Razorpay first (autoPayPending), then the dashboard.
+$('#email-later').addEventListener('click', async (e) => {
+  busy(e.target, true, 'Opening…');
+  await enterApp();
+  busy(e.target, false);
+});
 
 $('#email-resend').addEventListener('click', async (e) => {
   const msg = $('#email-msg');
@@ -1359,6 +1449,7 @@ function handleVerifyReturn() {
   history.replaceState(null, '', location.pathname);
 
   if (result === 'expired') return showEmailPanel('expired', email);
+  setLoginMethod('email');
   openAuth('login');
   if (email) $('#form-login').login.value = email;
   const say = {
@@ -1512,7 +1603,7 @@ $('#form-password').addEventListener('submit', async (e) => {
 
 async function loadServers() {
   const box = $('#server-list');
-  box.innerHTML = '<div class="empty">Loading…</div>';
+  box.innerHTML = skeleton('cards');
   try {
     const servers = await api('/servers');
     if (!servers.length) {
@@ -1520,12 +1611,23 @@ async function loadServers() {
       return;
     }
     box.innerHTML = servers.map(serverCard).join('');
+    drawServerHealthFilter();
     // The cards are drawn from the stored rows; this fills in what the monitor
     // knows right now rather than leaving them blank until the next tick.
     pollServerStatuses();
   } catch (err) {
     box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
   }
+}
+
+/** The All / Critical / Warning / Normal chips above the server cards, counted from the cards. */
+function drawServerHealthFilter() {
+  const box = $('#server-health-filter');
+  if (!box) return;
+  const levels = $$('#server-list .card[data-health-level]').map((c) => c.dataset.healthLevel);
+  box.innerHTML = levels.length ? healthFilterBar('#server-list', levels, 'servers') : '';
+  const bar = $('[data-health-filter]', box);
+  if (bar) applyHealthFilter(bar);
 }
 
 /** Green when the last check reached the host, red when it did not. */
@@ -1582,6 +1684,7 @@ async function pollServerStatuses() {
       + ` · checking every ${r.everySeconds}s`;
   }
 
+  let healthChanged = false;
   for (const s of r.servers) {
     const card = $(`#server-list .card[data-server="${s.id}"]`);
     if (!card) continue;
@@ -1595,6 +1698,16 @@ async function pollServerStatuses() {
       badge.textContent = s.status;
     }
 
+    // Going offline makes a server critical; coming back puts its recorded level back.
+    const base = card.dataset.healthBase === 'none' ? null : card.dataset.healthBase;
+    const level = s.status === 'offline' || s.status === 'error' ? 'critical' : base;
+    if ((level || 'none') !== card.dataset.healthLevel) {
+      card.dataset.healthLevel = level || 'none';
+      const hb = $('[data-health]', card);
+      if (hb) hb.outerHTML = healthBadge(level);
+      healthChanged = true;
+    }
+
     const note = $('[data-status-note]', card);
     if (note) note.innerHTML = statusNote(s);
 
@@ -1606,6 +1719,7 @@ async function pollServerStatuses() {
       problem.innerHTML = text ? `<div class="msg err" style="margin-top:12px">${esc(text)}</div>` : '';
     }
   }
+  if (healthChanged) drawServerHealthFilter();
 }
 
 /**
@@ -1728,15 +1842,21 @@ function serverUsage(sum) {
 
 function serverCard(s) {
   const sum = s.summary;
+  const level = serverHealth(s);
+  // The level without the reachability check, so the status poll can put it back when the server returns.
+  const base = serverHealth({ ...s, status: 'online' });
   return `
-  <div class="card" data-server="${s.id}">
+  <div class="card" data-server="${s.id}" data-health-level="${level || 'none'}" data-health-base="${base || 'none'}">
     <div class="card-head">
       <div>
         <h3><span class="dot ${esc(s.status)}"></span> ${esc(s.name)}</h3>
         <div class="muted small">${esc(s.username)}@${esc(s.host)}:${s.port} · ${s.auth_type === 'key' ? 'SSH key' : 'password'}</div>
         <div class="muted small" data-status-note></div>
       </div>
-      <span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>
+      <div class="head-badges">
+        <span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>
+        ${healthBadge(level, s.health)}
+      </div>
     </div>
     ${s.tags.length ? `<div class="chips" style="margin-top:10px">${s.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
     ${sum ? `
@@ -1824,13 +1944,18 @@ const SERVER_TABS = [
   { key: 'users', label: 'Users', load: () => loadServerUsers() },
   { key: 'services', label: 'Services', load: () => loadServerServices() },
   { key: 'runners', label: 'Runners', load: () => loadServerRunners() },
+  { key: 'terminal', label: 'Terminal', needs: 'edit', load: () => loadServerTerminal() },
 ];
+
+// A tab that needs a permission (the terminal runs commands) is left out for roles without it.
+const serverTabs = () => SERVER_TABS.filter((t) => !t.needs || canDo(t.needs));
 
 let currentTab = 'overview';
 let tabsLoaded = new Set();
 
 async function openServer(id) {
   stopLiveStats();
+  closeTerminal();
   // Opening a different server starts at the top; refreshing keeps your place.
   if (String(id) !== String(currentServerId)) {
     currentTab = 'overview';
@@ -1845,7 +1970,7 @@ async function openServer(id) {
 
   show('server-detail');
   $('#detail-tabs').innerHTML = '';
-  $('#detail-body').innerHTML = '<div class="empty">Loading…</div>';
+  $('#detail-body').innerHTML = skeleton('detail');
 
   try {
     const s = await api(`/servers/${id}`);
@@ -1860,9 +1985,9 @@ async function openServer(id) {
     const panels = s.facts ? renderFactTabs(s.facts) : null;
     const noFacts = '<div class="empty">No system details yet. Click <b>Fetch system details</b> to connect and read this server.</div>';
 
-    $('#detail-tabs').innerHTML = SERVER_TABS.map((t) => `<button class="tab ${t.key === currentTab ? 'active' : ''}" data-tab="${t.key}"><span>${esc(t.label)}</span><span class="tab-count" id="tab-count-${t.key}"></span></button>`).join('');
+    $('#detail-tabs').innerHTML = serverTabs().map((t) => `<button class="tab ${t.key === currentTab ? 'active' : ''}" data-tab="${t.key}"><span>${esc(t.label)}</span><span class="tab-count" id="tab-count-${t.key}"></span></button>`).join('');
 
-    $('#detail-body').innerHTML = SERVER_TABS.map((t) => `
+    $('#detail-body').innerHTML = serverTabs().map((t) => `
       <div class="tab-panel" data-panel="${t.key}" ${t.key === currentTab ? '' : 'hidden'}>
         ${t.key === 'overview' ? '<div class="section" id="server-summary"></div>' : ''}
         ${t.key === 'storage'
@@ -1879,11 +2004,11 @@ async function openServer(id) {
 
 const liveTabPanelId = (key) => ({
   live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel', nginxlogs: 'nginx-logs-panel',
-  cron: 'cron-panel', users: 'users-panel', services: 'services-panel', runners: 'server-runners-panel',
+  cron: 'cron-panel', users: 'users-panel', services: 'services-panel', runners: 'server-runners-panel', terminal: 'terminal-panel',
 }[key]);
 
 function showServerTab(key) {
-  const tab = SERVER_TABS.find((t) => t.key === key) || SERVER_TABS[0];
+  const tab = serverTabs().find((t) => t.key === key) || SERVER_TABS[0];
   currentTab = tab.key;
   syncRoute();
 
@@ -1899,6 +2024,9 @@ function showServerTab(key) {
   if (tab.load && !tabsLoaded.has(tab.key)) {
     tabsLoaded.add(tab.key);
     tab.load();
+  } else if (tab.key === 'terminal') {
+    // The shell kept running while hidden; size it to the panel again and give it the keyboard.
+    requestAnimationFrame(fitTerminal);
   }
 }
 
@@ -1926,6 +2054,147 @@ $('#detail-tabs').addEventListener('click', (e) => {
 });
 
 $('#btn-back').addEventListener('click', () => { show('servers'); loadServers(); });
+$('#btn-detail-terminal').addEventListener('click', () => showServerTab('terminal'));
+
+/* ------------------------------------------------------------ terminal */
+
+/*
+ * A real shell on the server, in the page (src/lib/terminal.js). It keeps
+ * running while you look at the other tabs and closes when you leave the
+ * server. xterm.js is only fetched the first time a terminal opens.
+ */
+let term = null; // { xterm, fit, ws, serverId, resizeObs }
+let xtermAssets = null;
+
+function loadXterm() {
+  if (window.Terminal && window.FitAddon) return Promise.resolve();
+  xtermAssets = xtermAssets || new Promise((resolve, reject) => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = '/vendor/xterm/css/xterm.css';
+    document.head.appendChild(css);
+    const add = (src) => new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = ok;
+      s.onerror = () => fail(new Error('The terminal could not be loaded — reload the page and try again.'));
+      document.head.appendChild(s);
+    });
+    add('/vendor/xterm/lib/xterm.js').then(() => add('/vendor/addon-fit/lib/addon-fit.js'))
+      .then(resolve, (err) => { xtermAssets = null; reject(err); });
+  });
+  return xtermAssets;
+}
+
+function loadServerTerminal() {
+  const box = $('#terminal-panel');
+  if (!box) return;
+  const s = currentServer;
+  box.innerHTML = `
+    <div class="term-shell" id="term-shell">
+      <div class="term-bar">
+        <span class="term-title">${esc(s.username)}@${esc(s.host)}</span>
+        <span class="badge" id="term-state">connecting…</span>
+        <span class="grow"></span>
+        <button class="btn tiny" data-term="clear">Clear</button>
+        <button class="btn tiny" data-term="full">Full screen</button>
+        <button class="btn tiny primary" data-term="reconnect">Reconnect</button>
+      </div>
+      <div class="term-box" id="term-box"></div>
+    </div>
+    <p class="muted small" style="margin-top:10px">A live shell as <b>${esc(s.username)}</b> on <b>${esc(s.host)}</b>.
+      Commands run on the server exactly as typed — there is no undo. Opening and closing the terminal is recorded in the activity log; what you type is not.</p>`;
+  openTerminal();
+}
+
+function setTermState(word, tone = '') {
+  const el = $('#term-state');
+  if (!el) return;
+  el.textContent = word;
+  el.className = `badge ${tone}`;
+}
+
+/** Fit the terminal to its box and tell the server the new size. */
+function fitTerminal() {
+  if (!term || !$('#term-box')?.offsetParent) return;
+  try { term.fit.fit(); } catch { /* not laid out yet */ }
+  if (term.ws.readyState === WebSocket.OPEN) term.ws.send(JSON.stringify({ t: 'resize', cols: term.xterm.cols, rows: term.xterm.rows }));
+  term.xterm.focus();
+}
+
+async function openTerminal() {
+  closeTerminal();
+  const serverId = currentServerId;
+  setTermState('connecting…', 'warn');
+  try {
+    await loadXterm();
+  } catch (err) {
+    setTermState('failed', 'err');
+    return toast(err.message, 'err');
+  }
+  // The page moved on while xterm was loading.
+  if (serverId !== currentServerId || !$('#term-box')) return undefined;
+
+  const xterm = new window.Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace',
+    scrollback: 5000,
+    theme: { background: '#0b0f17', foreground: '#e6e9ef', cursor: '#60a5fa', selectionBackground: 'rgba(96, 165, 250, .35)' },
+  });
+  const fit = new window.FitAddon.FitAddon();
+  xterm.loadAddon(fit);
+  $('#term-box').innerHTML = '';
+  xterm.open($('#term-box'));
+
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/terminal/ws?server=${encodeURIComponent(serverId)}`);
+  ws.binaryType = 'arraybuffer';
+  const t = { xterm, fit, ws, serverId, resizeObs: new ResizeObserver(() => fitTerminal()) };
+  term = t;
+  t.resizeObs.observe($('#term-box'));
+  try { fit.fit(); } catch { /* hidden */ }
+
+  ws.onmessage = (e) => {
+    if (typeof e.data !== 'string') return xterm.write(new Uint8Array(e.data));
+    let m;
+    try { m = JSON.parse(e.data); } catch { return undefined; }
+    if (m.t === 'ready') { setTermState('connected', 'ok'); fitTerminal(); }
+    else if (m.t === 'error') xterm.writeln(`\r\n\x1b[31m${m.message}\x1b[0m`);
+    else if (m.t === 'exit') xterm.writeln(`\r\n\x1b[90m[shell exited${m.code != null ? ` with code ${m.code}` : ''}]\x1b[0m`);
+    return undefined;
+  };
+  ws.onclose = () => {
+    if (term !== t) return;
+    setTermState('disconnected');
+    xterm.writeln('\r\n\x1b[90m[disconnected — press Reconnect to open a new shell]\x1b[0m');
+  };
+  xterm.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'in', d })); });
+  return undefined;
+}
+
+function closeTerminal() {
+  if (!term) return;
+  const t = term;
+  term = null;
+  t.resizeObs.disconnect();
+  try { t.ws.close(); } catch { /* already closed */ }
+  t.xterm.dispose();
+  document.body.classList.remove('term-full-open');
+}
+
+$('#detail-body').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-term]');
+  if (!btn) return;
+  if (btn.dataset.term === 'reconnect') openTerminal();
+  else if (btn.dataset.term === 'clear') { term?.xterm.clear(); term?.xterm.focus(); }
+  else if (btn.dataset.term === 'full') {
+    // Not on Esc: vim, less and friends need that key.
+    const full = $('#term-shell').classList.toggle('full');
+    document.body.classList.toggle('term-full-open', full);
+    btn.textContent = full ? 'Exit full screen' : 'Full screen';
+    requestAnimationFrame(fitTerminal);
+  }
+});
 
 $('#btn-detail-test').addEventListener('click', async (e) => {
   busy(e.target, true, 'Testing…');
@@ -1965,6 +2234,45 @@ function tile(label, value, sub, meterPct) {
 
 function section(title, inner) {
   return `<div class="section"><h2>${esc(title)}</h2>${inner}</div>`;
+}
+
+/**
+ * A shimmering placeholder in the shape of what is loading, shown until the
+ * answer arrives: 'cards' (a list of cards), 'table' (rows), 'detail' (tiles
+ * over a table), 'plans' (price cards) or 'lines' (a block of text).
+ * The label is read out to screen readers.
+ */
+function skeleton(kind = 'table', { n, label = 'Loading…' } = {}) {
+  const W = ['72%', '48%', '86%', '60%', '38%', '66%', '54%', '80%'];
+  const bar = (w, h = 10, cls = '') => `<i class="sk ${cls}" style="width:${w};height:${h}px"></i>`;
+  const times = (count, fn) => Array.from({ length: count }, (_, i) => fn(i)).join('');
+  const rows = (count) => `<div class="card sk-table">
+    <div class="sk-row th">${times(5, (i) => bar(i ? '50%' : '30%', 8))}</div>
+    ${times(count, (r) => `<div class="sk-row">${times(5, (i) => bar(W[(r + i * 3) % W.length], i === 4 ? 20 : 10, i === 4 ? 'pill' : ''))}</div>`)}
+  </div>`;
+  const tiles = (count) => `<div class="tiles">${times(count, (i) => `<div class="tile sk-tile">${bar('45%', 8)}${bar(W[(i + 2) % W.length], 18)}</div>`)}</div>`;
+
+  let inner;
+  if (kind === 'cards') {
+    inner = `<div class="grid">${times(n || 3, (i) => `<div class="card sk-card">
+      <div class="sk-head"><i class="sk dot"></i>${bar(['50%', '42%', '58%'][i % 3], 14)}</div>
+      ${bar('32%', 9)}
+      ${times(3, (j) => bar(W[(i + j * 2 + 2) % W.length]))}
+      <div class="sk-foot">${bar('64px', 20, 'pill')}${bar('84px', 20, 'pill')}</div>
+    </div>`)}</div>`;
+  } else if (kind === 'detail') {
+    inner = `${tiles(4)}${rows(n || 4)}`;
+  } else if (kind === 'plans') {
+    inner = `<div class="price-grid sk-plans">${times(n || 3, (i) => `<div class="price-card">
+      ${bar('40%', 16)}${bar('70%', 10)}${bar('55%', 30)}${bar('100%', 38, 'btn')}
+      ${times(5, (j) => bar(W[(i + j) % W.length]))}
+    </div>`)}</div>`;
+  } else if (kind === 'lines') {
+    inner = `<div class="card sk-lines">${times(n || 5, (i) => bar(W[i % W.length]))}</div>`;
+  } else {
+    inner = rows(n || 6);
+  }
+  return `<div class="sk-wrap" role="status" aria-busy="true"><span class="sr-only">${esc(label)}</span>${inner}</div>`;
 }
 
 function kvCard(title, pairs) {
@@ -2212,7 +2520,8 @@ async function loadFileBrowser(path = filesPath, { history = true } = {}) {
   filesPath = path;
   filesSelected = null;
   closeFxMenu();
-  const loading = `<div class="fx-empty"><span class="spinner"></span>Reading ${esc(path)} and measuring folder sizes (up to 20 seconds)…</div>`;
+  const loading = `<p class="muted small" style="margin:12px 16px 0">Reading ${esc(path)} and measuring folder sizes (up to 20 seconds)…</p>
+    ${skeleton('table', { n: 8, label: `Reading ${path}` })}`;
   // Keep the explorer in place while the next folder loads, like Explorer does.
   if ($('#files-table')) {
     $('#files-table').innerHTML = loading;
@@ -2886,7 +3195,7 @@ async function loadServerServices() {
   const box = $('#services-panel');
   if (!box) return;
   tabsLoaded.add('services');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Reading the service list from the server…</div>';
+  box.innerHTML = skeleton('table', { label: 'Reading the service list from the server…' });
   try {
     const r = await api(`/servers/${currentServerId}/services`);
     servicesCache = r.services;
@@ -3042,7 +3351,7 @@ async function openServiceDetail(unit) {
   const modal = $('#modal-service-detail');
   $('#service-detail-name').textContent = unit;
   $('#service-detail-sub').textContent = currentServer ? `on ${currentServer.name} (${currentServer.host})` : '';
-  $('#service-detail-body').innerHTML = '<div class="empty"><span class="spinner"></span>Reading the unit and its journal…</div>';
+  $('#service-detail-body').innerHTML = skeleton('detail', { label: 'Reading the unit and its journal…' });
   modal.classList.remove('hidden');
   try {
     const { service: s } = await api(`/servers/${currentServerId}/services/${encodeURIComponent(unit)}`);
@@ -3149,7 +3458,7 @@ async function loadServerRunners() {
   const box = $('#server-runners-panel');
   if (!box) return;
   tabsLoaded.add('runners');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Checking the runners on this server…</div>';
+  box.innerHTML = skeleton('table', { label: 'Checking the runners on this server…' });
 
   const head = `
     <div class="section-head">
@@ -3273,7 +3582,7 @@ function watchConnectors() {
 async function loadConnectors({ quiet = false } = {}) {
   const box = $('#connector-list');
   if (!quiet) {
-    box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading…</div>';
+    box.innerHTML = skeleton('cards');
     watchConnectors();
   }
   $('#form-connector').style.display = canDo('create') ? '' : 'none';
@@ -4395,7 +4704,7 @@ $('#btn-reopen-popup').addEventListener('click', () => {
 
 async function loadGitList() {
   const box = $('#git-list');
-  box.innerHTML = '<div class="empty">Loading…</div>';
+  box.innerHTML = skeleton('cards');
   try {
     const list = await api('/credentials?provider=git');
     if (!list.length) {
@@ -4470,7 +4779,7 @@ let currentGitRepos = [];
 async function openGit(id) {
   currentGitId = id;
   show('git-detail');
-  $('#git-body').innerHTML = '<div class="empty"><span class="spinner"></span>Loading repositories…</div>';
+  $('#git-body').innerHTML = skeleton('detail', { label: 'Loading repositories…' });
   try {
     const cred = await api(`/credentials/${id}`);
     const a = cred.extra.account || {};
@@ -4538,7 +4847,7 @@ $('#git-body').addEventListener('click', async (e) => {
 
   if (branchBtn) {
     const { repo, branch } = branchBtn.dataset;
-    box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading commits…</div>';
+    box.innerHTML = skeleton('table', { label: 'Loading commits…' });
     try {
       const r = await api(`/credentials/${currentGitId}/git/commits`, { method: 'POST', body: { repo, branch } });
       box.innerHTML = `
@@ -4560,7 +4869,7 @@ $('#git-body').addEventListener('click', async (e) => {
 
   if (!repoBtn) return;
   const repo = repoBtn.dataset.repo;
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading branches…</div>';
+  box.innerHTML = skeleton('table', { label: 'Loading branches…' });
   try {
     const r = await api(`/credentials/${currentGitId}/git/branches`, { method: 'POST', body: { repo } });
     box.innerHTML = `
@@ -4673,7 +4982,7 @@ async function loadGitRunners() {
       </div>
     </div>`;
 
-  box.innerHTML = `${head}<div class="empty"><span class="spinner"></span>Loading runners…</div>`;
+  box.innerHTML = `${head}${skeleton('table', { label: 'Loading runners…' })}`;
 
   try {
     const mine = await api(`/runners?credential_id=${currentGitId}`);
@@ -4741,7 +5050,7 @@ async function loadRepoRunners(repo) {
         ${ifCan('create', `<button class="btn tiny primary" data-git-runner-add="1" data-target="${esc(repo)}">+ Add runner</button>`)}
       </div>
     </div>`;
-  box.innerHTML = `${head}<div class="empty"><span class="spinner"></span>Asking the provider which runners this repository has…</div>`;
+  box.innerHTML = `${head}${skeleton('table', { label: 'Asking the provider which runners this repository has…' })}`;
 
   try {
     const r = await api(`/credentials/${currentGitId}/git/runners`, { method: 'POST', body: { scope: 'repo', target: repo } });
@@ -4903,8 +5212,12 @@ const DB_ENGINES = {
   postgres: { label: 'PostgreSQL', icon: '🐘', port: 5432, dbLabel: 'Database to connect to', userHint: 'postgres or an app role' },
   mongodb: { label: 'MongoDB', icon: '🍃', port: 27017, dbLabel: 'Default database', userHint: 'empty if authentication is off' },
   redis: { label: 'Redis', icon: '⚡', port: 6379, dbLabel: 'Database number (0–15)', userHint: 'empty for the "default" user' },
+  elasticsearch: { label: 'Elasticsearch', icon: '🔍', port: 9200, dbLabel: 'Default index (optional)', userHint: 'elastic, or empty if security is off', dbWord: ['index', 'indices'] },
 };
 const DB_PROVIDERS = Object.keys(DB_ENGINES);
+/** What the open connection's engine calls a database — Elasticsearch has indices. */
+const dbWord = (plural = false) => (DB_ENGINES[eng.cred?.provider]?.dbWord || ['database', 'databases'])[plural ? 1 : 0];
+const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1);
 let dbFilter = 'all';
 
 /*
@@ -4932,6 +5245,11 @@ const DB_LOGOS = {
     color: '#dc382d',
     svg: '<path d="M12 4 20.5 7.6 12 11.2 3.5 7.6Z"/><path d="M3.5 12 12 15.6 20.5 12"/><path d="M3.5 16.4 12 20 20.5 16.4"/>',
   },
+  // A magnifying glass over a search bar.
+  elasticsearch: {
+    color: '#00a9a5',
+    svg: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5.5 5.5"/><path d="M7.5 10.5h6"/>',
+  },
 };
 
 /** The engine's tile: `size` in px. */
@@ -4945,7 +5263,7 @@ function dbLogo(provider, size = 40) {
 
 async function loadMysqlList() {
   const box = $('#mysql-list');
-  box.innerHTML = '<div class="empty">Loading…</div>';
+  box.innerHTML = skeleton('cards');
   try {
     const all = await api(`/credentials?provider=${DB_PROVIDERS.join(',')}`);
     const counts = Object.fromEntries(DB_PROVIDERS.map((p) => [p, all.filter((c) => c.provider === p).length]));
@@ -4954,7 +5272,7 @@ async function loadMysqlList() {
 
     const list = dbFilter === 'all' ? all : all.filter((c) => c.provider === dbFilter);
     if (!list.length) {
-      box.innerHTML = `<div class="empty">No ${dbFilter === 'all' ? 'database' : DB_ENGINES[dbFilter].label} connections yet. Click <b>+ Add database connection</b> to connect MySQL, PostgreSQL, MongoDB or Redis — or install one from <b>Installations</b> and it appears here by itself.</div>`;
+      box.innerHTML = `<div class="empty">No ${dbFilter === 'all' ? 'database' : DB_ENGINES[dbFilter].label} connections yet. Click <b>+ Add database connection</b> to connect MySQL, PostgreSQL, MongoDB, Redis or Elasticsearch — or install one from <b>Installations</b> and it appears here by itself.</div>`;
       return;
     }
     box.innerHTML = list.map((c) => {
@@ -5150,7 +5468,7 @@ let my = {};
 
 const myApi = (path, options = { method: 'POST' }) => api(`/credentials/${currentMysqlId}/mysql${path}`, options);
 const myPanel = (key) => $(`#mysql-panel-${key}`);
-const myLoading = (key, text = 'Reading…') => { myPanel(key).innerHTML = `<div class="empty"><span class="spinner"></span>${esc(text)}</div>`; };
+const myLoading = (key, text = 'Reading…') => { myPanel(key).innerHTML = skeleton(key === 'overview' ? 'detail' : 'table', { label: text }); };
 const myError = (key, err) => { myPanel(key).innerHTML = `<div class="msg err">${esc(err.message)}</div>`; };
 
 async function openMysql(id, { reset = false } = {}) {
@@ -5942,7 +6260,7 @@ const engineTabs = () => ENGINE_TABS.filter((t) => !t.only || t.only === eng.cre
 
 const engApi = (path, body = {}, method = 'POST') => api(`/credentials/${currentEngineId}/db${path}`, { method, body });
 const engPanel = (key) => $(`#db-panel-${key}`);
-const engLoading = (key, what = 'Reading…') => { engPanel(key).innerHTML = `<div class="empty"><span class="spinner"></span>${esc(what)}</div>`; };
+const engLoading = (key, what = 'Reading…') => { engPanel(key).innerHTML = skeleton(key === 'overview' ? 'detail' : 'table', { label: what }); };
 const engError = (key, err) => { engPanel(key).innerHTML = `<div class="msg err">${esc(err.message)}</div>`; };
 
 /* drawing the shapes */
@@ -5997,14 +6315,14 @@ async function openEngine(id) {
   eng = { loaded: new Set() };
   show('db-detail');
   $('#db-tabs').innerHTML = '';
-  $('#db-body').innerHTML = '<div class="empty"><span class="spinner"></span>Opening…</div>';
+  $('#db-body').innerHTML = skeleton('detail', { label: 'Opening…' });
 
   try {
     eng.cred = await api(`/credentials/${id}`);
     // The tabs depend on the engine, so they are drawn once it is known.
     const tabs = engineTabs();
     if (!tabs.some((t) => t.key === engineTab)) engineTab = 'overview';
-    $('#db-tabs').innerHTML = tabs.map((t) => `<button class="tab ${t.key === engineTab ? 'active' : ''}" data-eng-tab="${t.key}"><span>${esc(t.label)}</span><span class="tab-count" id="eng-count-${t.key}"></span></button>`).join('');
+    $('#db-tabs').innerHTML = tabs.map((t) => `<button class="tab ${t.key === engineTab ? 'active' : ''}" data-eng-tab="${t.key}"><span>${esc(t.key === 'databases' ? capital(dbWord(true)) : t.label)}</span><span class="tab-count" id="eng-count-${t.key}"></span></button>`).join('');
     $('#db-body').innerHTML = tabs.map((t) => `<div class="tab-panel" data-panel="${t.key}" id="db-panel-${t.key}" ${t.key === engineTab ? '' : 'hidden'}></div>`).join('');
     const e = DB_ENGINES[eng.cred.provider];
     $('#db-name').innerHTML = `<span class="db-title">${dbLogo(eng.cred.provider, 34)}<span>${esc(eng.cred.name)}</span></span>`;
@@ -6098,7 +6416,7 @@ async function rkSearch({ more = false } = {}) {
     rk.keys = [];
     rk.cursor = '0';
     rk.selected.clear();
-    $('#rk-rows').innerHTML = '<div class="empty"><span class="spinner"></span>Searching…</div>';
+    $('#rk-rows').innerHTML = skeleton('table', { label: 'Searching…' });
   }
   const btn = $('[data-rk="more"]', rkBox());
   if (more) busy(btn, true, 'Loading…');
@@ -6150,7 +6468,7 @@ function rkSyncSelection() {
 async function rkOpen(key, { more = false, match } = {}) {
   const detail = $('#rk-detail');
   const prev = rk.open && rk.open.key === key ? rk.open : null;
-  if (!more) detail.innerHTML = '<div class="empty"><span class="spinner"></span>Reading…</div>';
+  if (!more) detail.innerHTML = skeleton('lines', { label: 'Reading…' });
   const filter = match !== undefined ? match : (prev?.match || '');
   try {
     const body = { database: rk.db, key, match: filter };
@@ -6596,10 +6914,10 @@ function renderEngineDatabases(d) {
   engPanel('databases').innerHTML = `
     <div class="section">
       <div class="section-head">
-        <h2>Databases</h2>
+        <h2>${capital(dbWord(true))}</h2>
         <div class="section-tools">
-          <input type="search" id="eng-db-filter" placeholder="Filter databases" />
-          ${caps.create ? ifCan('create', '<button class="btn tiny primary" data-eng-action="create-db">+ Create database</button>') : ''}
+          <input type="search" id="eng-db-filter" placeholder="Filter ${dbWord(true)}" />
+          ${caps.create ? ifCan('create', `<button class="btn tiny primary" data-eng-action="create-db">+ Create ${dbWord()}</button>`) : ''}
         </div>
       </div>
       ${engStats(d.stats)}
@@ -6626,13 +6944,13 @@ async function openEngineDatabase(name) {
     const d = await engApi('/database', { name });
     const caps = eng.databases?.caps || {};
     engPanel('databases').innerHTML = `
-      <button class="link-back" data-eng-nav="databases">← all databases</button>
+      <button class="link-back" data-eng-nav="databases">← all ${dbWord(true)}</button>
       <div class="section">
         <div class="section-head">
           <h2>${esc(d.title)}</h2>
           <div class="section-tools">
-            ${eng.cred?.provider === 'redis' ? '' : ifCan('create', `<button class="btn tiny" data-eng-action="create-user" data-db="${esc(name)}">+ User for this database</button>`)}
-            ${caps.drop !== false ? ifCan('delete', `<button class="btn tiny danger" data-eng-action="drop-db" data-name="${esc(name)}">${esc(caps.dropLabel || 'Drop')} database</button>`) : ''}
+            ${eng.cred?.provider === 'redis' ? '' : ifCan('create', `<button class="btn tiny" data-eng-action="create-user" data-db="${esc(name)}">+ User for this ${dbWord()}</button>`)}
+            ${caps.drop !== false ? ifCan('delete', `<button class="btn tiny danger" data-eng-action="drop-db" data-name="${esc(name)}">${esc(caps.dropLabel || 'Drop')} ${dbWord()}</button>`) : ''}
           </div>
         </div>
         ${engStats(d.stats)}
@@ -6765,10 +7083,10 @@ async function engineAction(action, btn) {
   if (action === 'create-db') {
     const caps = await engineCaps('databases');
     return openMyDialog({
-      title: 'Create database',
+      title: `Create ${dbWord()}`,
       intro: esc(caps.createNote || ''),
       fields: caps.createFields.map(engField).join(''),
-      submitLabel: 'Create database',
+      submitLabel: `Create ${dbWord()}`,
       submit: async (fd) => (await engApi('/schemas', engFormValues(fd, caps.createFields))).summary,
       after: () => { eng.openDb = null; return engineAfterDatabaseChange(); },
     });
@@ -6782,7 +7100,7 @@ async function engineAction(action, btn) {
       title: `${verb} ${name}?`,
       intro: `<div class="msg err">${esc(caps.dropNote || `Everything in ${name} is deleted for good. There is no undo — take a backup first if you might need it.`)}</div>`,
       fields: `<label>Type <code>${esc(name)}</code> to confirm<input name="confirm" autocomplete="off" required /></label>${(caps.dropFields || []).map(engField).join('')}`,
-      submitLabel: `${verb} database`,
+      submitLabel: `${verb} ${dbWord()}`,
       danger: true,
       submit: async (fd) => {
         if (fd.get('confirm') !== name) throw new Error('The name does not match');
@@ -6924,6 +7242,7 @@ const ENGINE_QUERY_FALLBACK = {
   postgres: { placeholder: 'SELECT * FROM customers LIMIT 20', hint: 'Read-only, inside a transaction that is rolled back.', databaseLabel: 'Database' },
   mongodb: { placeholder: '{ "collection": "orders", "filter": {}, "limit": 20 }', hint: 'A JSON find or aggregate. Nothing that writes.', databaseLabel: 'Database' },
   redis: { placeholder: 'GET mykey', hint: 'One read-only command.', databaseLabel: 'Database (db0–db15)' },
+  elasticsearch: { placeholder: 'GET /_cat/indices', hint: 'GET, or POST to _search / _count. Nothing that writes.', databaseLabel: 'Index' },
 };
 
 $('#btn-db-query').addEventListener('click', () => {
@@ -7183,7 +7502,7 @@ cfModal.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('clic
 
 async function loadCloudflareList() {
   const box = $('#cf-list');
-  box.innerHTML = '<div class="empty">Loading…</div>';
+  box.innerHTML = skeleton('cards');
   const list = await api('/credentials?provider=cloudflare');
   if (!list.length) {
     box.innerHTML = '<div class="empty">No Cloudflare accounts yet. Click <b>+ Connect Cloudflare</b> and sign in on Cloudflare.</div>';
@@ -7253,7 +7572,7 @@ async function openCloudflare(id) {
   show('cf-detail');
   setHeading('Account management');
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === 'accounts'));
-  $('#cf-body').innerHTML = '<div class="empty"><span class="spinner"></span>Loading…</div>';
+  $('#cf-body').innerHTML = skeleton('detail');
   try {
     currentCf = await api(`/credentials/${id}`);
     renderCloudflare();
@@ -7352,7 +7671,7 @@ function renderCloudflare() {
 
 async function openCfZone(zoneId) {
   const box = $('#cf-body');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading domain…</div>';
+  box.innerHTML = skeleton('detail', { label: 'Loading domain…' });
   try {
     const r = await api(`/credentials/${currentCfId}/cloudflare/zones/${zoneId}`, { method: 'POST' });
     const z = r.zone;
@@ -7600,7 +7919,7 @@ async function openZeroTrust(accountId) {
   const acc = accounts.find((a) => a.id === accountId) || accounts.find((a) => a.id === zt?.account.id) || accounts[0];
   if (acc.id !== zt?.account.id) ztFilter = null;
   const box = $('#cf-body');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading Zero Trust…</div>';
+  box.innerHTML = skeleton('detail', { label: 'Loading Zero Trust…' });
   try {
     zt = await api(`/credentials/${currentCfId}/cloudflare/accounts/${acc.id}/zero-trust`, { method: 'POST' });
     renderZeroTrust();
@@ -8110,12 +8429,13 @@ const CRED_HINTS = {
   postgres: 'A PostgreSQL role and password. A superuser (or a role with CREATEROLE and CREATEDB) can also manage users and databases.',
   mongodb: 'A MongoDB user, or nothing if authentication is off. A full mongodb+srv:// connection string also works as the host (Atlas).',
   redis: 'The Redis password (requirepass), plus an ACL username on Redis 6+ if you use one.',
+  elasticsearch: 'The elastic user (or another superuser) and its password, or both empty if security is off. Tick TLS for https://; a full https://host:port URL also works as the host.',
 };
 
 /** Docker Hub accounts, on their tab under Account management. */
 async function loadCredentials() {
   const box = $('#cred-list');
-  box.innerHTML = '<div class="empty">Loading…</div>';
+  box.innerHTML = skeleton('cards');
   const creds = await api('/credentials?provider=dockerhub');
   if (!creds.length) {
     box.innerHTML = '<div class="empty">No Docker Hub accounts yet. Click <b>+ Connect Docker Hub</b> and sign in on Docker Hub.</div>';
@@ -8288,7 +8608,7 @@ async function openDockerHub(id, namespace) {
   show('dh-detail');
   setHeading('Account management');
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === 'accounts'));
-  $('#dh-body').innerHTML = '<div class="empty"><span class="spinner"></span>Loading repositories…</div>';
+  $('#dh-body').innerHTML = skeleton('detail', { label: 'Loading repositories…' });
   try {
     currentDh = await api(`/credentials/${id}`);
     const a = currentDh.extra.account || {};
@@ -8342,7 +8662,7 @@ function renderHubRepos(keepFocus = false) {
 
 async function openHubRepo(repo) {
   const ns = dhRepos.namespace;
-  $('#dh-body').innerHTML = '<div class="empty"><span class="spinner"></span>Loading tags…</div>';
+  $('#dh-body').innerHTML = skeleton('detail', { label: 'Loading tags…' });
   try {
     dhRepo = await api(`${dhBase()}/${encodeURIComponent(ns)}/${encodeURIComponent(repo)}`, { method: 'POST' });
     renderHubRepo();
@@ -8484,11 +8804,11 @@ $('#cred-list').addEventListener('click', async (e) => {
 
 const CRED_TITLES = {
   git: 'Add git access token', dockerhub: 'Add Docker Hub account', cloudflare: 'Add Cloudflare API token',
-  mysql: 'Add database connection', postgres: 'Add database connection', mongodb: 'Add database connection', redis: 'Add database connection',
+  mysql: 'Add database connection', postgres: 'Add database connection', mongodb: 'Add database connection', redis: 'Add database connection', elasticsearch: 'Add database connection',
 };
 
-/** MongoDB and Redis can run without authentication. */
-const passwordOptional = (provider) => provider === 'mongodb' || provider === 'redis';
+/** MongoDB, Redis and Elasticsearch can run without authentication. */
+const passwordOptional = (provider) => provider === 'mongodb' || provider === 'redis' || provider === 'elasticsearch';
 
 /** The form as the API wants it: an unticked TLS box is still an answer. */
 function credBody() {
@@ -8748,7 +9068,7 @@ setInterval(() => { if (document.querySelector('[data-since]')) tickElapsed(); }
 
 async function loadApps({ quiet = false } = {}) {
   const box = $('#app-list');
-  if (!quiet) box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading…</div>';
+  if (!quiet) box.innerHTML = skeleton('cards');
   try {
     const apps = await api('/apps');
     if (!apps.length) {
@@ -8759,8 +9079,11 @@ async function loadApps({ quiet = false } = {}) {
       </div>`;
       return;
     }
-    box.innerHTML = `<div class="grid">${apps.map((a) => appCard(a)).join('')}</div>`;
+    box.innerHTML = `${healthFilterBar('#app-list .grid', apps.map((a) => appHealth(a) || 'none'), 'apps')}
+      <div class="grid">${apps.map((a) => appCard(a)).join('')}</div>`;
+    applyHealthFilter($('[data-health-filter]', box));
     watchDeployments(apps);
+    if (!quiet) watchAppUsage({ view: '#view-apps' });
   } catch (err) {
     if (!quiet) box.innerHTML = `<div class="empty">${esc(err.message)}</div>`;
   }
@@ -8781,7 +9104,7 @@ async function loadServerApps({ quiet = false } = {}) {
       <div class="section-tools">${tools}</div>
     </div>`;
 
-  if (!quiet) box.innerHTML = `${head('')}<div class="empty"><span class="spinner"></span>Loading apps…</div>`;
+  if (!quiet) box.innerHTML = `${head('')}${skeleton('cards', { label: 'Loading apps…' })}`;
   try {
     const apps = await api(`/apps?server_id=${currentServerId}`);
     setTabCount('apps', apps.length);
@@ -8789,12 +9112,16 @@ async function loadServerApps({ quiet = false } = {}) {
       ${head(`<button class="btn tiny" data-app-reload="1">Refresh</button>
               ${ifCan('create', '<button class="btn tiny primary" data-app-add="1">+ Custom service</button>')}`)}
       ${apps.length
-        ? `<div class="grid">${apps.map((a) => appCard(a)).join('')}</div>`
+        ? `${healthFilterBar('#server-apps-panel .grid', apps.map((a) => appHealth(a) || 'none'), 'server-apps')}
+           <div class="grid">${apps.map((a) => appCard(a)).join('')}</div>`
         : `<div class="card"><p class="muted small" style="margin:0">
              Nothing is deployed here yet. <b>+ Custom service</b> takes a repository from one of your git
              accounts, builds it into a Docker image on ${esc(currentServer?.name || 'this server')} and runs it.
            </p></div>`}`;
+    const bar = $('[data-health-filter]', box);
+    if (bar) applyHealthFilter(bar);
     watchDeployments(apps, { view: '#view-server-detail', reload: loadServerApps });
+    if (!quiet && apps.length) watchAppUsage({ view: '#server-apps-panel', serverId: currentServerId });
   } catch (err) {
     box.innerHTML = `${head('')}<div class="msg err">${esc(err.message)}</div>`;
   }
@@ -8804,8 +9131,9 @@ function appCard(a) {
   const d = a.detected || {};
   const busyNow = a.status === 'deploying';
   const mark = appTypeMark(a);
+  const level = appHealth(a);
   return `
-  <div class="card ${busyNow ? 'working' : ''}" data-app-card="${a.id}">
+  <div class="card ${busyNow ? 'working' : ''}" data-app-card="${a.id}" data-health-level="${level || 'none'}">
     <div class="card-head">
       <div>
         <h3><button class="file-name dir" data-app-action="details" data-id="${a.id}" data-name="${esc(a.name)}" title="All details and settings">🚀 ${esc(a.name)}</button></h3>
@@ -8815,12 +9143,10 @@ function appCard(a) {
         ${a.autoDeploy?.enabled ? `<span class="badge ok" title="${a.autoDeploy.trigger === 'merge' ? 'Merged pull / merge requests' : 'Every push'} to ${esc(a.branch)} deploys it">⚡ auto</span>` : ''}
         <span class="badge type">${mark.icon} ${esc(mark.label)}</span>
         <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'in progress' : esc(a.status)}</span>
+        ${busyNow || a.status === 'removing' ? '' : healthBadge(level, a.health)}
       </div>
     </div>
-    ${a.status === 'removing' ? `<div class="deploy-progress">
-      <div class="muted small"><span class="spinner"></span>Removing from ${esc(a.server?.name || 'the server')} — containers, domains and webhook…</div>
-      <div class="meter indeterminate"><span></span></div>
-    </div>` : ''}
+    ${a.status === 'removing' ? removingProgress(a) : ''}
     ${busyNow && a.currentDeploy ? deployBanner(a, { compact: true }) : busyNow ? `<div class="deploy-progress">
       <div class="muted small"><span class="spinner"></span>${a.currentStep ? `${esc(a.currentStep)}…` : 'Starting…'}
         <span data-since="${esc(a.deploy_started_at || '')}"></span></div>
@@ -8832,6 +9158,7 @@ function appCard(a) {
       <dt>Address</dt><dd>${appAddress(a)}</dd>
       <dt>Last deployed</dt><dd>${a.last_deployed_at ? `${esc(agoWords(a.last_deployed_at))}` : '<span class="muted">never</span>'}</dd>
     </dl>
+    <div class="app-usage" data-app-usage="${a.id}" data-status="${esc(a.status)}">${appUsageHtml(a)}</div>
     ${appProblem(a)}
     <div class="card-actions">
       <button class="btn tiny primary" data-app-action="details" data-id="${a.id}" data-name="${esc(a.name)}">View details</button>
@@ -8841,6 +9168,22 @@ function appCard(a) {
       ${busyNow || removalState(a) ? '' : ifCan('create', `<button class="btn tiny" data-app-action="${a.status === 'running' ? 'stop' : 'start'}" data-id="${a.id}">${a.status === 'running' ? 'Stop' : 'Start'}</button>`)}
       ${a.status === 'remove_failed' ? removeRetryButtons(a) : ''}
     </div>
+  </div>`;
+}
+
+/**
+ * A removal in progress: the step it is on and how long it has run. One that
+ * has taken over two minutes can be taken off the panel without waiting.
+ */
+function removingProgress(a) {
+  const started = a.removal?.startedAt || a.updated_at;
+  const slow = started && Date.now() - parseWhen(started).getTime() > 2 * 60000;
+  return `<div class="deploy-progress">
+    <div class="muted small"><span class="spinner"></span>${esc(a.removal?.step || `Removing from ${a.server?.name || 'the server'}`)}…
+      ${started ? `<span data-since="${esc(started)}"></span>` : ''}</div>
+    <div class="meter indeterminate"><span></span></div>
+    ${slow ? `<p class="muted small" style="margin:8px 0 0">Taking longer than it should — it gives up by itself after 6 minutes, or:</p>
+      <div class="card-actions">${ifCan('delete', `<button class="btn tiny danger" data-app-action="delete" data-force="1" data-id="${a.id}" data-name="${esc(a.name)}">Remove from panel only</button>`)}</div>` : ''}
   </div>`;
 }
 
@@ -8867,6 +9210,266 @@ function appProblem(a) {
   const text = a.last_error ? a.last_error : failed.length ? `${failed[0].domain}: ${failed[0].error || 'setup failed'}` : '';
   if (!text) return '';
   return `<div class="msg err" style="margin-top:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(text)}">${esc(String(text).slice(0, 160))}</div>`;
+}
+
+/* --- what each app is using, on its card */
+
+/** appId → { cur, prev }: the last two snapshots, so the card can show rates. */
+const appUsageCache = new Map();
+let appUsageTimer = null;
+
+/** Statuses with no containers worth asking about — the server skips these too. */
+const usageless = (a) => ['deploying', 'removing', 'pending'].includes(a.status);
+
+/** Bytes per second between two cumulative readings, or null with only one. */
+function usageRate(cur, prev, key) {
+  if (!prev || !cur.at || !prev.at) return null;
+  const secs = (new Date(cur.at) - new Date(prev.at)) / 1000;
+  return secs > 0 ? Math.max(0, (cur[key] - prev[key]) / secs) : null;
+}
+
+function appUsageHtml(a) {
+  if (usageless(a)) return '';
+  const entry = appUsageCache.get(String(a.id));
+  const u = entry?.cur;
+  if (!u) return '<span class="muted small"><span class="spinner"></span>Reading usage…</span>';
+  if (u.error) return `<span class="muted small" title="${esc(u.error)}">Usage unavailable — ${esc(String(u.error).slice(0, 80))}</span>`;
+  if (!u.running) return '<span class="muted small">Not running — nothing to measure</span>';
+  const rx = usageRate(u, entry.prev, 'netRxBytes');
+  const tx = usageRate(u, entry.prev, 'netTxBytes');
+  return `
+    <div class="app-usage-item" title="Docker counts per core: ${u.cpuPct}% here is ${u.cpuOfHostPct}% of all ${u.host.cores} cores">
+      <div class="app-usage-top"><span>CPU</span><b class="${meterClass(u.cpuOfHostPct)}">${u.cpuPct}%</b></div>
+      ${liveBar(u.cpuOfHostPct)}
+    </div>
+    <div class="app-usage-item" title="${u.memoryOfHostPct}% of the server's ${bytes(u.host.memoryBytes)}">
+      <div class="app-usage-top"><span>Memory</span><b class="${meterClass(u.memoryOfHostPct)}">${bytes(u.memoryBytes)}</b></div>
+      ${liveBar(u.memoryOfHostPct)}
+    </div>
+    <div class="app-usage-item" title="${bytes(u.netRxBytes)} in · ${bytes(u.netTxBytes)} out since it started">
+      <div class="app-usage-top"><span>Network</span><b>${rx === null ? bytes(u.netRxBytes + u.netTxBytes) : `↓${rate(rx)}`}</b></div>
+      <div class="muted small">${rx === null ? 'since start' : `↑${rate(tx)}`} · ${u.running}/${u.total} up${u.restarts ? ` · ${u.restarts} restarts` : ''}</div>
+    </div>`;
+}
+
+/** Ask for every app's usage and patch the cards in place. */
+async function refreshAppUsage(serverId = null) {
+  let r;
+  try {
+    r = await api(`/apps/stats${serverId ? `?server_id=${serverId}` : ''}`);
+  } catch {
+    return;
+  }
+  for (const [id, cur] of Object.entries(r.apps || {})) {
+    const before = appUsageCache.get(id)?.cur;
+    appUsageCache.set(id, { cur, prev: before && !before.error ? before : null });
+  }
+  for (const el of $$('[data-app-usage]')) {
+    const id = el.dataset.appUsage;
+    if (!appUsageCache.has(id)) continue;
+    // Only the strip is redrawn, so the card's buttons are never replaced under a click.
+    el.innerHTML = appUsageHtml({ id, status: el.dataset.status });
+  }
+}
+
+/** Keep the cards' usage current every 20s while their list is on screen. */
+function watchAppUsage({ view, serverId = null }) {
+  clearInterval(appUsageTimer);
+  refreshAppUsage(serverId);
+  appUsageTimer = setInterval(() => {
+    const el = $(view);
+    if (!el || el.offsetParent === null) {
+      clearInterval(appUsageTimer);
+      appUsageTimer = null;
+      return;
+    }
+    refreshAppUsage(serverId);
+  }, 20000);
+}
+
+/* --- one app, live, on its details page */
+
+/** The open live view: which app, its stream, the samples so far and what the pill last said. */
+let appLive = null;
+
+function stopAppLive() {
+  if (appLive) appLive.stream.close();
+  appLive = null;
+}
+
+/**
+ * Draw the live tab and start its stream — or, when the details page was only
+ * redrawn around a stream already running for this app, put the last sample
+ * back and carry on with the same stream.
+ */
+function mountAppLive(id) {
+  const box = $('#ad-live-panel');
+  if (!box) return;
+  box.innerHTML = appLiveFrame();
+
+  if (appLive && String(appLive.id) === String(id)) {
+    setLiveState(...appLive.state, '#ad-live-state');
+    const last = appLive.history[appLive.history.length - 1];
+    if (last) drawAppLive(last);
+    return;
+  }
+
+  stopAppLive();
+  const stream = new EventSource(`/api/apps/${id}/stats/stream?every=5000`);
+  const live = { id, stream, history: [], state: ['connecting', 'Opening a session on the server…'] };
+  appLive = live;
+  const say = (kind, text) => {
+    live.state = [kind, text];
+    if (appLive === live) setLiveState(kind, text, '#ad-live-state');
+  };
+  say(...live.state);
+
+  stream.addEventListener('sample', (e) => {
+    if (appLive !== live) return;
+    try {
+      const s = JSON.parse(e.data);
+      s.rates = appLiveRates(s, live.history[live.history.length - 1]);
+      live.history.push(s);
+      if (live.history.length > HISTORY) live.history.shift();
+      say('live', `every 5s · ${new Date(s.at).toLocaleTimeString()}`);
+      drawAppLive(s);
+    } catch { /* one bad frame is not worth tearing the view down */ }
+  });
+  stream.addEventListener('problem', (e) => say('problem', JSON.parse(e.data).error));
+  stream.addEventListener('end', () => say('reconnecting', 'The live view timed out — reconnecting…'));
+  stream.onerror = () => say('reconnecting', 'Connection lost — reconnecting…');
+}
+
+/**
+ * Per-second rates between two samples, per container and in total. A
+ * container that restarted in between starts its counters again from zero,
+ * so a drop counts as nothing rather than as a negative rate.
+ */
+function appLiveRates(s, prev) {
+  const out = { rx: null, tx: null, read: null, write: null, byName: {} };
+  if (!prev) return out;
+  const secs = (new Date(s.at) - new Date(prev.at)) / 1000;
+  if (secs <= 0) return out;
+  const before = new Map(prev.containers.map((c) => [c.name, c]));
+  const per = (c, p, key) => Math.max(0, ((c[key] || 0) - (p[key] || 0)) / secs);
+  Object.assign(out, { rx: 0, tx: 0, read: 0, write: 0 });
+  for (const c of s.containers) {
+    const p = before.get(c.name);
+    if (!p || c.state !== 'running') continue;
+    const r = { rx: per(c, p, 'netRxBytes'), tx: per(c, p, 'netTxBytes'), read: per(c, p, 'blockReadBytes'), write: per(c, p, 'blockWriteBytes') };
+    out.byName[c.name] = r;
+    for (const k of ['rx', 'tx', 'read', 'write']) out[k] += r[k];
+  }
+  return out;
+}
+
+function appLiveFrame() {
+  return `
+    <div class="live-head">
+      <div>
+        <h2 class="live-title">Live usage</h2>
+        <div class="muted small" id="ad-live-footer">&nbsp;</div>
+      </div>
+      <div class="section-tools" id="ad-live-state"></div>
+    </div>
+    <div id="ad-live-alerts"></div>
+    <div class="live-kpis">
+      ${liveKpi('cpu', 'CPU', 'ad-live')}
+      ${liveKpi('mem', 'Memory', 'ad-live')}
+      ${liveKpi('net', 'Network', 'ad-live')}
+      ${liveKpi('disk', 'Disk I/O', 'ad-live')}
+    </div>
+    <div class="live-card flush">
+      <div class="live-card-head"><h3>Containers</h3><span class="muted small" id="ad-live-count"></span></div>
+      <div id="ad-live-containers"></div>
+    </div>`;
+}
+
+function drawAppLive(s) {
+  const history = appLive?.history || [s];
+  const u = s.usage;
+  const r = s.rates || {};
+  const measuring = '<span class="muted">measuring…</span>';
+
+  const cpu = history.map((h) => h.usage.cpuPct);
+  setKpi('cpu', {
+    value: `${u.cpuPct}%`,
+    tone: meterClass(u.cpuOfHostPct),
+    tag: `${s.host.cores} cores`,
+    sub: `${u.cpuOfHostPct}% of the whole server`,
+    sub2: `peak ${Math.max(...cpu)}% · last ${uptimeWords(cpu.length * 5)}`,
+    spark: sparkline(cpu, { max: Math.max(10, ...cpu), color: toneColor(u.cpuOfHostPct), label: `CPU over the last ${cpu.length} samples, now ${u.cpuPct}%` }),
+  }, 'ad-live');
+
+  const mem = history.map((h) => h.usage.memoryBytes);
+  // A container with no limit reports the host's memory as its limit.
+  const limited = s.containers.filter((c) => c.memoryLimitBytes && c.memoryLimitBytes < s.host.memoryBytes);
+  const nearLimit = Math.max(0, ...s.containers.map((c) => c.memoryPct || 0));
+  setKpi('mem', {
+    value: bytes(u.memoryBytes),
+    tone: meterClass(Math.max(u.memoryOfHostPct, limited.length ? nearLimit : 0)),
+    tag: `of ${bytes(s.host.memoryBytes)}`,
+    sub: `${u.memoryOfHostPct}% of the server's memory`,
+    sub2: limited.length ? `limit ${bytes(limited[0].memoryLimitBytes)} · ${nearLimit}% used` : `peak ${bytes(Math.max(...mem))} · no limit set`,
+    spark: sparkline(mem, { max: Math.max(...mem) * 1.2 || 1, color: toneColor(u.memoryOfHostPct), label: `Memory over the last ${mem.length} samples, now ${bytes(u.memoryBytes)}` }),
+  }, 'ad-live');
+
+  const rx = history.map((h) => h.rates?.rx || 0);
+  const tx = history.map((h) => h.rates?.tx || 0);
+  setKpi('net', {
+    value: r.rx === null || r.rx === undefined ? '—' : `↓ ${rate(r.rx)}`,
+    tag: 'in / out',
+    sub: r.tx === null || r.tx === undefined ? measuring : `↑ ${rate(r.tx)} <span class="muted">out</span>`,
+    sub2: `${bytes(u.netRxBytes)} in · ${bytes(u.netTxBytes)} out since start`,
+    spark: sparkline(rx, { max: Math.max(...rx, ...tx) || 1, values2: tx, label: 'Network in (solid) and out (dashed)' }),
+  }, 'ad-live');
+
+  const rd = history.map((h) => h.rates?.read || 0);
+  const wr = history.map((h) => h.rates?.write || 0);
+  setKpi('disk', {
+    value: r.write === null || r.write === undefined ? '—' : `↑ ${rate(r.write)}`,
+    tag: 'write / read',
+    sub: r.read === null || r.read === undefined ? measuring : `↓ ${rate(r.read)} <span class="muted">read</span>`,
+    sub2: `${u.pids} processes · ${u.restarts} restart${u.restarts === 1 ? '' : 's'}`,
+    spark: sparkline(wr, { max: Math.max(...wr, ...rd) || 1, values2: rd, label: 'Disk writes (solid) and reads (dashed)' }),
+  }, 'ad-live');
+
+  const upFor = (c) => (c.startedAt ? uptimeWords(Math.max(0, (Date.now() - new Date(c.startedAt)) / 1000)) : '—');
+  $('#ad-live-count').textContent = `${u.running} of ${u.total} running`;
+  $('#ad-live-containers').innerHTML = liveTable(
+    [{ label: 'Container' }, { label: 'State' }, { label: 'Up for' }, { label: 'CPU', num: true }, { label: 'Memory', num: true },
+      { label: 'Net ↓ / ↑', num: true }, { label: 'Disk ↓ / ↑', num: true }, { label: 'PIDs', num: true }, { label: 'Restarts', num: true }],
+    s.containers.map((c) => {
+      const cr = r.byName?.[c.name];
+      const running = c.state === 'running';
+      return [
+        `<b>${esc(c.name)}</b>${c.health ? ` <span class="badge ${c.health === 'healthy' ? 'ok' : c.health === 'unhealthy' ? 'err' : 'warn'}">${esc(c.health)}</span>` : ''}`,
+        `<span class="badge ${CONTAINER_TONE[c.state] ?? 'err'}">${esc(c.state)}</span>${c.oomKilled ? ' <span class="badge err">out of memory</span>' : ''}`,
+        `<span class="small">${upFor(c)}</span>`,
+        running ? `<b class="${meterClass(c.cpuPct / s.host.cores)}">${c.cpuPct ?? 0}%</b>` : '—',
+        running ? `${bytes(c.memoryBytes)}<div class="muted small">${c.memoryPct ?? 0}% of ${bytes(c.memoryLimitBytes)}</div>` : '—',
+        cr ? `<span class="small">${rate(cr.rx)} / ${rate(cr.tx)}</span>` : '—',
+        cr ? `<span class="small">${rate(cr.read)} / ${rate(cr.write)}</span>` : '—',
+        running ? esc(c.pids ?? 0) : '—',
+        c.restarts ? `<b class="warn">${c.restarts}</b>` : '0',
+      ];
+    }),
+    'No containers for this app on the server'
+  );
+
+  const problems = [];
+  for (const c of s.containers) {
+    if (c.state === 'missing') problems.push(['err', `${c.name} does not exist on the server — redeploy to create it.`]);
+    else if (c.state === 'restarting') problems.push(['err', `${c.name} is restarting in a loop — check its container logs.`]);
+    else if (c.state !== 'running') problems.push(['err', `${c.name} is ${c.state}.`]);
+    if (c.oomKilled) problems.push(['err', `${c.name} was killed for running out of memory.`]);
+    if (c.health === 'unhealthy') problems.push(['err', `${c.name} is failing its health check.`]);
+  }
+  if (u.cpuOfHostPct >= 90) problems.push(['warn', `This app is using ${u.cpuOfHostPct}% of the server's CPU.`]);
+  if (limited.length && nearLimit >= 90) problems.push(['warn', `A container is at ${nearLimit}% of its memory limit.`]);
+  $('#ad-live-alerts').innerHTML = problems.map(([tone, text]) => `<div class="msg ${tone}" style="margin-bottom:8px">${esc(text)}</div>`).join('');
+
+  $('#ad-live-footer').textContent = `On a server with ${s.host.cores} cores and ${bytes(s.host.memoryBytes)} memory`;
 }
 
 $('#btn-apps-refresh').addEventListener('click', loadApps);
@@ -9234,7 +9837,7 @@ async function openAppDetails(id, tab = detailsTab) {
     $('#ad-sub').textContent = '';
     $('#ad-state').innerHTML = '';
     $('#ad-tabs').innerHTML = '';
-    $('#ad-body').innerHTML = '<div class="empty"><span class="spinner"></span>Reading the service…</div>';
+    $('#ad-body').innerHTML = skeleton('detail', { label: 'Reading the service…' });
     $('#ad-actions').innerHTML = '';
     $('#btn-app-detail-back').textContent = detailsFrom === 'server' ? `← ${currentServer?.name || 'Server'}` : '← Apps';
     show('app-detail');
@@ -9279,7 +9882,7 @@ function renderAppDetails(a) {
     <button class="btn tiny" data-ad-refresh="1">Refresh</button>
     ${ifCan('delete', `<button class="btn tiny danger" data-app-action="delete" data-id="${a.id}" data-name="${n}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">Remove</button>`)}`;
 
-  const tabs = [['overview', 'Overview'], ['settings', 'Settings'], ['auto', 'Auto deploy'], ['history', 'Deploy history'], ['domains', `Domains (${(a.domains || []).length})`],
+  const tabs = [['overview', 'Overview'], ['live', 'Live stats'], ['settings', 'Settings'], ['auto', 'Auto deploy'], ['history', 'Deploy history'], ['domains', `Domains (${(a.domains || []).length})`],
     ['containers', `Containers (${a.containers.length})`], ['env', 'Environment & volumes'], ['activity', 'Activity']];
   const ad = a.autoDeploy || {};
   const when = (v) => (v ? esc(String(v).replace('T', ' ').slice(0, 16)) : '—');
@@ -9312,7 +9915,8 @@ function renderAppDetails(a) {
     ['Git account', esc(a.account?.name || '—')],
     ['Image', `<code class="small">${esc(a.image)}:${esc(a.tag)}</code>${a.pushed ? ' <span class="badge ok">pushed to Docker Hub</span>' : ''}`],
   ])}
-      </div>`,
+      </div>
+      <div style="margin-top:14px">${metricsSlot('app', a.id)}</div>`,
     settings: `<div class="two-col">
         ${kvCard('Build', [
     ['Project type', `${mark.icon} ${esc(mark.label)}`],
@@ -9333,8 +9937,9 @@ function renderAppDetails(a) {
   ])}
       </div>
       ${ifCan('edit', `<p style="margin-top:12px">${btn('edit', 'Edit these settings', 'primary')}</p>`)}`,
+    live: `<div id="ad-live-panel" data-app="${a.id}"></div>`,
     auto: `${deployBanner(a)}<div id="ad-auto-panel" data-app="${a.id}">${autoSummaryHtml(a)}</div>`,
-    history: `${deployBanner(a)}<div id="ad-history-panel" data-app="${a.id}"><div class="empty"><span class="spinner"></span>Reading the deploy history…</div></div>`,
+    history: `${deployBanner(a)}<div id="ad-history-panel" data-app="${a.id}">${skeleton('table', { label: 'Reading the deploy history…' })}</div>`,
     domains: `
       ${(a.domains || []).length ? table(
     [{ label: 'Domain' }, { label: 'Status' }, { label: 'How' }, { label: 'Port', num: true }, { label: '' }],
@@ -9380,6 +9985,8 @@ function renderAppDetails(a) {
   $('#ad-body').innerHTML = tabs.map(([k]) => `<div class="tab-panel" data-ad-panel="${k}" ${k === detailsTab ? '' : 'hidden'}>${panels[k]}</div>`).join('');
   if (detailsTab === 'auto') loadAutoPanel(a);
   if (detailsTab === 'history') loadHistoryPanel(a.id);
+  loadMetricsCharts($('#ad-body') || document);
+  if (detailsTab === 'live') mountAppLive(a.id); else stopAppLive();
 
   // Keep it current while something is still happening.
   clearTimeout(renderAppDetails.timer);
@@ -9414,6 +10021,7 @@ $('#view-app-detail').addEventListener('click', (e) => {
     $$('#ad-body [data-ad-panel]').forEach((p) => { p.hidden = p.dataset.adPanel !== detailsTab; });
     if (detailsTab === 'auto') loadAutoPanel({ id: detailsAppId });
     if (detailsTab === 'history') loadHistoryPanel(detailsAppId);
+    if (detailsTab === 'live') mountAppLive(detailsAppId); else stopAppLive();
     return;
   }
   if (e.target.closest('[data-ad-refresh]')) return openAppDetails(detailsAppId, detailsTab);
@@ -9684,7 +10292,7 @@ async function openAppEnv(id, name, reload) {
   $('#app-env-sub').textContent = `${name} — variables given to every container of this service`;
   $('#app-env-msg').classList.add('hidden');
   $('#env-apply').checked = true;
-  $('#env-rows').innerHTML = '<div class="empty">Loading…</div>';
+  $('#env-rows').innerHTML = skeleton('table');
   $('#modal-app-env').classList.remove('hidden');
 
   $('#app-env-source').value = '';
@@ -9765,7 +10373,7 @@ async function openAppContainers(id, name, reload) {
   containersReload = reload;
   $('#app-containers-sub').textContent = `${name} — add, remove or move the containers this service runs as`;
   $('#app-containers-msg').classList.add('hidden');
-  $('#containers-rows').innerHTML = '<div class="empty">Loading…</div>';
+  $('#containers-rows').innerHTML = skeleton('table');
   $('#modal-app-containers').classList.remove('hidden');
 
   try {
@@ -10431,7 +11039,7 @@ async function loadCatalog() {
 
 async function loadInstallsView() {
   const box = $('#install-catalog');
-  box.innerHTML = '<div class="empty">Loading…</div>';
+  box.innerHTML = skeleton('cards');
   try {
     await loadCatalog();
     box.innerHTML = catalog.map((c) => `
@@ -10455,7 +11063,7 @@ async function loadInstallsView() {
 /** Everything the panel has installed, across every server. */
 async function loadInstallList() {
   const box = $('#install-list-panel');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading installed services…</div>';
+  box.innerHTML = skeleton('table', { label: 'Loading installed services…' });
   try {
     const installs = await api('/installs');
     box.innerHTML = `
@@ -10880,7 +11488,7 @@ async function loadServerDocker() {
   const box = $('#docker-panel');
   if (!box) return;
   tabsLoaded.add('docker');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Reading Docker…</div>';
+  box.innerHTML = skeleton('detail', { label: 'Reading Docker…' });
 
   const head = (extra = '') => `
     <div class="section-head">
@@ -11085,7 +11693,7 @@ async function openContainerDetails(name, tab = 'overview') {
   $('#ct-sub').textContent = 'Reading…';
   $('#ct-state').innerHTML = '';
   $('#ct-actions').innerHTML = '';
-  $('#ct-body').innerHTML = '<div class="empty"><span class="spinner"></span>Inspecting the container…</div>';
+  $('#ct-body').innerHTML = skeleton('detail', { label: 'Inspecting the container…' });
   modal.classList.remove('hidden');
   try {
     const { container: c } = await api(`/servers/${currentServerId}/containers/${encodeURIComponent(name)}`);
@@ -11450,6 +12058,7 @@ function startLiveStats() {
   statsSeenAlerts = new Set();
 
   box.innerHTML = liveFrame();
+  loadMetricsCharts(box);
   setLiveState('connecting', 'Opening a session on the server…');
 
   const stream = new EventSource(`/api/servers/${currentServerId}/stats/stream?every=5000`);
@@ -11479,8 +12088,8 @@ function startLiveStats() {
   };
 }
 
-function setLiveState(kind, text) {
-  const el = $('#live-state');
+function setLiveState(kind, text, target = '#live-state') {
+  const el = $(target);
   if (!el) return;
   const tone = { live: 'ok', connecting: '', reconnecting: 'warn', problem: 'err' }[kind] ?? '';
   el.innerHTML = `<span class="live-pill ${tone}"><i class="live-dot"></i>${kind === 'live' ? 'Live' : esc(kind)}</span>
@@ -11491,13 +12100,13 @@ function setLiveState(kind, text) {
 const toneColor = (p) => ({ err: 'var(--err)', warn: 'var(--warn)' }[meterClass(p)] || 'var(--accent)');
 
 /** One of the four headline numbers, with room for a sparkline under it. */
-const liveKpi = (key, label) => `
+const liveKpi = (key, label, prefix = 'live') => `
   <div class="live-kpi">
-    <div class="live-kpi-head"><span>${label}</span><span class="live-kpi-tag" id="live-${key}-tag"></span></div>
-    <div class="live-kpi-value" id="live-${key}">—</div>
-    <div class="live-kpi-sub" id="live-${key}-sub">&nbsp;</div>
-    <div class="live-kpi-sub" id="live-${key}-sub2">&nbsp;</div>
-    <div class="live-spark" id="live-${key}-spark"></div>
+    <div class="live-kpi-head"><span>${label}</span><span class="live-kpi-tag" id="${prefix}-${key}-tag"></span></div>
+    <div class="live-kpi-value" id="${prefix}-${key}">—</div>
+    <div class="live-kpi-sub" id="${prefix}-${key}-sub">&nbsp;</div>
+    <div class="live-kpi-sub" id="${prefix}-${key}-sub2">&nbsp;</div>
+    <div class="live-spark" id="${prefix}-${key}-spark"></div>
   </div>`;
 
 /** The frame, drawn once; every id in here is patched by drawLiveSample. */
@@ -11519,6 +12128,8 @@ function liveFrame() {
       ${liveKpi('load', 'Load average')}
       ${liveKpi('net', 'Network')}
     </div>
+
+    ${metricsSlot('server', currentServerId)}
 
     <div class="live-split">
       <div class="live-card">
@@ -11563,21 +12174,227 @@ function sparkline(values, { max = 100, color = 'var(--accent)', label = '', val
   </svg>`;
 }
 
+/* --------------------------------------------- statistics over time */
+
+/**
+ * A day, a week or a month of a server's or an app's usage, from the samples
+ * the panel records every few minutes. Daily is the default; the choice is
+ * remembered per kind so a server page and an app page each keep their own.
+ */
+const METRIC_RANGES = [['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']];
+const HEALTH_WORDS = { critical: 'Critical', warning: 'Warning', ok: 'Normal' };
+const HEALTH_TONE = { critical: 'err', warning: 'warn', ok: 'ok' };
+const metricRange = {};
+
+/** The placeholder a page drops in; loadMetricsCharts fills every one on screen. */
+const metricsSlot = (kind, id) => `<div class="mchart-slot" data-metrics-kind="${kind}" data-metrics-id="${id}"></div>`;
+
+function loadMetricsCharts(root = document) {
+  $$('[data-metrics-kind]', root).forEach((slot) => loadMetricsChart(slot));
+}
+
+async function loadMetricsChart(slot, range = metricRange[slot.dataset.metricsKind] || 'daily') {
+  const { metricsKind: kind, metricsId: id } = slot.dataset;
+  metricRange[kind] = range;
+  slot.innerHTML = metricsFrame(range, `<div class="mchart-empty muted small"><span class="spinner"></span> Reading the history…</div>`);
+  try {
+    const m = await api(`/${kind === 'app' ? 'apps' : 'servers'}/${id}/metrics?range=${range}&tz=${new Date().getTimezoneOffset()}`);
+    if (!slot.isConnected || metricRange[kind] !== range) return;
+    slot.innerHTML = metricsFrame(range, metricsBody(kind, m), m);
+  } catch (err) {
+    if (slot.isConnected) slot.innerHTML = metricsFrame(range, `<div class="msg err">${esc(err.message)}</div>`);
+  }
+}
+
+function metricsFrame(range, body, m = null) {
+  return `<div class="live-card mchart">
+    <div class="live-card-head">
+      <h3>Statistics${m ? ` <span class="mchart-sub">— ${esc(m.label)}</span>` : ''}</h3>
+      <div class="seg" role="group" aria-label="Time range">${METRIC_RANGES.map(([k, label]) => `<button type="button" data-metrics-range="${k}" class="${k === range ? 'active' : ''}" aria-pressed="${k === range}">${label}</button>`).join('')}</div>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function metricsBody(kind, m) {
+  const series = [
+    { key: 'cpu', label: 'CPU', cls: 's1' },
+    { key: 'memory', label: 'Memory', cls: 's2' },
+    ...(kind === 'server' ? [{ key: 'disk', label: 'Disk', cls: 's3' }] : []),
+  ];
+  const have = m.points.filter((p) => p.cpu !== null);
+  if (!have.length) {
+    return `<div class="mchart-empty muted small">No samples recorded in this range yet. The panel takes one every
+      ${m.everyMinutes} minutes while the ${kind === 'app' ? "app's server" : 'server'} is online — check back soon.</div>`;
+  }
+
+  const peak = (k) => Math.max(...have.map((p) => p[`${k}Max`] ?? p[k] ?? 0));
+  const avg = (k) => Math.round(have.reduce((t, p) => t + (p[k] || 0), 0) / have.length);
+  const c = m.counts;
+  const pctOf = (n) => (c.samples ? Math.round((n / c.samples) * 100) : 0);
+
+  return `
+    <div class="mchart-stats">
+      ${['critical', 'warning', 'ok'].map((lvl) => `<div class="mchart-stat ${HEALTH_TONE[lvl]}">
+        <span>${HEALTH_WORDS[lvl]}</span><b>${pctOf(c[lvl])}%</b>
+        <small class="muted">${c[lvl]} of ${c.samples} samples</small></div>`).join('')}
+      ${series.map((s) => `<div class="mchart-stat"><span><i class="mchart-key ${s.cls}"></i>${s.label}</span>
+        <b>${avg(s.key)}%</b><small class="muted">avg · peak ${Math.round(peak(s.key))}%</small></div>`).join('')}
+    </div>
+    ${metricsSvg(m, series)}
+    <div class="mchart-legend muted small">
+      ${series.map((s) => `<span><i class="mchart-key ${s.cls}"></i>${s.label}</span>`).join('')}
+      <span><i class="mchart-key lvl ok"></i>Normal</span><span><i class="mchart-key lvl warn"></i>Warning</span><span><i class="mchart-key lvl err"></i>Critical</span>
+      <span class="mchart-legend-note">one point per ${m.bucketSeconds >= 86400 ? 'day' : `${m.bucketSeconds / 3600} hour${m.bucketSeconds > 3600 ? 's' : ''}`}</span>
+    </div>`;
+}
+
+/** The lines on a 0–100% scale, with a strip under them coloured by the worst level in each bucket. */
+function metricsSvg(m, series) {
+  const W = 720; const H = 220; const L = 34; const R = 8; const T = 8; const B = 40;
+  const pts = m.points;
+  const step = (W - L - R) / Math.max(1, pts.length - 1);
+  const x = (i) => L + i * step;
+  const y = (v) => T + (1 - Math.min(100, Math.max(0, v)) / 100) * (H - T - B - 14);
+  const plotBottom = y(0);
+
+  const path = (key) => {
+    let d = ''; let pen = false;
+    pts.forEach((p, i) => {
+      if (p[key] === null || p[key] === undefined) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`;
+      pen = true;
+    });
+    return d;
+  };
+  const dots = (key, cls) => pts.map((p, i) => {
+    const lone = p[key] !== null && (pts[i - 1]?.[key] ?? null) === null && (pts[i + 1]?.[key] ?? null) === null;
+    return lone ? `<circle class="${cls}" cx="${x(i).toFixed(1)}" cy="${y(p[key]).toFixed(1)}" r="2.5" />` : '';
+  }).join('');
+
+  const tick = (p) => {
+    const d = new Date(p.at);
+    if (m.range === 'daily') return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (m.range === 'weekly') return d.toLocaleDateString([], { weekday: 'short', day: 'numeric' });
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  };
+  const every = m.range === 'weekly' ? 4 : m.range === 'monthly' ? 5 : 4;
+  const tipTime = (p) => new Date(p.at).toLocaleString([], m.range === 'monthly'
+    ? { day: 'numeric', month: 'short', year: 'numeric' } : { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  const stripY = H - B + 4;
+  const colW = Math.max(2, step);
+  return `<svg class="chart mchart-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(`${series.map((s) => s.label).join(', ')} usage, ${m.label}`)}">
+    <g class="grid">${[0, 25, 50, 75, 100].map((v) => `<line class="${v ? '' : 'base'}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" /><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}%</text>`).join('')}</g>
+    ${series.map((s) => `<path class="mchart-line ${s.cls}" d="${path(s.key)}" />${dots(s.key, `mchart-dot ${s.cls}`)}`).join('')}
+    ${pts.map((p, i) => `<rect class="mchart-lvl ${p.level ? HEALTH_TONE[p.level] : 'none'}" x="${(x(i) - colW / 2).toFixed(1)}" y="${stripY}" width="${(colW - 1).toFixed(1)}" height="6" rx="1.5" />`).join('')}
+    ${pts.map((p, i) => (i % every === 0 || i === pts.length - 1) && (i === pts.length - 1 || pts.length - 1 - i >= every / 2)
+    ? `<text x="${x(i)}" y="${H - 12}" text-anchor="middle">${esc(tick(p))}</text>` : '').join('')}
+    ${pts.map((p, i) => `<g class="col"><rect class="hit" x="${(x(i) - step / 2).toFixed(1)}" y="${T}" width="${step.toFixed(1)}" height="${(stripY + 6 - T).toFixed(1)}" />
+      <line class="mchart-cursor" x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${plotBottom}" />
+      <title>${esc(tipTime(p))}\n${p.cpu === null ? 'No samples' : `${series.map((s) => `${s.label}: ${p[s.key]}% (peak ${p[`${s.key}Max`] ?? p[s.key]}%)`).join('\n')}\nStatus: ${HEALTH_WORDS[p.level]}`}</title></g>`).join('')}
+  </svg>`;
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-metrics-range]');
+  const slot = btn?.closest('[data-metrics-kind]');
+  if (slot) loadMetricsChart(slot, btn.dataset.metricsRange);
+});
+
+/**
+ * Critical, Warning or Normal for a card. An unreachable server is critical
+ * whatever it last reported; otherwise the worse of the newest recorded sample
+ * and the stored disk / memory / CPU summary.
+ */
+function serverHealth(s) {
+  if (s.status === 'offline' || s.status === 'error') return 'critical';
+  const rank = { ok: 0, warning: 1, critical: 2 };
+  let worst = s.health?.level || null;
+  const sum = s.summary;
+  if (sum) {
+    for (const [kind, p] of [['disk', sum.diskUsedPct], ['memory', sum.memoryUsedPct], ['cpu', sum.cpuLoadPct]]) {
+      if (p === null || p === undefined) continue;
+      const lvl = { err: 'critical', warn: 'warning', ok: 'ok' }[resourceTone(kind, Math.round(p))];
+      if (worst === null || rank[lvl] > rank[worst]) worst = lvl;
+    }
+  }
+  return worst;
+}
+
+/** An app that failed, or whose containers are down, is critical; a stopped one is just stopped. */
+function appHealth(a) {
+  if (['deploying', 'removing', 'pending'].includes(a.status)) return null;
+  if (a.status === 'stopped') return 'ok';
+  if (a.status === 'failed' || a.status === 'error' || a.status === 'remove_failed') return 'critical';
+  return a.health?.level || null;
+}
+
+function healthBadge(level, sample) {
+  if (!level) return '<span class="badge" data-health="" title="No samples recorded yet">no data</span>';
+  const tip = sample?.at ? `Last sample ${agoWords(sample.at)}${sample.cpu != null ? ` — CPU ${Math.round(sample.cpu)}%, memory ${Math.round(sample.memory)}%` : ''}` : '';
+  return `<span class="badge ${HEALTH_TONE[level]}" data-health="${level}" title="${esc(tip)}">${level === 'ok' ? '●' : '▲'} ${HEALTH_WORDS[level]}</span>`;
+}
+
+/**
+ * All / Critical / Warning / Normal above a list of cards, with counts. The
+ * cards carry their level in data-health-level; this only hides and shows.
+ */
+const healthFilter = {};
+
+function healthFilterBar(list, levels, key) {
+  const n = (lvl) => levels.filter((l) => l === lvl).length;
+  const active = healthFilter[key] || 'all';
+  const chips = [['all', 'All', levels.length], ['critical', 'Critical', n('critical')], ['warning', 'Warning', n('warning')], ['ok', 'Normal', n('ok')]];
+  return `<div class="chips health-filter" data-health-filter="${key}" data-health-list="${list}">${chips.map(([k, label, count]) => `<button type="button" class="chip-btn ${k === active ? 'active' : ''}" data-health-pick="${k}">${label} <b>${count}</b></button>`).join('')}</div>`;
+}
+
+function applyHealthFilter(bar) {
+  const key = bar.dataset.healthFilter;
+  const pick = healthFilter[key] || 'all';
+  $$('[data-health-pick]', bar).forEach((b) => b.classList.toggle('active', b.dataset.healthPick === pick));
+  const list = $(bar.dataset.healthList);
+  if (!list) return;
+  let shown = 0;
+  $$('[data-health-level]', list).forEach((card) => {
+    const show = pick === 'all' || card.dataset.healthLevel === pick;
+    card.classList.toggle('hidden', !show);
+    if (show) shown += 1;
+  });
+  let none = $('.health-none', list);
+  if (!shown && !none) {
+    list.insertAdjacentHTML('beforeend', '<div class="empty health-none"></div>');
+    none = $('.health-none', list);
+  }
+  if (none) {
+    none.classList.toggle('hidden', Boolean(shown));
+    none.textContent = `Nothing is ${(HEALTH_WORDS[pick] || '').toLowerCase()} right now.`;
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const pick = e.target.closest('[data-health-pick]');
+  const bar = pick?.closest('[data-health-filter]');
+  if (!bar) return;
+  healthFilter[bar.dataset.healthFilter] = pick.dataset.healthPick;
+  applyHealthFilter(bar);
+});
+
 const rate = (n) => `${bytes(n)}/s`;
 
 /** A small bar with its percentage, toned by how full it is. */
 const liveBar = (p) => `<div class="meter"><span class="${meterClass(p)}" style="width:${Math.min(100, Math.max(0, p))}%"></span></div>`;
 
 /** Fill one headline tile. */
-function setKpi(key, { value, tone = '', tag = '', sub = '', sub2 = '', spark = '' }) {
-  const v = $(`#live-${key}`);
+function setKpi(key, { value, tone = '', tag = '', sub = '', sub2 = '', spark = '' }, prefix = 'live') {
+  const v = $(`#${prefix}-${key}`);
   if (!v) return;
   v.textContent = value;
   v.className = `live-kpi-value ${tone}`;
-  $(`#live-${key}-tag`).innerHTML = tag;
-  $(`#live-${key}-sub`).innerHTML = sub || '&nbsp;';
-  $(`#live-${key}-sub2`).innerHTML = sub2 || '&nbsp;';
-  $(`#live-${key}-spark`).innerHTML = spark;
+  $(`#${prefix}-${key}-tag`).innerHTML = tag;
+  $(`#${prefix}-${key}-sub`).innerHTML = sub || '&nbsp;';
+  $(`#${prefix}-${key}-sub2`).innerHTML = sub2 || '&nbsp;';
+  $(`#${prefix}-${key}-spark`).innerHTML = spark;
 }
 
 const liveTable = (headers, rows, emptyText) => (rows.length
@@ -12018,7 +12835,7 @@ async function loadServerCron() {
   const box = $('#cron-panel');
   if (!box) return;
   tabsLoaded.add('cron');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Reading the schedule…</div>';
+  box.innerHTML = skeleton('detail', { label: 'Reading the schedule…' });
 
   const head = (tools = '') => `
     <div class="section-head">
@@ -12267,7 +13084,7 @@ async function loadServerUsers() {
     return;
   }
 
-  box.innerHTML = `${head()}<div class="empty"><span class="spinner"></span>Checking permission and reading the users…</div>`;
+  box.innerHTML = `${head()}${skeleton('table', { label: 'Checking permission and reading the users…' })}`;
   try {
     const { users } = await api(`/servers/${currentServerId}/users`);
     osUsers = users;
@@ -12649,7 +13466,7 @@ async function loadServerNginx() {
   const box = $('#nginx-panel');
   if (!box) return;
   tabsLoaded.add('nginx');
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Reading nginx…</div>';
+  box.innerHTML = skeleton('detail', { label: 'Reading nginx…' });
 
   const head = (tools = '') => `
     <div class="section-head">
@@ -14005,7 +14822,7 @@ async function loadSettings() {
   $('#settings-tabs').innerHTML = visible.map((t) =>
     `<button class="tab ${t.key === settingsTab ? 'active' : ''}" data-settings-tab="${t.key}"><span>${esc(t.label)}</span></button>`).join('');
 
-  box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading…</div>';
+  box.innerHTML = skeleton('detail');
 
   try {
     const [team, orgs] = await Promise.all([
@@ -14315,6 +15132,7 @@ $('#form-org').addEventListener('submit', async (e) => {
 /* ------------------------------------------------------------ activity */
 
 async function loadActivity() {
+  $('#activity-list').innerHTML = skeleton('table', { n: 8 });
   const rows = await api('/activity');
   $('#activity-list').innerHTML = rows.length
     ? `<table><thead><tr><th>When</th><th>Who</th><th>Entity</th><th>Action</th><th>Message</th></tr></thead><tbody>
@@ -14409,7 +15227,7 @@ async function loadPlatform() {
   pf.loaded = new Set();
   $('#pf-body').innerHTML = PF_TABS.map((t) => `
     <div class="tab-panel" data-panel="${t.key}" ${t.key === pf.tab ? '' : 'hidden'}>
-      <div id="pf-panel-${t.key}"><div class="empty">Loading…</div></div>
+      <div id="pf-panel-${t.key}">${skeleton('detail')}</div>
     </div>`).join('');
   showPfTab(pf.tab);
 }
@@ -15220,7 +16038,7 @@ async function pfPaymentDelete(p) {
 function pfOpenOrganisation(id) {
   pf.orgId = id;
   pf.detail = null;
-  $('#pf-panel-org').innerHTML = '<div class="empty">Loading…</div>';
+  $('#pf-panel-org').innerHTML = skeleton('detail');
   showPfTab('org', { reload: true });
 }
 
@@ -15800,7 +16618,7 @@ function leadAsText(d) {
 function pfOpenLead(id) {
   pf.leadId = id;
   pf.lead = null;
-  $('#pf-panel-lead').innerHTML = '<div class="empty">Loading…</div>';
+  $('#pf-panel-lead').innerHTML = skeleton('detail');
   showPfTab('lead', { reload: true });
 }
 
@@ -16276,6 +17094,35 @@ function trialEnded(message) {
   refreshBilling();
 }
 
+/* -------------------------------------------- email not verified yet */
+
+/** Shown on every page until the email's link is clicked ("verify later" at sign-up). */
+function renderVerifyBanner() {
+  const user = session.user;
+  const banner = $('#verify-banner');
+  banner.hidden = !(user && user.emailVerified === false);
+  if (banner.hidden) return;
+  banner.innerHTML = `
+    <div class="verify-text">
+      <b>⚠️ Email verification pending</b>
+      <span>We sent a link to <b>${esc(user.email)}</b>. Click it to verify your email — until then, account and billing emails may not reach you.</span>
+    </div>
+    <button type="button" class="btn" data-verify-resend>Resend link</button>`;
+}
+
+$('#verify-banner').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-verify-resend]');
+  if (!btn) return;
+  busy(btn, true, 'Sending…');
+  try {
+    const r = await api('/auth/verify-email/resend', { method: 'POST', body: { email: session.user.email } });
+    toast(r.message);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  busy(btn, false);
+});
+
 $('#trial-pill').addEventListener('click', () => openBilling());
 $('#trial-banner').addEventListener('click', (e) => { if (e.target.closest('[data-trial-upgrade]')) openBilling(); });
 
@@ -16283,7 +17130,7 @@ async function openBilling() {
   stopLiveStats();
   show('billing');
   setHeading('Plan & billing');
-  $('#billing-body').innerHTML = '<div class="empty">Loading…</div>';
+  $('#billing-body').innerHTML = skeleton('plans');
   await refreshBilling();
   renderBilling();
 }
@@ -16403,7 +17250,43 @@ function renderBilling() {
         </div>` : ''}
       </div>
       ${b.plans.length ? `<div class="price-grid">${cards}</div>` : '<div class="empty">No plans are on offer yet. Contact the platform administrator.</div>'}
-    </div>`;
+    </div>
+    ${paymentHistoryHtml(b.payments || [])}`;
+}
+
+const PAY_STATUS = { paid: ['ok', 'paid'], failed: ['err', 'failed'], incomplete: ['', 'not completed'] };
+
+/** Every payment the organisation made, plus online attempts that did not go through. */
+function paymentHistoryHtml(payments) {
+  const paid = payments.filter((p) => p.status === 'paid');
+  const cur = paid[0]?.currency || 'INR';
+  const total = paid.reduce((n, p) => n + p.amount, 0);
+  const methodWord = (m) => {
+    if (!m) return '—';
+    const [provider, via] = String(m).split('/');
+    return provider === 'razorpay' ? `Razorpay${via ? ` · ${via.toUpperCase()}` : ''}` : m;
+  };
+  return `<div class="section">
+    <div class="section-head">
+      <h2>Payment history</h2>
+      ${paid.length ? `<span class="muted small">${paid.length} payment${paid.length === 1 ? '' : 's'} · ${esc(fmtMoney(total, cur))} in total</span>` : ''}
+    </div>
+    ${table(
+    [{ label: 'Date' }, { label: 'Plan' }, { label: 'Method' }, { label: 'Reference' }, { label: 'Status' }, { label: 'Amount', num: true }],
+    payments.map((p) => {
+      const [badge, word] = PAY_STATUS[p.status] || ['', p.status];
+      return [
+        `<span class="nowrap">${esc(fmtDay(p.at))}</span>`,
+        p.plan ? `${esc(p.plan)}${p.cycle ? ` <span class="muted small">(${esc(p.cycle)})</span>` : ''}` : '—',
+        esc(methodWord(p.method)),
+        p.reference ? `<code>${esc(p.reference)}</code>` : '—',
+        `<span class="badge ${badge}" ${p.error ? `title="${esc(p.error)}"` : ''}>${esc(word)}</span>`,
+        `<b class="nowrap">${esc(fmtMoney(p.amount, p.currency))}</b>`,
+      ];
+    }),
+    'No payments yet.',
+  )}
+  </div>`;
 }
 
 $('#billing-body').addEventListener('click', async (e) => {
@@ -16430,12 +17313,8 @@ $('#billing-body').addEventListener('click', async (e) => {
   const cycle = choose.dataset.cycle;
   const price = cycle === 'yearly' ? plan.priceYearly : plan.priceMonthly;
 
-  if (price && session.billing.payOnline) {
-    if (!await askConfirm(`Pay ${fmtMoney(price, plan.currency)} for ${plan.name} (${cycle === 'yearly' ? 'one year' : 'one month'})?\n\n`
-      + 'Razorpay opens to take the payment by card, UPI, netbanking or wallet. The plan starts as soon as the payment goes through.',
-    { ok: 'Continue to payment' })) return;
-    return payForPlan(plan, cycle, choose);
-  }
+  // A paid plan goes straight to Razorpay — Checkout itself shows the amount before anything is taken.
+  if (price && session.billing.payOnline) return payForPlan(plan, cycle, choose);
 
   const ask = price
     ? `Request ${plan.name} at ${fmtMoney(price, plan.currency)} ${cycle === 'yearly' ? 'a year' : 'a month'}?\n\nIt is switched on once the platform confirms your payment.`
@@ -16536,17 +17415,105 @@ async function payForPlan(plan, cycle, btn) {
       }
     }
 
-    toast(message);
     const wasGated = document.body.classList.contains('needs-plan');
     await refreshBilling();
+    renderBilling();
+    await showPlanDone(message, paid?.razorpay_payment_id);
     // A plan that is on right away opens the rest of the app.
     if (wasGated && session.billing?.active) return enterApp({ keepOrgPicker: true });
-    renderBilling();
   } catch (err) {
     toast(err.message, 'err');
     busy(btn, false);
   }
   return undefined;
+}
+
+/** The payment went through: say which plan is now on, until when, and what was paid. */
+function showPlanDone(message, paymentId) {
+  const sub = session.billing?.subscription;
+  const lines = sub ? [
+    `${sub.plan} (${sub.cycle}) is now active for ${session.billing.organisation?.name || 'your organisation'}.`,
+    [`Paid: ${fmtMoney(sub.amount, sub.currency)}`, sub.renewsAt ? `Renews: ${fmtDay(sub.renewsAt)}` : '', paymentId ? `Payment ID: ${paymentId}` : '']
+      .filter(Boolean).join('\n'),
+  ] : [message];
+  return openAsk({
+    title: 'Payment successful — your plan is active',
+    message: lines.join('\n\n'),
+    tone: 'ok',
+    dismiss: true,
+    buttons: [{ label: session.billing?.active ? 'Start using AJ Pilot' : 'Done', value: true, kind: 'primary', main: true }],
+  });
+}
+
+/*
+ * A paid plan picked at sign-up is waiting as a request. On the first visit
+ * after signing in, a "Pay now" summary of the plan comes up, and Razorpay
+ * opens when they continue — once per request in this browser, so "Pay later"
+ * or closing Checkout does not bring it back on every page load (the billing
+ * page keeps a "Pay now" button for it).
+ */
+const AUTO_PAY_KEY = 'ad-autopay-shown';
+
+function autoPaySeen() {
+  try { return JSON.parse(localStorage.getItem(AUTO_PAY_KEY) || '[]'); } catch { return []; }
+}
+
+/** True when a paid request is waiting that this browser has not opened Razorpay for yet. */
+function autoPayDue() {
+  const b = session.billing;
+  return Boolean(b?.pending && b.payOnline && b.canChoose && b.pending.amount > 0 && !autoPaySeen().includes(b.pending.id));
+}
+
+async function autoPayPending() {
+  if (!autoPayDue()) return;
+  const b = session.billing;
+  const { pending } = b;
+  try { localStorage.setItem(AUTO_PAY_KEY, JSON.stringify([...autoPaySeen(), pending.id].slice(-20))); } catch { /* storage off */ }
+  const plan = b.plans.find((p) => p.id === pending.planId);
+  const btn = $(`#billing-body [data-choose="${pending.planId}"][data-cycle="${pending.cycle}"]`);
+  if (!plan || !btn) return;
+  // Just signed up: show what they are about to pay for, and open Razorpay only when they say so.
+  if (await confirmPlanPayment(plan, pending.cycle)) payForPlan(plan, pending.cycle, btn);
+}
+
+/**
+ * "Pay now" summary before Razorpay: the plan, what it costs for which period,
+ * and what it includes. Resolves true for "Continue to payment", false for "Pay later".
+ */
+function confirmPlanPayment(plan, cycle) {
+  const yearly = cycle === 'yearly' && plan.priceYearly > 0;
+  const price = yearly ? plan.priceYearly : plan.priceMonthly;
+  const saving = yearly && plan.priceMonthly > 0 ? plan.priceMonthly * 12 - plan.priceYearly : 0;
+  const renews = new Date(Date.now() + (yearly ? 365 : 30) * 86400000);
+  const includes = [
+    ...Object.keys(LIMIT_WORDS).map((k) => limitLine(k, plan.limits?.[k])),
+    ...(plan.features || []),
+  ];
+  const html = `
+    <div class="ask-plan">
+      <div class="ask-plan-head">
+        <div><b>${esc(plan.name)}</b>${plan.tagline ? `<span>${esc(plan.tagline)}</span>` : ''}</div>
+        <div class="ask-plan-price"><b>${esc(fmtMoney(price, plan.currency))}</b><span>${yearly ? 'per year' : 'per month'}</span></div>
+      </div>
+      <dl class="ask-plan-kv">
+        <dt>Billing</dt><dd>${yearly ? 'Yearly' : 'Monthly'}${saving > 0 ? ` <span class="badge ok">save ${esc(fmtMoney(saving, plan.currency))}</span>` : ''}</dd>
+        <dt>Starts</dt><dd>As soon as the payment goes through</dd>
+        <dt>Renews</dt><dd>${esc(fmtDay(renews.toISOString()))}</dd>
+        <dt>Pay with</dt><dd>Card, UPI, netbanking or wallet — secured by Razorpay</dd>
+      </dl>
+      <ul class="ask-plan-list">${includes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+    </div>`;
+  return openAsk({
+    title: 'Complete your plan purchase',
+    html,
+    tone: 'info',
+    icon: 'pay',
+    dismiss: false,
+    buttons: [
+      { label: 'Pay later', value: false },
+      { label: `Pay ${fmtMoney(price, plan.currency)} now`, value: true, kind: 'primary', main: true },
+    ],
+  });
 }
 
 /** Ask the server whether Razorpay took a payment the browser never heard about. */
@@ -16657,7 +17624,12 @@ async function enterApp({ keepOrgPicker = false } = {}) {
   }
   // A client without a plan starts — and stays — on the plan page.
   if (session.user.role !== 'super_admin' && !(await refreshBilling())) {
-    openBilling();
+    openBilling().then(autoPayPending);
+    return health();
+  }
+  // A paid plan chosen at sign-up and not paid for yet: straight to Razorpay for it.
+  if (session.user.role !== 'super_admin' && autoPayDue()) {
+    openBilling().then(autoPayPending);
     return health();
   }
   if (location.hash.startsWith('#/') && await openRoute()) return health();
@@ -16722,7 +17694,7 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 async function loadEnvironments() {
   const box = $('#envs-list');
-  if (!envsCache) box.innerHTML = '<div class="empty"><span class="spinner"></span>Loading environments…</div>';
+  if (!envsCache) box.innerHTML = skeleton('cards', { label: 'Loading environments…' });
   try {
     await fetchEnvironments(true);
     renderEnvironments();
@@ -16988,7 +17960,7 @@ async function openEnvironmentView(id) {
   envView.reveal = false;
   $('#envview-title').textContent = 'Loading…';
   $('#envview-sub').textContent = '';
-  $('#envview-body').innerHTML = '<div class="empty"><span class="spinner"></span></div>';
+  $('#envview-body').innerHTML = skeleton('detail');
   $('#modal-environment-view').classList.remove('hidden');
   try {
     const r = await api(`/environments/${id}`);
@@ -17236,7 +18208,7 @@ function autoSummaryHtml(a) {
     ? `${esc(AUTO_TRIGGER[ad.trigger] || AUTO_TRIGGER.push)} to <b>${esc(a.branch)}</b> rebuilds and restarts ${esc(a.name)}.`
     : `${esc(a.name)} deploys only when someone clicks Redeploy.`}</p></div>
     </div>
-    ${canDo('edit') ? '<div class="empty"><span class="spinner"></span>Reading the branch…</div>' : ''}
+    ${canDo('edit') ? skeleton('lines', { label: 'Reading the branch…' }) : ''}
   </div>`;
 }
 
@@ -17598,13 +18570,18 @@ async function boot() {
     session.roles = state.roles || [];
     session.user = state.user;
     signupOpen = Boolean(state.signupOpen);
+    otpLoginOn = Boolean(state.otpLogin);
+    setLoginMethod(loginMethod);
     if (!state.user) {
       showLanding(state.needsSetup);
       return handleVerifyReturn();
     }
-    // Signed in already (another tab): the link did its job, nothing to say.
-    if (new URLSearchParams(location.search).has('verify')) history.replaceState(null, '', location.pathname);
+    // Signed in already ("verify later", then the link): say it worked; the reminder is gone.
+    const verified = new URLSearchParams(location.search).get('verify');
+    if (verified) history.replaceState(null, '', location.pathname);
     await enterApp();
+    if (verified === 'verified' || verified === 'already') toast('Your email is verified — thank you.');
+    else if (verified === 'expired') toast('That link has expired — use "Resend link" on the reminder for a new one.', 'err');
   } catch (err) {
     $('#health-dot').className = 'dot error';
     $('#health-text').textContent = 'API unreachable';

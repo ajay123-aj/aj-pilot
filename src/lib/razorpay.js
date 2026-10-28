@@ -19,6 +19,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { all, one, run, logActivity } from '../db/index.js';
 import { setSubscription, pendingRequest, activateRequest, money } from './plans.js';
+import { runWithContext, currentContext } from './context.js';
 
 export class PaymentError extends Error {
   constructor(message, status = 400) {
@@ -143,7 +144,17 @@ async function confirmedPayment(order, paymentId) {
  * Switch the plan on and record the payment — once. A second call for the same
  * order (Checkout and the webhook both arriving) finds it already paid and stops.
  */
-export async function fulfilOrder(order, payment) {
+export function fulfilOrder(order, payment) {
+  // The webhook arrives with nobody signed in: the activity log still belongs to the
+  // organisation that paid, and to the person who started the payment.
+  const ctx = currentContext();
+  return runWithContext({
+    user: ctx?.user || (order.user_id ? { id: order.user_id } : null),
+    orgId: order.org_id,
+  }, () => applyPaidOrder(order, payment));
+}
+
+async function applyPaidOrder(order, payment) {
   const claimed = await run(
     "UPDATE payment_orders SET status = 'paid', provider_payment_id = ?, paid_at = NOW(), error = NULL WHERE id = ? AND status <> 'paid'",
     [payment.id, order.id],

@@ -13,6 +13,7 @@ import {
   requireDocker, DockerMissingError, containerAction, containerLogs, containerDetails, removeAnyContainer, CONTAINER_ACTIONS,
 } from '../lib/docker.js';
 import { collectLiveStats } from '../lib/liveStats.js';
+import { metricSeries, latestLevels } from '../lib/metrics.js';
 import { runnerState } from '../lib/runnerInstall.js';
 import { collectSummary } from '../lib/serverSummary.js';
 import {
@@ -133,6 +134,7 @@ serversRouter.get('/', async (req, res, next) => {
          AND server_id IN (${rows.map(() => '?').join(',')})
     `, rows.map((r) => r.id)) : [];
     const byServer = new Map(latest.map((f) => [f.server_id, f]));
+    const health = await latestLevels('server', rows.map((r) => r.id));
 
     res.json(rows.map((row) => {
       const fact = byServer.get(row.id);
@@ -156,8 +158,16 @@ serversRouter.get('/', async (req, res, next) => {
           uptime: p.uptime?.human,
         };
       }
-      return { ...publicServer(row), summary };
+      return { ...publicServer(row), summary, health: health.get(row.id) || null };
     }));
+  } catch (err) { next(err); }
+});
+
+/** CPU, memory, disk and load over the last day, week or month, from the recorded samples. */
+serversRouter.get('/:id/metrics', async (req, res, next) => {
+  try {
+    if (!await getRow(req.params.id, req.orgId)) return res.status(404).json({ error: 'Server not found' });
+    res.json(await metricSeries('server', Number(req.params.id), req.orgId, String(req.query.range || 'daily'), req.query.tz));
   } catch (err) { next(err); }
 });
 

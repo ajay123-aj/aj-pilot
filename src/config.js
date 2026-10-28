@@ -91,6 +91,16 @@ export const config = {
     mode: String(process.env.OTP_MODE || 'fixed').trim().toLowerCase() === 'random' ? 'random' : 'fixed',
     fixedCode: /^\d{6}$/.test(String(process.env.OTP_FIXED_CODE || '')) ? String(process.env.OTP_FIXED_CODE) : '123456',
     minutes: Math.max(1, Number(process.env.OTP_MINUTES || 10)),
+    /*
+     * Signing in with just a mobile number and a code. The code is then the only
+     * proof, so with a fixed code (anyone can type 123456) it is off unless
+     * OTP_LOGIN=on says so — for testing. With random codes it is on unless OTP_LOGIN=off.
+     */
+    login: (() => {
+      const set = String(process.env.OTP_LOGIN || '').trim().toLowerCase();
+      if (set === 'on' || set === 'off') return set === 'on';
+      return String(process.env.OTP_MODE || 'fixed').trim().toLowerCase() === 'random';
+    })(),
   },
 
   /** Outgoing email (verification links). Without SMTP_HOST the message is written to the server log instead. */

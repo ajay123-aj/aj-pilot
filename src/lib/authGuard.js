@@ -45,6 +45,8 @@ export const publicUser = (user, org = null) => (user ? {
   homeOrgId: user.org_id,
   lastLoginAt: user.last_login_at,
   phone: user.phone || null,
+  // A self sign-up may verify its email later; the panel shows a reminder until it does.
+  emailVerified: Number(user.email_verified ?? 1) === 1,
   // Admins and super admins must have a mobile number; the browser asks for it until they do.
   needsPhone: ['super_admin', 'admin'].includes(user.role) && !user.phone,
   organisation: org ? { id: org.id, name: org.name, slug: org.slug } : null,

@@ -1,5 +1,5 @@
 /**
- * PostgreSQL, MongoDB and Redis connections — the same pages MySQL has, served
+ * PostgreSQL, MongoDB, Redis and Elasticsearch connections — the same pages MySQL has, served
  * by whichever engine module matches the credential's provider.
  *
  * Reads are POSTs listed as read-only in authGuard, so a viewer can look.
@@ -77,7 +77,7 @@ const manage = (action, handler) => engineRoute(async (engine, cfg, req, row) =>
 /** Try the details on the add-connection form before saving them. */
 dbEnginesRouter.post('/test-db', async (req, res) => {
   const engine = engineFor(req.body.provider);
-  if (!engine) return res.status(400).json({ error: 'Pick PostgreSQL, MongoDB or Redis' });
+  if (!engine) return res.status(400).json({ error: 'Pick PostgreSQL, MongoDB, Redis or Elasticsearch' });
   try {
     res.json({ ok: true, ...(await engine.test(await engineConfig(req.body, req.orgId, { fromForm: true }))) });
   } catch (err) {

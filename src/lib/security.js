@@ -51,7 +51,7 @@ export function securityHeaders(req, res, next) {
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** The hosts this panel is served at: the one asked for, and SITE_URL if set. */
-function ownHosts(req) {
+export function ownHosts(req) {
   const hosts = new Set([String(req.headers.host || '').toLowerCase()]);
   if (config.trustProxy && req.headers['x-forwarded-host']) {
     hosts.add(String(req.headers['x-forwarded-host']).split(',')[0].trim().toLowerCase());

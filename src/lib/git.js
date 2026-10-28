@@ -58,6 +58,8 @@ async function request(url, token, s, { method = 'GET', body = null, raw = false
       method,
       headers: { ...headers, 'User-Agent': 'aj-pilot' },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      // A provider that stops answering must not hold a deploy or a removal for minutes.
+      signal: AbortSignal.timeout(30000),
     });
   } catch (err) {
     throw new Error(`Could not reach ${url.split('/')[2]}: ${err.message}`);
@@ -570,6 +572,7 @@ export async function latestRunnerVersion(extra = {}) {
   try {
     const res = await fetch(`${api}/repos/actions/runner/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'aj-pilot' },
+      signal: AbortSignal.timeout(15000),
     });
     const body = await res.json().catch(() => null);
     const tag = String(body?.tag_name || '').replace(/^v/, '');

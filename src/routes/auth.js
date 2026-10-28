@@ -1,9 +1,10 @@
 /**
  * Signing in.
  *
- * Signing in and signing up both end in a one-time code sent to the mobile
- * number (lib/verification.js), and a self sign-up must also click the link
- * emailed to it before its first sign-in.
+ * Sign in with an email and password, or with a mobile number and a one-time
+ * code sent to it (lib/verification.js). Signing up proves the mobile number
+ * with a code and signs straight in; the link emailed to a new account can be
+ * clicked later — the panel reminds them until it is.
  *
  * The very first run has no accounts at all, so the panel asks whoever gets
  * there first to create the super admin. A super admin runs the platform and
@@ -73,6 +74,8 @@ authRouter.get('/state', async (req, res, next) => {
     res.json({
       needsSetup,
       signupOpen: !needsSetup && signupOpen(),
+      // Whether the sign-in card offers "Mobile & OTP" (see config.otp.login).
+      otpLogin: config.otp.login,
       user: publicUser(req.user, req.organisation),
       roles: publicRoles(),
     });
@@ -176,7 +179,7 @@ authRouter.post('/signup', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** Step 2: the code is right — create the organisation and email the verification link. */
+/** Step 2: the code is right — create the organisation, email the verification link and sign in. */
 authRouter.post('/signup/verify', async (req, res, next) => {
   try {
     const wait = loginByIp.hit(clientIp(req));
@@ -202,7 +205,8 @@ authRouter.post('/signup/verify', async (req, res, next) => {
     }, null);
     if (requested) await setSubscription(orgId, requested, { cycle: b.cycle, status: 'pending', notes: 'Chosen at sign-up' });
 
-    // Signed up from the website: the email must be confirmed before the first sign-in.
+    // Signed up from the website: the email is unconfirmed until its link is clicked. That can
+    // wait ("verify later") — the panel reminds them until it is done.
     await run(
       'UPDATE users SET email_verified = 0, email_verified_at = NULL, terms_version = ?, terms_accepted_at = NOW() WHERE email = ?',
       [TERMS_VERSION, b.email],
@@ -213,10 +217,14 @@ authRouter.post('/signup/verify', async (req, res, next) => {
 
     await logActivity('user', user.id, 'signup', `${b.name} signed up and created "${org.name}"`
       + `${plan ? ` on ${plan.name}` : ' (no free plan — waiting for one)'}${requested ? `, asking for ${requested.name} (${b.cycle})` : ''}`
-      + ' — mobile verified, waiting for the email to be verified');
+      + ' — mobile verified, email not yet verified');
+
+    // The mobile number is proven, so they are signed in now: straight on to paying or the dashboard.
+    await startSession(req, res, user);
 
     res.status(201).json({
       ok: true,
+      user: publicUser(user, org),
       verifyEmail: true,
       email: user.email,
       emailSent: Boolean(mail.delivered),
@@ -290,8 +298,8 @@ async function checkSignup(b) {
 /* ---------------------------------------------------------------- login */
 
 /**
- * Sign in with an email or a mobile number and the password, then a one-time
- * code. An account that signed up itself must have verified its email first.
+ * Sign in with an email (or a mobile number) and the password. An email that
+ * is not verified yet does not stop it: the panel shows a reminder instead.
  */
 authRouter.post('/login', async (req, res, next) => {
   try {
@@ -320,42 +328,75 @@ authRouter.post('/login', async (req, res, next) => {
     if (user.status !== 'active') {
       return res.status(403).json({ error: 'This account has been disabled. Ask an admin to turn it back on.' });
     }
-    if (!Number(user.email_verified)) {
-      return res.status(403).json({
-        error: `Verify your email first — we sent a link to ${user.email}.`,
-        needsEmailVerification: true,
-        email: user.email,
-      });
-    }
+    res.json({ ok: true, user: await signIn(req, res, user) });
+  } catch (err) { next(err); }
+});
 
-    const challenge = await createChallenge({ purpose: 'login', user, phone: user.phone, email: user.email });
+/** Start the session and say who it is for — shared by every way of signing in. */
+async function signIn(req, res, user) {
+  // A super admin always lands on the platform, not inside the last organisation they opened.
+  if (user.role === 'super_admin' && user.active_org_id) {
+    await run('UPDATE users SET active_org_id = NULL WHERE id = ?', [user.id]);
+    user.active_org_id = null;
+  }
+  await startSession(req, res, user);
+  const org = orgOf(user) ? await one('SELECT * FROM organisations WHERE id = ?', [orgOf(user)]) : null;
+  await logActivity('user', user.id, 'login', `${user.name} signed in`);
+  return publicUser(user, org);
+}
+
+/* ------------------------------------------------ sign in with a code */
+
+const otpByPhone = rateLimiter({ windowMs: 15 * 60_000, max: 5 });
+
+/**
+ * Sign in with a mobile number: send a code to it. The answer looks the same
+ * whether or not the number is on an account, so it cannot be used to find
+ * out who has one — a number with no account simply never gets a code.
+ */
+authRouter.post('/login/otp', async (req, res, next) => {
+  try {
+    if (!config.otp.login) {
+      return res.status(403).json({ error: 'Signing in with a mobile number is not available here — use your email and password.', otpLoginOff: true });
+    }
+    const phone = checkPhone(req.body.phone, { required: true });
+    if (phone.error) return res.status(400).json({ error: phone.error, field: 'phone' });
+    const wait = Math.max(loginByIp.hit(clientIp(req)), otpByPhone.hit(phoneDigits(phone.value)));
+    if (wait) return tooMany(res, wait);
+
+    const known = (await usersByPhone(phone.value)).some((u) => u.status === 'active');
+    const challenge = await createChallenge({ purpose: 'login', payload: { phone: phone.value }, phone: phone.value, deliver: known });
     res.json({ ok: true, ...challenge });
   } catch (err) { next(err); }
 });
 
-/** Step 2 of signing in: the code, then the session. */
+/** Step 2 of signing in with a mobile number: the code, then the session. */
 authRouter.post('/login/verify', async (req, res, next) => {
   try {
     const wait = loginByIp.hit(clientIp(req));
     if (wait) return tooMany(res, wait);
 
-    const { userId } = await verifyChallenge(req.body.challenge, req.body.otp, 'login');
-    const user = await one('SELECT * FROM users WHERE id = ?', [userId]);
+    const { userId, payload } = await verifyChallenge(req.body.challenge, req.body.otp, 'login');
+    let user;
+    if (userId) {
+      user = await one('SELECT * FROM users WHERE id = ?', [userId]);
+    } else {
+      // The code proves the number; the number says which account. One number on several
+      // accounts cannot say which one is meant, so those sign in with their email instead.
+      const accounts = (await usersByPhone(payload?.phone)).filter((u) => u.status === 'active');
+      if (!accounts.length) {
+        return res.status(404).json({ error: 'No account uses this mobile number. Sign in with your email, or create an account.', restart: true });
+      }
+      if (accounts.length > 1) {
+        return res.status(409).json({ error: 'This mobile number is on more than one account — sign in with your email and password instead.', restart: true });
+      }
+      [user] = accounts;
+    }
     if (!user || user.status !== 'active') {
       return res.status(403).json({ error: 'This account has been disabled. Ask an admin to turn it back on.', restart: true });
     }
 
-    // A super admin always lands on the platform, not inside the last organisation they opened.
-    if (user.role === 'super_admin' && user.active_org_id) {
-      await run('UPDATE users SET active_org_id = NULL WHERE id = ?', [user.id]);
-      user.active_org_id = null;
-    }
-
-    await startSession(req, res, user);
-    const org = orgOf(user) ? await one('SELECT * FROM organisations WHERE id = ?', [orgOf(user)]) : null;
-    await logActivity('user', user.id, 'login', `${user.name} signed in`);
-
-    res.json({ ok: true, user: publicUser(user, org) });
+    res.json({ ok: true, user: await signIn(req, res, user) });
   } catch (err) {
     if (err instanceof VerifyError) return res.status(err.status).json({ error: err.message, restart: Boolean(err.restart) });
     next(err);

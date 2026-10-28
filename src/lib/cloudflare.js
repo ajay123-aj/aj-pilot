@@ -34,6 +34,8 @@ async function cf(token, path, { method = 'GET', payload } = {}) {
       method,
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(payload ? { body: JSON.stringify(payload) } : {}),
+      // Cloudflare not answering must not hold a domain setup or a removal for minutes.
+      signal: AbortSignal.timeout(30000),
     });
   } catch (err) {
     throw new Error(`Could not reach Cloudflare: ${err.message}`);
@@ -205,7 +207,7 @@ export async function deleteZone(token, zoneId) {
   if (!/^[a-f0-9]{32}$/i.test(String(zoneId))) throw new Error('That is not a Cloudflare zone id');
   let res;
   try {
-    res = await fetch(`${API}/zones/${zoneId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    res = await fetch(`${API}/zones/${zoneId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000) });
   } catch (err) {
     throw new Error(`Could not reach Cloudflare: ${err.message}`);
   }

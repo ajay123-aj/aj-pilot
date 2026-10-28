@@ -231,6 +231,8 @@ const CONNECTION_FOR = {
   postgres: (v) => ({ provider: 'postgres', username: v.user || 'postgres', secret: v.password, database: v.database || v.user || 'postgres' }),
   mongo: (v) => ({ provider: 'mongodb', username: v.user || '', secret: v.password || '', authSource: 'admin' }),
   redis: (v) => ({ provider: 'redis', username: '', secret: v.password || '' }),
+  // The catalog turns HTTPS off; with a password set, the API wants the built-in superuser.
+  elasticsearch: (v) => ({ provider: 'elasticsearch', username: v.password ? 'elastic' : '', secret: v.password || '' }),
 };
 
 async function addDatabaseConnection(entry, server, spec, values) {

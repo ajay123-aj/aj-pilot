@@ -75,7 +75,7 @@ fi
 ${withDocker ? `echo '@@@dockerps'
 docker ps -a --format '{{.Names}}\\t{{.State}}\\t{{.Status}}\\t{{.Image}}\\t{{.Ports}}\\t{{.RunningFor}}' 2>/dev/null
 echo '@@@dockerstats'
-docker stats --no-stream --format '{{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.MemPerc}}\\t{{.NetIO}}\\t{{.BlockIO}}\\t{{.PIDs}}' 2>/dev/null` : ''}
+docker stats --no-stream --format '${DOCKER_STATS_FORMAT}' 2>/dev/null` : ''}
 echo '@@@done'
 echo ok`;
 
@@ -325,18 +325,12 @@ const pairOf = (text) => {
   return { a, b };
 };
 
-function dockerOf(s, withDocker) {
-  const state = (/state=(\S+)/.exec(s.docker || '') || [])[1] || 'absent';
-  const base = {
-    installed: state !== 'absent',
-    running: state === 'running',
-    containers: [],
-    counts: { running: 0, exited: 0, restarting: 0, paused: 0, created: 0, dead: 0, total: 0 },
-  };
-  if (!withDocker || state !== 'running') return base;
+const DOCKER_STATS_FORMAT = '{{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}\\t{{.MemPerc}}\\t{{.NetIO}}\\t{{.BlockIO}}\\t{{.PIDs}}';
 
+/** `docker stats` lines in DOCKER_STATS_FORMAT, by container name. */
+function statsByName(text) {
   const stats = new Map();
-  for (const line of lines(s.dockerstats)) {
+  for (const line of lines(text)) {
     const [name, cpu, mem, memPct, net, block, pids] = line.split('\t');
     const memory = pairOf(mem);
     const netIo = pairOf(net);
@@ -353,6 +347,20 @@ function dockerOf(s, withDocker) {
       pids: num(pids),
     });
   }
+  return stats;
+}
+
+function dockerOf(s, withDocker) {
+  const state = (/state=(\S+)/.exec(s.docker || '') || [])[1] || 'absent';
+  const base = {
+    installed: state !== 'absent',
+    running: state === 'running',
+    containers: [],
+    counts: { running: 0, exited: 0, restarting: 0, paused: 0, created: 0, dead: 0, total: 0 },
+  };
+  if (!withDocker || state !== 'running') return base;
+
+  const stats = statsByName(s.dockerstats);
 
   for (const line of lines(s.dockerps)) {
     const [name, cState, status, image, ports, since] = line.split('\t');
@@ -375,6 +383,96 @@ function dockerOf(s, withDocker) {
 
   base.containers.sort((a, b) => (b.cpuPct || 0) - (a.cpuPct || 0));
   return base;
+}
+
+/* ---------------------------------------------- one app's containers */
+
+const q = (v) => `'${String(v ?? '').replace(/'/g, `'\\''`)}'`;
+
+/**
+ * What a named set of containers is using right now — the containers of one
+ * app, or of every app on a server. One pass: `docker inspect` for state,
+ * uptime and restarts, then `docker stats` for the ones that are running
+ * (asked by name, since a bare `docker stats` would report every container).
+ *
+ * Network and block I/O come back as totals since the container started; a
+ * caller with two samples works out the rate.
+ */
+export async function collectContainerStats(conn, server, names) {
+  const list = names.map(q).join(' ');
+  const script = `export LC_ALL=C
+echo '@@@host'
+nproc 2>/dev/null || echo 1
+grep '^MemTotal:' /proc/meminfo
+echo '@@@docker'
+if ! command -v docker >/dev/null 2>&1; then echo absent
+elif ! docker info >/dev/null 2>&1; then echo stopped
+else echo running; fi
+echo '@@@inspect'
+for c in ${list}; do
+  docker inspect -f '{{.Name}}|{{.State.Status}}|{{.State.StartedAt}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}|{{.State.OOMKilled}}' "$c" 2>/dev/null || echo "/$c|missing||0||false"
+done
+echo '@@@stats'
+running=$(for c in ${list}; do docker inspect -f '{{if .State.Running}}{{.Name}}{{end}}' "$c" 2>/dev/null; done | sed 's#^/##')
+[ -n "$running" ] && docker stats --no-stream --format '${DOCKER_STATS_FORMAT}' $running 2>/dev/null
+echo '@@@done'
+echo ok`;
+
+  const result = await rootExec(conn, server, script, { timeout: 30000 });
+  const s = splitSections(result.stdout);
+  if (!s.done) {
+    throw new Error('Could not read container statistics: '
+      + `${(result.stderr || result.stdout || '').trim().slice(0, 200) || 'the probe returned nothing'}`);
+  }
+  const docker = lines(s.docker)[0] || 'absent';
+  if (docker !== 'running') {
+    throw new Error(docker === 'absent' ? 'Docker is not installed on this server' : 'The Docker daemon is not running');
+  }
+
+  const hostRows = lines(s.host);
+  const host = {
+    cores: Math.max(1, num(hostRows[0]) || 1),
+    memoryBytes: num((/MemTotal:\s+(\d+)/.exec(hostRows.join('\n')) || [])[1]) * 1024,
+  };
+
+  const stats = statsByName(s.stats);
+  const containers = lines(s.inspect).map((line) => {
+    const [name, state, startedAt, restarts, health, oom] = line.split('|');
+    const clean = String(name || '').replace(/^\//, '');
+    return {
+      name: clean,
+      state: state || 'unknown',
+      startedAt: state === 'running' && startedAt && !startedAt.startsWith('0001') ? startedAt : null,
+      restarts: num(restarts),
+      health: health || null,
+      oomKilled: oom === 'true',
+      ...(stats.get(clean) || {}),
+    };
+  });
+
+  return { at: new Date().toISOString(), host, containers };
+}
+
+/** One app's containers added up, for a card or a headline tile. */
+export function appUsage(containers, host) {
+  const sum = (key) => containers.reduce((t, c) => t + (c[key] || 0), 0);
+  const cpuPct = round1(sum('cpuPct'));
+  const memoryBytes = sum('memoryBytes');
+  return {
+    running: containers.filter((c) => c.state === 'running').length,
+    total: containers.length,
+    cpuPct,
+    // Docker counts CPU per core — 200% is two cores flat out — so this is the share of the whole server.
+    cpuOfHostPct: round1(cpuPct / host.cores),
+    memoryBytes,
+    memoryOfHostPct: host.memoryBytes ? round1((memoryBytes / host.memoryBytes) * 100) : 0,
+    netRxBytes: sum('netRxBytes'),
+    netTxBytes: sum('netTxBytes'),
+    blockReadBytes: sum('blockReadBytes'),
+    blockWriteBytes: sum('blockWriteBytes'),
+    pids: sum('pids'),
+    restarts: sum('restarts'),
+  };
 }
 
 /* ------------------------------------------------------------ alerts */

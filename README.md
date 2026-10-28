@@ -15,8 +15,8 @@ stored and verified so the deployment phase can use them.
 restart, enable, read its journal, and create new units from a form. Install a self-hosted CI runner on any
 of your servers straight from a git account, and see the runners each repository has.
 
-**Phase 3 (built): installations.** A catalog of things to install — Docker, Docker Compose, MySQL, MongoDB
-and Redis. Everything except Docker itself runs as a container, on a port you choose and can change later.
+**Phase 3 (built): installations.** A catalog of things to install — Docker, Docker Compose, MySQL, PostgreSQL,
+MongoDB, Redis, EMQX and Elasticsearch. Everything except Docker itself runs as a container, on a port you choose and can change later.
 
 **Phase 4 (built): custom services.** Point the panel at a Node.js repository — a service, Next.js, NestJS,
 Angular, React — and it checks the project, builds it into a Docker image on one of your servers and runs it
@@ -172,8 +172,10 @@ token disconnects the running copy.
 ### The server page
 
 The sidebar is fixed, so it stays put however far you scroll, and collapses to an icon rail with the «
-button next to the logo — the choice is remembered in the browser. Under 720px it becomes a row of icons
-across the top instead.
+button next to the logo — the choice is remembered in the browser. Until you choose, a screen 1100px wide or
+less (a tablet or small laptop) starts with the icon rail, so pages keep most of the width. On a phone (720px or
+less) the sidebar is a menu that slides in from the left: tap ☰ in the top bar to open it, and it closes when
+you pick a page, tap outside it or press Esc.
 
 Everything about one server sits behind a vertical tab rail on the left rather than one long scroll. The
 rail stays put as you scroll a long panel, and folds into a scrolling row of tabs under 900px wide:
@@ -361,7 +363,7 @@ attempted, not after it fails. The same check guards the API, so it cannot be wo
 
 Each service's form covers the version, the container name, the **port**, which Docker network to join, and
 whether it is reachable from anywhere or only from the server itself, plus its own settings — root password
-and an initial database for MySQL, root credentials for MongoDB, a password for Redis. Passwords are
+and an initial database for MySQL, root credentials for MongoDB, a password for Redis, a password for the `elastic` user and the JVM heap for Elasticsearch. Passwords are
 encrypted with the same master key as every other secret and are never returned by the API.
 
 ### Services that answer on more than one port
@@ -715,17 +717,17 @@ yours accounts for are listed underneath, the same way the Docker tab lists cont
 
 The tab's counter is how many are running, and turns red when any of them is stopped or missing.
 
-## Databases (MySQL, PostgreSQL, MongoDB, Redis)
+## Databases (MySQL, PostgreSQL, MongoDB, Redis, Elasticsearch)
 
-The **Databases** tab connects to the MySQL, PostgreSQL, MongoDB and Redis servers running on your machines.
+The **Databases** tab connects to the MySQL, PostgreSQL, MongoDB, Redis and Elasticsearch servers running on your machines.
 Click **+ Add database connection** and pick the engine; the port, the auth-database field (MongoDB) and
-the TLS box (PostgreSQL, MongoDB, Redis) follow the choice. MongoDB and Redis may have no password.
+the TLS box (PostgreSQL, MongoDB, Redis, Elasticsearch — for Elasticsearch it means HTTPS) follow the choice. MongoDB, Redis and Elasticsearch may have no password.
 A MongoDB `mongodb+srv://…` string also works as the host, for Atlas. The chips above the list filter it by engine.
 
-A database installed from **Installations** (MySQL, PostgreSQL, MongoDB, Redis) is added here by itself,
+A database installed from **Installations** (MySQL, PostgreSQL, MongoDB, Redis, Elasticsearch) is added here by itself,
 tunnelled through its server with the superuser it was created with.
 
-PostgreSQL, MongoDB and Redis get the same four tabs as MySQL:
+PostgreSQL, MongoDB and Redis get the same four tabs as MySQL (Elasticsearch is described after the table):
 
 |                   | PostgreSQL                                                                                                                                                                                                                                                                      | MongoDB                                                                                                                                                                          | Redis                                                                                                                                                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -734,6 +736,34 @@ PostgreSQL, MongoDB and Redis get the same four tabs as MySQL:
 | **Users**         | roles with login, superuser, connection limit, expiry, sessions and grants. Create, grant read-only / read-write / full / owner on a database, revoke, password, lock (NOLOGIN), drop. Dropping hands anything the role owned to the panel's role first, so no table is deleted | users with auth database and roles. Create, grant a role (per database or `…AnyDatabase` / `root`), revoke every role on a database, password, drop. MongoDB has no account lock | ACL users. Create with full / read-write / read-only access on a key pattern, change access, revoke all commands, password, enable / disable, delete. Saved with `ACL SAVE` or `CONFIG REWRITE` when the server has a file for it |
 | **Configuration** | 20 settings via `ALTER SYSTEM` + reload (persistent; "restart" marks the ones that need one), plus all of `pg_settings`                                                                                                                                                         | runtime `setParameter` values and the profiler's `slowms` (lost on restart), plus every parameter                                                                                | 13 settings via `CONFIG SET`, optionally saved with `CONFIG REWRITE`, plus every setting                                                                                                                                          |
 | **Run query**     | runs inside a `READ ONLY` transaction that is rolled back, as a single prepared statement                                                                                                                                                                                       | JSON find or aggregate; `$out` / `$merge` refused                                                                                                                                | one command from a read-only allow-list                                                                                                                                                                                           |
+
+### Elasticsearch
+
+An Elasticsearch connection uses the HTTP API (port 9200). Sign in as `elastic` or another user with the
+`superuser` role, or leave the username and password empty if security is turned off. Tick **TLS** when the
+cluster answers on `https://`; self-signed certificates are accepted. Its page has the same tabs, with
+**Indices** in place of Databases:
+
+- **Overview** — version, cluster health (green / yellow / red), nodes, indices, documents, size on disk,
+  active and unassigned shards, JVM heap, and a table of nodes with their roles, heap, RAM, CPU, load and disk
+- **Indices** — every index with its health, status, documents, size and shard counts. **+ Create index** asks
+  for the name and the number of shards and replicas (keep replicas at 0 on a single node, or the cluster turns
+  yellow). **Delete** asks you to type the name back. Indices whose names start with `.` belong to
+  Elasticsearch and cannot be deleted here. Click an index for its documents, deleted documents, size, shards,
+  aliases, settings, its fields with their types, and its first 20 documents. Click a field to see how many
+  documents have it and, for keyword, number, date and boolean fields, its 20 most common values
+- **Users** — security users with their roles and whether they are enabled. **+ Create user**, change
+  **Password**, **Disable** / **Enable**, **Delete**, **Grant** a built-in or custom role or read / write / full
+  access to an index pattern such as `logs-*`, and **Revoke** a role. Built-in users such as `elastic` cannot be
+  deleted, and the user the panel signs in as cannot disable itself. On a cluster with security off this tab
+  says so
+- **Configuration** — persistent cluster settings (shard allocation, disk watermarks, recovery speed, the
+  default search timeout, shards per node, automatic index creation, `action.destructive_requires_name`).
+  They survive restarts. Every other setting is listed below them
+- **Run query** — the same syntax as Kibana Dev Tools: a first line such as `GET /_cat/indices?v` or
+  `POST /orders/_search`, then an optional JSON body. A JSON body on its own searches the index in the
+  Database box. Search hits show as rows with their fields as columns. Only reads are allowed: `GET`, and
+  `POST` to `_search`, `_count`, `_msearch`, `_field_caps`, `_validate/query` and `_sql`
 
 The rest of this section describes the MySQL page.
 
@@ -1142,8 +1172,8 @@ page, the same line under its name, kept up to date while you are on it.
 | `DELETE`                  | `/api/credentials/:id/mysql/users/grants`                                                                                          | revoke everything on one database `{ user, host, database }`                                   |
 | `POST`                    | `/api/credentials/:id/mysql/variables`                                                                                             | editable settings and every global variable                                                    |
 | `PUT`                     | `/api/credentials/:id/mysql/variables`                                                                                             | `SET GLOBAL` / `SET PERSIST` `{ name, value, persist }`                                        |
-| `POST`                    | `/api/credentials/test-db`                                                                                                         | try PostgreSQL / MongoDB / Redis details before saving                                         |
-| `POST`                    | `/api/credentials/:id/db/overview` · `/db/databases` · `/db/database` · `/db/item` · `/db/users/list` · `/db/config` · `/db/query` | PostgreSQL / MongoDB / Redis reads (viewers allowed)                                           |
+| `POST`                    | `/api/credentials/test-db`                                                                                                         | try PostgreSQL / MongoDB / Redis / Elasticsearch details before saving                                         |
+| `POST`                    | `/api/credentials/:id/db/overview` · `/db/databases` · `/db/database` · `/db/item` · `/db/users/list` · `/db/config` · `/db/query` | PostgreSQL / MongoDB / Redis / Elasticsearch reads (viewers allowed)                                           |
 | `POST` / `DELETE`         | `/api/credentials/:id/db/schemas` · `/db/databases`                                                                                | create / drop (flush) a database                                                               |
 | `POST` / `PUT` / `DELETE` | `/api/credentials/:id/db/users`                                                                                                    | create / change / drop a user, identified by `key`                                             |
 | `POST` / `DELETE`         | `/api/credentials/:id/db/users/grants`                                                                                             | grant / revoke                                                                                 |

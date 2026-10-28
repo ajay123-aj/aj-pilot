@@ -31,7 +31,9 @@ export const DOCS = [
 otherwise do by hand — deploying apps, running databases, setting up domains and SSL. There is nothing to install on
 your servers first.</p>
 <h2>1. Sign in and choose a plan</h2>
-<p>Your account is created by us or by your organisation's admin. After you sign in, if your organisation has no plan yet
+<p>Click <b>Get started</b> on the home page to create your account — or sign in with the one your organisation's admin made
+for you. Each sign-in asks for a <b>6-digit code</b> we send you, and a new account first confirms its email address with a
+link. After you sign in, if your organisation has no plan yet
 you will see <b>Plan &amp; billing</b>. Pick the <b>Free</b> plan to start straight away, or a paid plan — a paid plan is
 switched on as soon as your payment is confirmed. See <a href="/docs/plans-and-billing">Plans &amp; billing</a>.</p>
 <h2>2. Add a server</h2>
@@ -47,6 +49,9 @@ and its log. See <a href="/docs/deploy-an-app">Deploy an app</a>.</p>
 <h2>5. Put it on your domain</h2>
 <p>Tick <b>Add a domain</b> while creating the app — or add one later from the app's page — and AJ Pilot creates the DNS
 record, the nginx site and a free SSL certificate. See <a href="/docs/app-domains">Put an app on your domain</a>.</p>
+<h2>Then keep an eye on it</h2>
+<p>Each app card shows how much CPU and memory the app uses, and its <b>Live stats</b> tab shows it second by second. See
+<a href="/docs/monitoring">Monitor servers and apps</a>.</p>
 ${tip('Stuck? <a href="/docs/troubleshooting">Troubleshooting</a> covers the problems people hit most, and the <b>Get started</b> form on the home page reaches us directly.')}`,
   },
 
@@ -91,6 +96,37 @@ ${tip('Every password and key is encrypted before it is stored, and is never sho
 ${warn('"Connection timed out" means the server could not be reached: check the IP address, and that port 22 is open in the server\'s firewall and in your cloud provider\'s security group.')}`,
   },
   {
+    slug: 'connectors',
+    category: 'Servers',
+    title: 'Reach servers behind a VPN (connectors)',
+    summary: 'Manage office servers that only a PC on your VPN can reach — with a small program on that PC.',
+    body: `
+<p>Some servers can only be reached from inside your office network or VPN, so AJ Pilot cannot connect to them directly.
+A <b>connector</b> solves this: a small program you run on a PC that <i>can</i> reach them (your laptop with the VPN
+connected, say). The panel then reaches those servers through that PC.</p>
+<h2>Set one up</h2>
+<ol class="doc-steps">
+  <li>Open <b>Connectors</b> in the side menu.</li>
+  <li>Type a name (for example <code>Office laptop</code>) and click <b>Create connector</b>.</li>
+  <li>Download it for that PC — <b>Windows</b>, <b>Mac</b> or <b>Ubuntu / Linux</b>. The download already knows your panel
+    and its key, so there is nothing to type.</li>
+  <li>On the PC, connect your VPN, then start the downloaded file. It needs Node.js 22 or newer and offers to install it if
+    it is missing.</li>
+  <li>Keep its window open. The connector shows as <b>online</b> on the Connectors page.</li>
+  <li>Add the server as usual (<a href="/docs/add-a-server">Add a server</a>) with its office or VPN address. When the panel
+    cannot reach it directly, it goes through the connector automatically.</li>
+</ol>
+<h2>Good to know</h2>
+<ul>
+  <li>The connector only makes one <b>outgoing</b>, encrypted connection to the panel. Nothing is opened on the PC and no
+    router settings change.</li>
+  <li>Servers reached this way only work while that PC is on, connected to the VPN and running the connector.</li>
+  <li>Want it to reach only certain networks? Start it with <code>--allow 192.168.1.0/24</code> (several, separated by commas).</li>
+  <li>Lost the PC, or someone left? <b>Delete</b> the connector, or make a new key for it — the old copy stops working at once.</li>
+</ul>
+${tip('Leaving the connector running all day? Use a PC that stays on, such as an office desktop, rather than a laptop that goes to sleep.')}`,
+  },
+  {
     slug: 'server-page',
     category: 'Servers',
     title: 'The server page and its tabs',
@@ -100,8 +136,8 @@ ${warn('"Connection timed out" means the server could not be reached: check the 
 <b>Reboot</b> restarts the machine after you confirm — see <a href="/docs/reboot-a-server">Reboot a server</a>.</p>
 <table class="doc-table">
   <tr><th>Tab</th><th>What it is for</th></tr>
-  <tr><td>Overview</td><td>Operating system, CPU, memory, disks and a summary of everything running.</td></tr>
-  <tr><td>Live</td><td>CPU, memory, disk and network, updating in real time.</td></tr>
+  <tr><td>Overview</td><td>Operating system, CPU, memory, disks, a count of everything on it, and the <b>Statistics</b> chart — CPU, memory and disk over the last day, week or month. See <a href="/docs/monitoring">Monitor servers and apps</a>.</td></tr>
+  <tr><td>Live</td><td>CPU, memory, load, network, disks, containers and the busiest processes, updating every 5 seconds — with a warning when something is close to its limit.</td></tr>
   <tr><td>Storage</td><td>A file manager: browse folders with their sizes, upload, download, edit, rename, copy, move, extract and change permissions.</td></tr>
   <tr><td>Network</td><td>Interfaces, addresses and every listening port with the program behind it.</td></tr>
   <tr><td>Processes</td><td>The busiest processes right now.</td></tr>
@@ -109,11 +145,73 @@ ${warn('"Connection timed out" means the server could not be reached: check the 
   <tr><td>Apps</td><td>The apps deployed on this server.</td></tr>
   <tr><td>Docker</td><td>Containers, images, networks and volumes — details, logs, start, stop, restart, remove.</td></tr>
   <tr><td>Nginx</td><td>Sites, upstreams and SSL certificates. See <a href="/docs/nginx-and-ssl">Nginx sites &amp; SSL</a>.</td></tr>
+  <tr><td>Nginx Logs</td><td>Your website traffic, analysed: errors, slow pages, attackers — and how to fix each one. See <a href="/docs/nginx-logs">Nginx logs &amp; blocking attackers</a>.</td></tr>
   <tr><td>Cron</td><td>Scheduled jobs. See <a href="/docs/cron-jobs">Scheduled jobs</a>.</td></tr>
   <tr><td>Users</td><td>Ubuntu logins, passwords, sudo and SSH keys. See <a href="/docs/server-users">Server users &amp; SSH keys</a>.</td></tr>
   <tr><td>Services</td><td>systemd services. See <a href="/docs/create-a-service">Create a service</a>.</td></tr>
-  <tr><td>Runners</td><td>CI runners installed on this server.</td></tr>
-</table>`,
+  <tr><td>Runners</td><td>CI runners installed on this server. See <a href="/docs/ci-runners">CI runners</a>.</td></tr>
+  <tr><td>Terminal</td><td>A command line on the server, right in your browser. See <a href="/docs/terminal">Terminal</a>.</td></tr>
+</table>
+<p>The dot next to a server's name in the list shows whether it is <b>online</b>: the panel checks every few seconds that the
+server answers, and every few minutes that it can still sign in. <b>Cannot sign in</b> means the server is up but its saved
+password or key no longer works — edit the server and enter it again.</p>`,
+  },
+  {
+    slug: 'monitoring',
+    category: 'Servers',
+    title: 'Monitor servers and apps',
+    summary: 'See how much CPU, memory, disk and network your servers and apps use — right now and over the last month.',
+    body: `
+<p>AJ Pilot shows how hard your servers and apps are working in four places:</p>
+<table class="doc-table">
+  <tr><th>Where</th><th>What you see</th><th>How fresh</th></tr>
+  <tr><td>A server's <b>Live</b> tab</td><td>The whole machine: CPU, memory, load, network, disks, every container and the busiest processes.</td><td>Every 5 seconds</td></tr>
+  <tr><td><b>Statistics</b> on a server's or app's <b>Overview</b></td><td>CPU, memory (and disk for a server) over the last 24 hours, 7 days or 30 days, with how often it was normal, warning or critical.</td><td>A sample every 5 minutes</td></tr>
+  <tr><td>Each app card on <b>Apps</b></td><td>The app's CPU, memory and network at a glance.</td><td>Every 20 seconds</td></tr>
+  <tr><td>An app's <b>Live stats</b> tab</td><td>That app only: CPU, memory, network, disk activity and each of its containers.</td><td>Every 5 seconds</td></tr>
+</table>
+
+<h2>A server, live</h2>
+<p>Open a server and click <b>Live</b>. The four tiles at the top show <b>CPU</b>, <b>Memory</b>, <b>Load average</b> and
+<b>Network</b>, each with a small line of the last five minutes. Below them: each processor core, each disk and how full it
+is, the containers on the server with what each one uses, and the processes using the most CPU and memory.</p>
+<p>When something needs attention, a red or amber box at the top says what and why — for example <i>"/ is 93% full"</i> or
+<i>"shop-api is restarting in a loop"</i>.</p>
+
+<h2>An app, live</h2>
+<p>Open an app (<b>View details</b>) and click the <b>Live stats</b> tab.</p>
+<ul>
+  <li><b>CPU</b> — how much processor time the app uses. Docker counts each core as 100%, so <b>150%</b> means one and a half
+    cores are busy. The line under it shows the same as a share of the whole server.</li>
+  <li><b>Memory</b> — how much memory the app holds, and its share of the server's memory. If you set a memory limit, it
+    shows how close the app is to it.</li>
+  <li><b>Network</b> — data in (↓) and out (↑) per second, and the totals since the app last started.</li>
+  <li><b>Disk I/O</b> — how fast the app writes and reads its files, its number of processes and how many times it has restarted.</li>
+  <li><b>Containers</b> — one row per container: running or not, how long it has been up, and its own CPU, memory, network and disk figures.</li>
+</ul>
+<p>A message appears above the tiles if a container is stopped, missing, restarting over and over, was stopped for using too
+much memory, or is failing its health check.</p>
+${tip('The first reading of network and disk shows <i>measuring…</i> — a speed needs two readings, so it fills in 5 seconds later.')}
+
+<h2>History: the Statistics chart</h2>
+<p>The <b>Overview</b> tab of every server and app ends with a <b>Statistics</b> chart. Choose <b>Daily</b>, <b>Weekly</b>
+or <b>Monthly</b>. The coloured strip under the lines shows the worst moment of each hour or day:</p>
+<table class="doc-table">
+  <tr><th>Level</th><th>A server is…</th><th>An app is…</th></tr>
+  <tr><td><span class="badge ok">Normal</span></td><td>Below every limit below.</td><td>All containers running, using less than 75% of the server's CPU and 80% of its memory.</td></tr>
+  <tr><td><span class="badge warn">Warning</span></td><td>CPU from 75%, memory from 80%, a disk from 80% full, or a high load.</td><td>From 75% of the server's CPU or 80% of its memory.</td></tr>
+  <tr><td><span class="badge err">Critical</span></td><td>CPU from 90%, memory from 92%, a disk from 90% full, a very high load, or Docker stopped.</td><td>A container down, restarting or unhealthy — or from 90% CPU / 92% memory of the server.</td></tr>
+</table>
+<p>Samples are only taken while the server is online, so a gap in the chart means the server could not be reached then.
+History is kept for 35 days.</p>
+
+<h2>Good to know</h2>
+<ul>
+  <li>A live view stops by itself after 15 minutes and reconnects — leave it open as long as you like.</li>
+  <li>Leaving the tab or page closes its connection to the server, so nothing keeps running in the background.</li>
+  <li>An app that is deploying, being removed or not deployed yet shows no usage until it is running.</li>
+</ul>
+${warn('An app using a lot of CPU or memory slows down <b>everything</b> on the same server. If one app is always near the top, give it its own server, or add a memory limit to keep it in check.')}`,
   },
   {
     slug: 'create-a-service',
@@ -274,6 +372,28 @@ ${warn('If the server has not answered after five minutes, the page tells you. C
 ${warn('Deleting is permanent. Key system folders are protected from accidental changes.')}`,
   },
   {
+    slug: 'terminal',
+    category: 'Servers',
+    title: 'Terminal',
+    summary: 'Type commands on your server in the browser — no SSH program needed.',
+    body: `
+<p>The <b>Terminal</b> tab of a server is a real command line on that server, signed in with the server's saved login.
+Use it for anything the other tabs do not cover.</p>
+<ol class="doc-steps">
+  <li>Open the server and click the <b>Terminal</b> tab.</li>
+  <li>Wait for the prompt, then type as you would in any SSH session. Copy and paste work as usual.</li>
+  <li>Type <code>exit</code> or leave the tab when you are done.</li>
+</ol>
+<h2>Good to know</h2>
+<ul>
+  <li>Only <b>Admins</b> and <b>Editors</b> can open a terminal; <b>View only</b> members do not see the tab.</li>
+  <li>A terminal nobody has typed into for <b>30 minutes</b> closes by itself.</li>
+  <li>You can have up to <b>5</b> terminals open at once, across all your browser tabs.</li>
+  <li>The <b>Activity</b> log records who opened and closed a terminal on which server — never what was typed.</li>
+</ul>
+${warn('Commands run for real, with the permissions of the server\'s login. A wrong <code>rm</code> or <code>reboot</code> cannot be undone from here.')}`,
+  },
+  {
     slug: 'nginx-and-ssl',
     category: 'Domains & SSL',
     title: 'Nginx sites & SSL certificates',
@@ -288,6 +408,42 @@ automatically. Use the <b>Nginx</b> tab of a server when you want to do it by ha
   <li><b>Get an SSL certificate</b> — a free Let's Encrypt certificate (<b>Install certbot here</b> if asked). It renews on its own; you can also renew it here.</li>
 </ol>
 ${tip('Every change is checked with <code>nginx -t</code> before nginx reloads, so a mistake cannot take your sites down.')}`,
+  },
+  {
+    slug: 'nginx-logs',
+    category: 'Domains & SSL',
+    title: 'Nginx logs & blocking attackers',
+    summary: 'See what is going wrong on your websites, who is attacking them, and fix it — without reading raw log files.',
+    body: `
+<p>The <b>Nginx Logs</b> tab of a server reads nginx's access and error logs and turns them into plain answers: which pages
+fail, which are slow, who is scanning or attacking the server — and, for each problem, how to fix it.</p>
+<h2>Read the report</h2>
+<ol class="doc-steps">
+  <li>Open the server and click <b>Nginx Logs</b>. The latest requests are analysed straight away.</li>
+  <li>Choose how many log lines to read — 5,000 up to 100,000. More lines go further back in time but take longer. Click <b>Analyse again</b> whenever you want a fresh look.</li>
+</ol>
+<p>The report shows:</p>
+<ul>
+  <li><b>Top findings</b> — each problem with its evidence and the fix, often with the exact nginx setting to use. For example:
+    pages failing with server errors (5xx), an app that is too slow or refuses connections, uploads that are too large,
+    pages that keep answering 404, certificates or TLS settings that are out of date, and logs that are never cleaned up.</li>
+  <li><b>Top threats</b> — addresses guessing passwords on login pages, scanning for weak spots, or sending far more requests than normal.</li>
+  <li><b>Requests over time</b>, the <b>status mix</b> (successes, redirects, errors) and the <b>busiest paths</b>.</li>
+</ul>
+<h2>Get more detail: install the analyzer</h2>
+<p>With nginx's standard logs, the report already works. Click <b>Install analyzer</b> to also get <b>response times</b> and
+figures per website: it adds a richer log format to nginx (checked before nginx reloads). <b>Remove analyzer</b> takes it out again.</p>
+<h2>Block an attacker</h2>
+<ul>
+  <li>Click <b>Block</b> next to an address in the threats list — or <b>Block all</b> to block every one listed. You can also
+    block a whole range, such as <code>203.0.113.0/24</code>.</li>
+  <li>Blocked addresses get an error from nginx for every website on that server. See them under <b>Blocked addresses</b>
+    and click <b>Unblock</b> to let one back in.</li>
+  <li>For protection while nobody is watching, use <b>Install fail2ban with nginx jails</b>: it bans addresses that keep
+    attacking, automatically.</li>
+</ul>
+${warn('Is your site behind Cloudflare\'s orange cloud? Then every visitor arrives from a Cloudflare address — the report tells you so. Blocking those would block real visitors, so block attackers in Cloudflare instead.')}
+${tip('AJ Pilot keeps no copy of your logs: each analysis reads them on the server and shows the result.')}`,
   },
 
   /* ------------------------------------------------------ apps & deployments */
@@ -312,12 +468,56 @@ Docker installed (<a href="/docs/one-click-installs">how</a>).</p>
   <li>Deploy. Click <b>Check progress</b> to watch every step — clone, install, build, start — with its log.</li>
 </ol>
 <h2>After it is live</h2>
-<ul>
-  <li>Click <b>View details</b> on the app for its settings, domains, containers, environment and logs.</li>
-  <li><b>Redeploy</b> after you push new code; <b>Restart</b>, <b>Stop</b> or change the number of instances any time.</li>
-  <li>Edit environment variables and ports from the app's page.</li>
-</ul>
+<p>The app's card shows its address, its status and how much <b>CPU</b>, <b>memory</b> and <b>network</b> it uses. Click
+<b>View details</b> for everything else — <a href="/docs/manage-an-app">Manage a running app</a> walks through it.</p>
 ${warn('If a deploy fails, click <b>Check progress</b>: the step that failed shows the exact error from the build.')}`,
+  },
+  {
+    slug: 'manage-an-app',
+    category: 'Apps & deployments',
+    title: 'Manage a running app',
+    summary: 'Everything on an app\'s page: live usage, logs, settings, containers, environment, domains and removing it.',
+    body: `
+<p>Open <b>Apps</b> (or a server's <b>Apps</b> tab) and click <b>View details</b> on an app. The buttons along the top work
+on the whole app; the tabs on the side show one part of it each.</p>
+<h2>The buttons</h2>
+<table class="doc-table">
+  <tr><th>Button</th><th>What it does</th></tr>
+  <tr><td>Deploy log / Check progress</td><td>The last deploy step by step, with its log — or the one running now.</td></tr>
+  <tr><td>Container logs</td><td>What your app itself prints (errors, requests…). With several containers, choose which one.</td></tr>
+  <tr><td>Edit settings</td><td>Branch, project type, Node version, install / build / start commands, port, restart policy, Docker network and Docker Hub. <b>Redeploy now</b> is ticked, so the change goes live straight away; untick it to wait for the next deploy.</td></tr>
+  <tr><td>Environment</td><td>See and change the app's variables. The containers restart with the new values in seconds — no rebuild — or untick the option to wait for the next deploy.</td></tr>
+  <tr><td>Containers</td><td>How many copies of the app run and which port each one uses on the server.</td></tr>
+  <tr><td>+ Domain</td><td>Put the app on another domain — see <a href="/docs/app-domains">Put an app on your domain</a>.</td></tr>
+  <tr><td>Redeploy</td><td>Fetch the branch again, rebuild and restart. Use it after pushing new code (or turn on <a href="/docs/auto-deploy">auto deploy</a>).</td></tr>
+  <tr><td>Start / Stop / Restart</td><td>Run or halt the app's containers without rebuilding.</td></tr>
+  <tr><td>Remove</td><td>Take the app off the server — see below.</td></tr>
+</table>
+<p><b>View only</b> team members see the app but not the buttons that change it.</p>
+<h2>The tabs</h2>
+<table class="doc-table">
+  <tr><th>Tab</th><th>What it shows</th></tr>
+  <tr><td>Overview</td><td>Status, containers running, live domains, image size, last deploy, where it runs, the commit that is live, and the <b>Statistics</b> chart of the last day, week or month.</td></tr>
+  <tr><td>Live stats</td><td>CPU, memory, network and disk use, every 5 seconds, for the app and each of its containers. See <a href="/docs/monitoring">Monitor servers and apps</a>.</td></tr>
+  <tr><td>Settings</td><td>How the app is built and run.</td></tr>
+  <tr><td>Auto deploy</td><td>Whether a push or a merge deploys it by itself.</td></tr>
+  <tr><td>Deploy history</td><td>Every deploy: who or what started it, the commit, whether it worked, and its log.</td></tr>
+  <tr><td>Domains</td><td>Each domain with its status; <b>Setup log</b>, <b>Retry</b> or <b>Remove</b> one.</td></tr>
+  <tr><td>Containers</td><td>Each container, the port it answers on, and whether it is running.</td></tr>
+  <tr><td>Environment &amp; volumes</td><td>The names of its variables (values stay hidden) and the volumes that keep its data.</td></tr>
+  <tr><td>Activity</td><td>Everything done to this app, by whom and when.</td></tr>
+</table>
+<h2>Keep data between deploys: volumes</h2>
+<p>Each deploy starts the app in a fresh container, so files it writes (uploads, a SQLite database…) are lost — unless
+they are in a <b>volume</b>. Add one when creating the app, giving the folder inside the app to keep (for example
+<code>/app/uploads</code>). The same volume is mounted again at every deploy.</p>
+<h2>Run several copies</h2>
+<p>Open <b>Containers</b> and add more. Each copy gets its own port on the server, and each domain is pointed at the port
+you choose when adding it. Extra copies keep the app answering while one restarts — but each one uses its own memory.</p>
+<h2>Remove an app</h2>
+<p><b>Remove</b> stops and deletes its containers, and takes down each of its domains — DNS record or tunnel, nginx site and
+certificate. You choose whether to keep its <b>volumes</b> (its saved data). It takes a minute or two; the card shows each step.</p>
+${warn('Removing cannot be undone. Unless you keep the volumes, anything the app saved on the server is deleted with it.')}`,
   },
   {
     slug: 'auto-deploy',
@@ -446,12 +646,12 @@ ${tip('After installing a database, add it under <b>Databases</b> to manage it �
   {
     slug: 'databases',
     category: 'Databases',
-    title: 'Manage databases (MySQL, PostgreSQL, MongoDB, Redis)',
+    title: 'Manage databases (MySQL, PostgreSQL, MongoDB, Redis, Elasticsearch)',
     summary: 'Connect a database, browse it, manage users and privileges, and run queries.',
     body: `
 <ol class="doc-steps">
   <li>Open <b>Databases</b> and click <b>+ Add database connection</b>.</li>
-  <li>Choose the type — MySQL, PostgreSQL, MongoDB or Redis — and enter its host, port, user and password.</li>
+  <li>Choose the type — MySQL, PostgreSQL, MongoDB, Redis or Elasticsearch — and enter its host, port, user and password.</li>
   <li>Pick a <b>server</b> to connect through if the database only listens on <code>localhost</code>: AJ Pilot reaches it
     over that server's SSH, so you never have to open the database port to the internet.</li>
   <li><b>Test connection</b>, then save.</li>
@@ -464,6 +664,19 @@ ${tip('After installing a database, add it under <b>Databases</b> to manage it �
   <li>Read and change server <b>settings</b>.</li>
   <li><b>Run query</b> for anything the screens do not answer.</li>
 </ul>
+<h2>Elasticsearch</h2>
+<ul>
+  <li>Connect on port <code>9200</code> as <code>elastic</code> (or another superuser), or with no username and password if
+    security is off. Tick <b>TLS</b> if the cluster uses <code>https://</code>.</li>
+  <li><b>Overview</b> shows cluster health (green, yellow or red), nodes, memory, disk and shards.</li>
+  <li><b>Indices</b> takes the place of databases: create an index with its shards and replicas, delete one, and open
+    it to see its fields, sample documents, aliases and settings. Click a field to see its most common values.</li>
+  <li><b>Users</b>: create users and give them a role, or read / write / full access to an index pattern such as
+    <code>logs-*</code>.</li>
+  <li><b>Run query</b> uses the same syntax as Kibana Dev Tools, for example <code>GET /_cat/indices</code> or
+    <code>POST /orders/_search</code> with a JSON body. Only reads are allowed.</li>
+</ul>
+${tip('On a single server, create indices with 0 replicas — otherwise the copies have nowhere to go and the index shows yellow.')}
 ${warn('Queries run against your real data — double-check anything that changes or deletes rows.')}`,
   },
 
@@ -471,12 +684,13 @@ ${warn('Queries run against your real data — double-check anything that change
   {
     slug: 'connect-github-gitlab',
     category: 'Accounts & integrations',
-    title: 'Connect GitHub or GitLab',
+    title: 'Connect GitHub, GitLab or Bitbucket',
     summary: 'Give AJ Pilot access to your repositories to deploy them.',
     body: `
 <ol class="doc-steps">
   <li>Open <b>Account management</b> and click <b>+ Add git account</b>.</li>
-  <li>Choose <b>GitHub</b> or <b>GitLab</b>.</li>
+  <li>Choose <b>GitHub</b>, <b>GitLab</b> or <b>Bitbucket</b>. Your company runs its own GitHub Enterprise or GitLab?
+    Choose it and enter its address.</li>
   <li>Sign in in the window that opens and approve access. (Or paste a personal access token instead.)</li>
   <li>Your repositories, branches and recent commits now appear when you deploy an app.</li>
 </ol>
@@ -544,7 +758,7 @@ build and deploy on your own server.</p>`,
 <table class="doc-table">
   <tr><th>Role</th><th>Can do</th></tr>
   <tr><td>Admin</td><td>Everything in the organisation, including its team and its plan.</td></tr>
-  <tr><td>Editor</td><td>Add and change servers, apps, domains and databases — but not the team.</td></tr>
+  <tr><td>Editor</td><td>Add and change servers, apps, domains and databases, and open a server's Terminal — but not the team.</td></tr>
   <tr><td>View only</td><td>Look at everything; change nothing.</td></tr>
 </table>
 <h2>Add a person</h2>
@@ -557,7 +771,14 @@ build and deploy on your own server.</p>`,
 you can add.</p>
 <h2>Your own account</h2>
 <p>From the menu at the top right: <b>Edit profile</b> (name, email, mobile number) and <b>Change password</b>.
-<b>Activity</b> shows who changed what.</p>`,
+<b>Activity</b> shows who changed what.</p>
+<h2>Signing in</h2>
+<p>After your email and password, AJ Pilot sends a <b>6-digit code</b> to your mobile number (or your email, if no number is
+saved). Type it in within 10 minutes. Did not get it? Wait 30 seconds and ask for a new one.</p>
+<h2>More than one organisation</h2>
+<p>If you belong to several organisations — your company and a client's, say — open <b>Settings → Organisations</b> and
+click <b>Work in it</b> to switch. Servers, apps and accounts are never shared between organisations, so you only see the
+ones of the organisation you are working in.</p>`,
   },
   {
     slug: 'plans-and-billing',
@@ -599,6 +820,25 @@ environment variable, the wrong Node version, or the wrong project folder in a m
   <li>Open the domain's log on the app page; use <b>Retry</b> after fixing the cause.</li>
   <li>Behind a firewall? Use a <b>Zero Trust</b> domain instead — it needs no open ports.</li>
 </ul>
+<h2>A server shows "offline" or "cannot sign in"</h2>
+<ul>
+  <li><b>Offline</b>: the panel cannot reach the server at all. Check it is switched on and that port 22 is open. If it is
+    only reachable on your office network or VPN, use a <a href="/docs/connectors">connector</a>.</li>
+  <li><b>Cannot sign in</b>: the server answers but its saved password or key was changed. Edit the server and enter the new one.</li>
+</ul>
+<h2>An app card says "Usage unavailable"</h2>
+<p>The panel could not read the app's containers. The reason follows on the card: usually the server is offline, or
+<b>Docker is not running</b> on it — open the server's <b>Docker</b> tab, or restart Docker from its <b>Terminal</b>
+with <code>sudo systemctl start docker</code>.</p>
+<h2>The app's CPU shows more than 100%</h2>
+<p>That is normal: each processor core counts as 100%, so 250% means two and a half cores are busy. The line underneath
+shows the same as a share of the whole server.</p>
+<h2>"Too many live views are open at once"</h2>
+<p>Each live view keeps a connection to a server open. Close the Live or Live stats tabs you are not watching — in other
+browser tabs too — and try again.</p>
+<h2>The Statistics chart is empty</h2>
+<p>A sample is taken every 5 minutes while the server is online, so a server or app added a moment ago has nothing to
+show yet. Check back in a few minutes.</p>
 <h2>"Your plan allows …"</h2>
 <p>You have reached a limit of your plan. See <a href="/docs/plans-and-billing">Plans &amp; billing</a> to upgrade.</p>
 <h2>"Your organisation has no active plan"</h2>
@@ -620,6 +860,10 @@ environment variable, the wrong Node version, or the wrong project folder in a m
   <li><b>Sessions you can end:</b> a new password or role signs that person out everywhere.</li>
   <li><b>Organisations are separate:</b> nothing is shared between them, not even by guessing an id.</li>
   <li><b>Activity log:</b> every change is recorded with who made it.</li>
+  <li><b>A code at every sign-in:</b> a password alone is not enough — each sign-in also needs a one-time code sent to you.</li>
+  <li><b>Terminal privacy:</b> the browser terminal records only who opened it and when — never what was typed.</li>
+  <li><b>Connectors open nothing:</b> a connector on your PC only makes an outgoing connection to the panel, and stops the moment you delete it.</li>
+  <li><b>No copies of your logs:</b> nginx logs are read on your server for each analysis and are not stored by AJ Pilot.</li>
 </ul>`,
   },
 
@@ -679,7 +923,7 @@ visitor's location, computer and whether they enquired before.</p>
     category: 'Platform admin',
     audience: 'admin',
     title: 'Settings in .env',
-    summary: 'The super admin account, the site address and location lookups.',
+    summary: 'The super admin account, the site address, location lookups, statistics history and live views.',
     body: `
 <table class="doc-table">
   <tr><th>Setting</th><th>What it does</th></tr>
@@ -687,6 +931,12 @@ visitor's location, computer and whether they enquired before.</p>
   <tr><td><code>SUPER_ADMIN_NAME</code>, <code>SUPER_ADMIN_PHONE</code></td><td>Its name and mobile number.</td></tr>
   <tr><td><code>SITE_URL</code></td><td>The public address (e.g. <code>https://ajpilot.com</code>) used in search-engine tags and the sitemap.</td></tr>
   <tr><td><code>GEOIP</code></td><td><code>ipwho.is</code> (default) looks up where a lead's IP address is; <code>off</code> turns it off.</td></tr>
+  <tr><td><code>METRICS_ENABLED</code></td><td><code>false</code> stops recording the Statistics history for servers and apps (on by default).</td></tr>
+  <tr><td><code>METRICS_EVERY_MINUTES</code>, <code>METRICS_KEEP_DAYS</code></td><td>How often a sample is taken (default 5 minutes) and how long it is kept (default 35 days, at least 7).</td></tr>
+  <tr><td><code>METRICS_CONCURRENCY</code></td><td>How many servers are sampled at the same time (default 4).</td></tr>
+  <tr><td><code>STATS_MAX_STREAMS</code>, <code>STATS_MAX_STREAMS_PER_ORG</code></td><td>How many server <b>Live</b> tabs may be open at once in total (default 8) and per organisation (default 4).</td></tr>
+  <tr><td><code>APP_STATS_STREAMS_PER_ORG</code></td><td>How many app <b>Live stats</b> tabs one organisation may have open at once (default 4).</td></tr>
+  <tr><td><code>STATS_STREAM_MINUTES</code></td><td>How long one live view runs before it reconnects (default 15).</td></tr>
 </table>
 <p>Restart the server after changing <code>.env</code>.</p>`,
   },

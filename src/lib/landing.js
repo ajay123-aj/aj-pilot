@@ -63,7 +63,7 @@ export const FAQ = [
   ['How do domains and SSL work?',
     'Connect your Cloudflare account, choose a domain and type a subdomain. The DNS record, the Nginx site and a free Let\'s Encrypt certificate are created for you. For servers without open ports, apps can be published through a Cloudflare Zero Trust tunnel instead. An app can have several domains.'],
   ['Which databases are supported?',
-    'MySQL, PostgreSQL, MongoDB and Redis — install them on your server with one click, then manage databases, users, privileges and settings, see statistics and run queries from the panel.'],
+    'MySQL, PostgreSQL, MongoDB, Redis and Elasticsearch — install them on your server with one click, then manage databases (or Elasticsearch indices), users, privileges and settings, see statistics and run read-only queries from the panel.'],
   ['Which servers can I use?',
     'Any Ubuntu server you can reach over SSH — from DigitalOcean, AWS, Hetzner, Linode, Hostinger, any other VPS provider, or your own hardware.'],
   ['Is my data secure?',
@@ -142,7 +142,7 @@ function jsonLd(url, plans) {
       applicationCategory: 'DeveloperApplication',
       applicationSubCategory: 'Server management and app deployment',
       operatingSystem: 'Web browser; manages Ubuntu Linux servers',
-      description: 'Self-hosted control panel to manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static apps from GitHub or GitLab, run Docker, MySQL, PostgreSQL, MongoDB and Redis, and connect domains with Cloudflare, Nginx and free SSL.',
+      description: 'Self-hosted control panel to manage Ubuntu servers over SSH, deploy Next.js, NestJS, Node.js, React and static apps from GitHub or GitLab, run Docker, MySQL, PostgreSQL, MongoDB, Redis and Elasticsearch, and connect domains with Cloudflare, Nginx and free SSL.',
       featureList: [
         'Server inventory and live monitoring over SSH', 'systemd service, cron and file management',
         'Ubuntu user management with passwords, sudo and SSH key generation',

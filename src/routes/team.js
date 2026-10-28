@@ -109,8 +109,9 @@ teamRouter.put('/members/:id', requirePermission('members'), async (req, res, ne
   try {
     const member = await one('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!member) return res.status(404).json({ error: 'That person does not have an account here' });
+    // Someone in another organisation is answered as if they did not exist, so ids cannot be probed.
     if (member.org_id !== req.orgId && req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'That person is not in your organisation' });
+      return res.status(404).json({ error: 'That person does not have an account here' });
     }
     if (member.role === 'super_admin') return res.status(400).json({ error: SUPER_ELSEWHERE });
 
@@ -158,8 +159,9 @@ teamRouter.delete('/members/:id', requirePermission('members'), async (req, res,
   try {
     const member = await one('SELECT * FROM users WHERE id = ?', [req.params.id]);
     if (!member) return res.status(404).json({ error: 'That person does not have an account here' });
+    // Someone in another organisation is answered as if they did not exist, so ids cannot be probed.
     if (member.org_id !== req.orgId && req.user.role !== 'super_admin') {
-      return res.status(403).json({ error: 'That person is not in your organisation' });
+      return res.status(404).json({ error: 'That person does not have an account here' });
     }
     if (member.id === req.user.id) return res.status(400).json({ error: 'You cannot remove your own account' });
     if (member.role === 'super_admin') return res.status(400).json({ error: SUPER_ELSEWHERE });

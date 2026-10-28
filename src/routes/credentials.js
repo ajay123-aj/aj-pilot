@@ -27,7 +27,7 @@ import {
 
 export const credentialsRouter = Router();
 
-const PROVIDERS = new Set(['git', 'dockerhub', 'cloudflare', 'mysql', 'postgres', 'mongodb', 'redis']);
+const PROVIDERS = new Set(['git', 'dockerhub', 'cloudflare', 'mysql', 'postgres', 'mongodb', 'redis', 'elasticsearch']);
 
 async function publicCredential(row) {
   if (!row) return null;
@@ -111,8 +111,8 @@ credentialsRouter.post('/', async (req, res, next) => {
 
     if (!PROVIDERS.has(provider)) return res.status(400).json({ error: `provider must be one of ${[...PROVIDERS].join(', ')}` });
     if (!name) return res.status(400).json({ error: 'name is required' });
-    // MongoDB and Redis can run without authentication, so an empty password is allowed there.
-    const optionalSecret = provider === 'mongodb' || provider === 'redis';
+    // MongoDB, Redis and Elasticsearch can run without authentication, so an empty password is allowed there.
+    const optionalSecret = provider === 'mongodb' || provider === 'redis' || provider === 'elasticsearch';
     if (!secret && !optionalSecret) return res.status(400).json({ error: 'secret (token / password) is required' });
     if (provider === 'dockerhub' && !username) return res.status(400).json({ error: 'username is required for Docker Hub' });
     if (DATABASE_PROVIDERS[provider]?.userRequired && !username) {
@@ -411,6 +411,7 @@ const verifiers = {
   postgres: (row) => testEngine(row),
   mongodb: (row) => testEngine(row),
   redis: (row) => testEngine(row),
+  elasticsearch: (row) => testEngine(row),
 };
 
 async function testEngine(row) {

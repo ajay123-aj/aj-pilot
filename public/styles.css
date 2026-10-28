@@ -180,6 +180,7 @@ body.nav-collapsed .sidebar { width: var(--rail-collapsed); padding: 18px 10px; 
   color: var(--muted); cursor: pointer; font: inherit; font-size: 13px;
 }
 .nav-toggle:hover { color: var(--text); border-color: var(--accent); }
+.icon-btn.nav-menu-btn { display: none; }
 
 .sidebar nav { display: flex; flex-direction: column; gap: 3px; }
 
@@ -277,6 +278,22 @@ body.nav-collapsed .shell { margin-left: var(--rail-collapsed); }
 .trial-text span { color: var(--muted); font-size: 12.5px; }
 .trial-banner.ended .trial-text b { color: var(--err); }
 .trial-banner .btn { white-space: nowrap; }
+
+/* email not verified yet: on every page until the link is clicked */
+.verify-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap;
+  margin: 16px 32px 0; padding: 12px 16px; border-radius: 12px;
+  background: var(--warn-soft); border: 1px solid var(--warn-line);
+}
+.verify-banner[hidden] { display: none; }
+.verify-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; }
+.verify-text span { color: var(--muted); font-size: 12.5px; }
+.verify-banner .btn { white-space: nowrap; }
+@media (max-width: 640px) { .verify-banner { margin: 12px 16px 0; } }
+
+/* sign in: email + password, or mobile + code */
+.login-method { display: flex; width: 100%; margin: 14px 0 4px; }
+.login-method button { flex: 1; padding: 7px 10px; font-size: 12.5px; }
 
 /* one little bar per day: used days filled, today pulsing */
 .trial-days { display: flex; gap: 3px; }
@@ -388,7 +405,8 @@ html:not([data-theme="light"]) .theme-flip .lt-moon { opacity: 0; transform: rot
 .page-head p { margin: 0; }
 /* A long description wraps inside its own column, so the actions stay top right. */
 .page-head > :first-child { flex: 1 1 280px; min-width: 0; }
-.page-head > :not(:first-child) { flex-shrink: 0; }
+/* Buttons beside a title keep their size when they fit, and wrap onto their own line when they do not. */
+.page-head > :not(:first-child) { flex-shrink: 1; max-width: 100%; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 .view.hidden, .hidden, [hidden] { display: none !important; }
@@ -641,6 +659,18 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-sp
 .card:has(> table) > table thead th:first-child { border-top-left-radius: calc(var(--radius) - 1px); }
 .card:has(> table) > table thead th:last-child { border-top-right-radius: calc(var(--radius) - 1px); }
 .scroll-table { padding: 0 !important; }
+/* A table wider than its card shows a soft shadow on the side that has more to scroll to.
+   The card-coloured covers scroll with the content and hide each shadow once that edge is reached. */
+.card:has(> table), .scroll-table {
+  --shade: rgba(148, 163, 184, .30);
+  background:
+    linear-gradient(to right, var(--card) 40%, transparent) left / 36px 100% no-repeat local,
+    linear-gradient(to left, var(--card) 40%, transparent) right / 36px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--shade), transparent) left / 16px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--shade), transparent) right / 16px 100% no-repeat scroll,
+    var(--card);
+}
+:root[data-theme="light"] .card:has(> table), :root[data-theme="light"] .scroll-table { --shade: rgba(15, 23, 42, .16); }
 
 /* ---------- the row "Actions" menu (built by enhanceRowActions in app.js) */
 .act-toggle {
@@ -814,6 +844,22 @@ td .badge { vertical-align: middle; }
 .live-ct-image { font-family: var(--mono); font-size: 11px; word-break: break-all; }
 .live-ct-actions { display: flex; gap: 4px; justify-content: flex-end; flex-wrap: nowrap; }
 
+.live-table b.warn, .app-usage b.warn { color: var(--warn); }
+.live-table b.err, .app-usage b.err { color: var(--err); }
+
+/* An app card's usage strip: CPU, memory and network side by side. */
+.app-usage {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;
+  margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2);
+}
+.app-usage:empty { display: none; }
+.app-usage > .muted { grid-column: 1 / -1; }
+.app-usage-item { min-width: 0; }
+.app-usage-top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 12px; color: var(--muted); }
+.app-usage-top b { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-usage .meter { margin-top: 6px; height: 4px; }
+.app-usage-item .small { margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 @media (max-width: 1100px) {
   .live-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -876,6 +922,7 @@ td .badge { vertical-align: middle; }
 }
 .ask-danger { --tone: var(--err); --tone-soft: var(--err-soft); }
 .ask-warn { --tone: var(--warn); --tone-soft: var(--warn-soft); }
+.ask-ok { --tone: var(--ok); --tone-soft: var(--ok-soft); }
 @keyframes ask-pop { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
 .ask-icon {
   width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 16px;
@@ -886,6 +933,22 @@ td .badge { vertical-align: middle; }
 .ask-body { color: var(--muted); font-size: 13.5px; line-height: 1.55; max-height: 40vh; overflow-y: auto; overflow-wrap: anywhere; }
 .ask-body p { margin: 0 0 8px; }
 .ask-body p:last-child { margin-bottom: 0; }
+
+/* the plan summary shown before Razorpay opens at sign-up */
+.ask:has(.ask-plan) { max-width: 460px; }
+.ask-body:has(.ask-plan) { max-height: 60vh; }
+.ask-plan { text-align: left; color: var(--text); }
+.ask-plan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); border: 1px solid var(--accent-ring); }
+.ask-plan-head b { font-size: 15px; }
+.ask-plan-head span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.ask-plan-price { text-align: right; white-space: nowrap; }
+.ask-plan-price b { font-size: 18px; color: var(--accent); }
+.ask-plan-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 2px; font-size: 12.5px; }
+.ask-plan-kv dt { color: var(--muted); }
+.ask-plan-kv dd { margin: 0; }
+.ask-plan-list { margin: 0; padding: 10px 2px 0 20px; border-top: 1px solid var(--line); font-size: 12.5px; columns: 2; column-gap: 18px; }
+.ask-plan-list li { margin: 0 0 4px; break-inside: avoid; }
+@media (max-width: 480px) { .ask-plan-list { columns: 1; } }
 .ask-input {
   width: 100%; margin-top: 14px; padding: 10px 12px; border-radius: 10px;
   border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-size: 14px;
@@ -1741,19 +1804,29 @@ body.nav-collapsed .nav-badge { position: absolute; top: 2px; right: 2px; min-wi
 
 @media (max-width: 720px) {
   body { flex-direction: column; }
-  /* On a phone the rail becomes a bar across the top: icons only, no collapsing. */
+  /* On a phone the rail is a drawer that slides in from the left, labels and all;
+     the menu button in the top bar opens it. The collapsed rail does not apply here. */
   .sidebar, body.nav-collapsed .sidebar {
-    position: sticky; top: 0; bottom: auto;
-    width: 100%; height: auto;
-    flex-direction: row; align-items: center; gap: 14px;
-    padding: 10px 14px; overflow-x: auto; overflow-y: hidden;
+    width: min(290px, 84vw); padding: 18px 14px; z-index: 60;
+    transform: translateX(-102%); transition: transform .22s ease, box-shadow .22s ease;
+    overscroll-behavior: contain;
   }
-  .sidebar nav { flex-direction: row; }
-  .nav-item.active::before { display: none; }
-  .sidebar-foot { margin: 0 0 0 auto; border-top: 0; padding: 0; }
-  .brand-text, .nav-toggle, .nav-label { display: none; }
-  .health { display: none; }
+  body.nav-open .sidebar { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, .45); }
+  body.nav-collapsed .brand-text, body.nav-collapsed .nav-label, body.nav-collapsed .health span:not(.dot) { display: revert; }
+  body.nav-collapsed .brand { justify-content: flex-start; gap: 10px; }
+  body.nav-collapsed .brand .logo { display: flex; }
+  body.nav-collapsed .nav-item { justify-content: flex-start; padding: 9px 12px; }
+  body.nav-collapsed .nav-item.active::before { left: -14px; }
+  .nav-item { padding: 11px 12px; }
+  .nav-toggle { display: none; }
+  .icon-btn.nav-menu-btn { display: inline-flex; flex: 0 0 auto; }
+  .nav-backdrop { position: fixed; inset: 0; z-index: 55; background: rgba(2, 6, 23, .55); backdrop-filter: blur(2px); }
+  body.nav-open { overflow: hidden; }
   .shell, body.nav-collapsed .shell { margin-left: 0; }
+  /* Two figures per row: a phone is too narrow for three, and one each makes a long page. */
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .tile { padding: 12px 13px; min-width: 0; }
+  .tile .value { font-size: 18px; overflow-wrap: anywhere; }
   .shell > main { padding: 18px 16px 50px; }
   .topbar { padding: 10px 16px; gap: 10px; }
   .topbar-title h2 { font-size: 14px; }
@@ -2398,6 +2471,56 @@ kbd { display: inline-block; padding: 1px 6px; font: 600 11px ui-monospace, SFMo
 @keyframes nlog-shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .nlog-skel { animation: none; } }
 
+/* ------------------------------------------------- server terminal */
+
+/* Dark in both themes, like every terminal. */
+.term-shell {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: #0b0f17; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.term-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; background: #111622; border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.term-title { font-family: var(--mono); font-size: 12.5px; color: #cbd2de; }
+.term-bar .grow { flex: 1; }
+.term-box { height: 480px; padding: 8px 4px 4px 10px; }
+.term-shell.full { position: fixed; inset: 0; z-index: 1000; border-radius: 0; border: 0; }
+.term-shell.full .term-box { flex: 1; height: auto; min-height: 0; }
+body.term-full-open { overflow: hidden; }
+@media (max-width: 640px) { .term-box { height: 360px; padding-left: 6px; } }
+
+/* ------------------------------------------- shimmer while a page loads */
+
+/* Drawn in the shape of what is coming (cards, tables, tiles, plans) — see skeleton() in app.js. */
+.sk-wrap { grid-column: 1 / -1; display: grid; gap: 16px; }
+.sk {
+  display: block; height: 10px; border-radius: 6px; max-width: 100%;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%; animation: nlog-shimmer 1.4s linear infinite;
+}
+.sk.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.sk.pill { height: 20px; border-radius: 99px; }
+.sk.btn { height: 38px; border-radius: 10px; }
+.sk-card { display: grid; gap: 12px; }
+.sk-head { display: flex; align-items: center; gap: 10px; }
+.sk-foot { display: flex; gap: 8px; margin-top: 4px; }
+.sk-table { padding: 4px 0; }
+/* Inside a box that is already a card (activity, file explorer): just the rows, no second frame. */
+.card > .sk-wrap > .sk-table, .fx .sk-table { border: 0; box-shadow: none; background: none; }
+.sk-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr .6fr; gap: 18px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.sk-row:last-child { border-bottom: 0; }
+.sk-row.th { padding-top: 10px; padding-bottom: 10px; }
+.sk-row.th .sk { height: 8px; opacity: .7; }
+.sk-tile { display: grid; gap: 10px; }
+.sk-lines { display: grid; gap: 12px; }
+.sk-plans .price-card { gap: 12px; }
+@media (max-width: 640px) {
+  .sk-row { grid-template-columns: 2fr 1fr .6fr; }
+  .sk-row > :nth-child(3), .sk-row > :nth-child(4) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
+
 /* health hero */
 .nlog-hero {
   display: flex; align-items: center; gap: 14px 18px; flex-wrap: wrap; padding: 18px 20px; margin-bottom: 14px;
@@ -2628,3 +2751,33 @@ kbd { display: inline-block; padding: 1px 6px; font: 600 11px ui-monospace, SFMo
   .nlog-ua { max-width: 160px; }
   .nlog-risk-track { width: 44px; }
 }
+
+/* ---------------------------------------- statistics over time (daily / weekly / monthly) */
+.mchart { --s1: var(--accent); --s2: #8b5cf6; --s3: #14b8a6; margin-top: 14px; }
+.mchart .live-card-head { flex-wrap: wrap; gap: 8px; }
+.mchart-sub { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.mchart-empty { padding: 28px 8px; text-align: center; }
+.mchart-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin: 4px 0 10px; }
+.mchart-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); min-width: 0; }
+.mchart-stat span { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.mchart-stat b { font-size: 18px; }
+.mchart-stat small { font-size: 11px; }
+.mchart-stat.err { border-color: var(--err-line); background: var(--err-soft); } .mchart-stat.err b { color: var(--err); }
+.mchart-stat.warn { border-color: var(--warn-line); background: var(--warn-soft); } .mchart-stat.warn b { color: var(--warn); }
+.mchart-stat.ok { border-color: var(--ok-line); background: var(--ok-soft); } .mchart-stat.ok b { color: var(--ok); }
+.mchart-svg text { font-size: 11px; }
+.mchart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.mchart-line.s1, .mchart-dot.s1 { stroke: var(--s1); fill: var(--s1); } .mchart-line.s1 { fill: none; }
+.mchart-line.s2, .mchart-dot.s2 { stroke: var(--s2); fill: var(--s2); } .mchart-line.s2 { fill: none; }
+.mchart-line.s3, .mchart-dot.s3 { stroke: var(--s3); fill: var(--s3); } .mchart-line.s3 { fill: none; stroke-dasharray: 5 3; }
+.mchart-lvl.ok { fill: var(--ok); } .mchart-lvl.warn { fill: var(--warn); } .mchart-lvl.err { fill: var(--err); } .mchart-lvl.none { fill: var(--line); }
+.mchart-cursor { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; opacity: 0; }
+.mchart-svg .col:hover .mchart-cursor { opacity: .7; }
+.mchart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 4px 2px 2px; }
+.mchart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.mchart-legend-note { margin-left: auto; }
+.mchart-key { display: inline-block; width: 12px; height: 3px; border-radius: 2px; background: var(--s1); }
+.mchart-key.s2 { background: var(--s2); } .mchart-key.s3 { background: var(--s3); }
+.mchart-key.lvl { width: 9px; height: 9px; border-radius: 2px; }
+.mchart-key.lvl.ok { background: var(--ok); } .mchart-key.lvl.warn { background: var(--warn); } .mchart-key.lvl.err { background: var(--err); }
+.health-filter { margin: 0 0 14px; }
