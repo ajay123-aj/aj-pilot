@@ -2514,16 +2514,32 @@ body.term-full-open { overflow: hidden; }
 .sk-table { padding: 4px 0; }
 /* Inside a box that is already a card (activity, file explorer): just the rows, no second frame. */
 .card > .sk-wrap > .sk-table, .fx .sk-table { border: 0; box-shadow: none; background: none; }
-.sk-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr .6fr; gap: 18px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.sk-row { display: grid; grid-template-columns: var(--sk-cols, 2fr 1fr 1fr 1fr .6fr); gap: 18px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .sk-row:last-child { border-bottom: 0; }
 .sk-row.th { padding-top: 10px; padding-bottom: 10px; }
 .sk-row.th .sk { height: 8px; opacity: .7; }
 .sk-tile { display: grid; gap: 10px; }
 .sk-lines { display: grid; gap: 12px; }
 .sk-plans .price-card { gap: 12px; }
+.sk-stack { flex: 1; min-width: 0; display: grid; gap: 8px; }
+.sk-badges { display: flex; gap: 6px; flex: none; }
+.card-actions .sk.pill { flex: none; }
+/* The file explorer: its toolbar, then one row per file (icon, name, size, modified, permissions). */
+.sk-files { display: grid; padding: 0; overflow: hidden; }
+.fx .sk-files { border: 0; box-shadow: none; background: none; }
+.sk-files-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.sk-files-bar .sk.btn { height: 28px; border-radius: 7px; }
+.sk-files-bar .sk-path { flex: 1; }
+.sk-files-row { display: grid; grid-template-columns: 18px 1fr 60px 100px 80px; gap: 14px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); }
+.sk-files-row:last-child { border-bottom: 0; }
+.sk-tab { pointer-events: none; }
+.sk-form { gap: 18px; max-width: 640px; }
 @media (max-width: 640px) {
   .sk-row { grid-template-columns: 2fr 1fr .6fr; }
-  .sk-row > :nth-child(3), .sk-row > :nth-child(4) { display: none; }
+  .sk-row > :nth-child(3), .sk-row > :nth-child(4), .sk-row > :nth-child(n+6) { display: none; }
+  .sk-files-row { grid-template-columns: 18px 1fr 60px; }
+  .sk-files-row > :nth-child(n+4) { display: none; }
+  .sk-files-bar .sk-search { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .sk { animation: none; } }
 

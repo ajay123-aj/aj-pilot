@@ -1603,7 +1603,7 @@ $('#form-password').addEventListener('submit', async (e) => {
 
 async function loadServers() {
   const box = $('#server-list');
-  box.innerHTML = skeleton('cards');
+  box.innerHTML = skeleton('servers');
   try {
     const servers = await api('/servers');
     if (!servers.length) {
@@ -1969,8 +1969,8 @@ async function openServer(id) {
   tabsLoaded = new Set();
 
   show('server-detail');
-  $('#detail-tabs').innerHTML = '';
-  $('#detail-body').innerHTML = skeleton('detail');
+  $('#detail-tabs').innerHTML = skeletonTabs(SERVER_TABS.length);
+  $('#detail-body').innerHTML = skeleton('overview', { label: 'Reading this server…' });
 
   try {
     const s = await api(`/servers/${id}`);
@@ -2238,30 +2238,114 @@ function section(title, inner) {
 
 /**
  * A shimmering placeholder in the shape of what is loading, shown until the
- * answer arrives: 'cards' (a list of cards), 'table' (rows), 'detail' (tiles
- * over a table), 'plans' (price cards) or 'lines' (a block of text).
+ * answer arrives. Each page gets its own shape, built from the same classes as
+ * the real thing so nothing jumps when the content lands:
+ *
+ *   servers · apps · accounts · catalog — that page's cards
+ *   overview — tiles, two cards of details and a table (a server, an app)
+ *   files — the explorer's toolbar and file rows
+ *   activity — the activity log's columns
+ *   dashboard — numbers, a chart and a table
+ *   cards · table · detail · plans · lines — the general shapes
+ *
+ * `cols` shapes a table's columns: 'name', 'pill', 'when', 'wide', 'num', 'actions'.
  * The label is read out to screen readers.
  */
-function skeleton(kind = 'table', { n, label = 'Loading…' } = {}) {
+function skeleton(kind = 'table', { n, label = 'Loading…', cols } = {}) {
   const W = ['72%', '48%', '86%', '60%', '38%', '66%', '54%', '80%'];
   const bar = (w, h = 10, cls = '') => `<i class="sk ${cls}" style="width:${w};height:${h}px"></i>`;
+  const pill = (w = '64px') => bar(w, 20, 'pill');
+  const box = (size, radius = 8) => `<i class="sk" style="width:${size}px;height:${size}px;border-radius:${radius}px;flex:none"></i>`;
   const times = (count, fn) => Array.from({ length: count }, (_, i) => fn(i)).join('');
-  const rows = (count) => `<div class="card sk-table">
-    <div class="sk-row th">${times(5, (i) => bar(i ? '50%' : '30%', 8))}</div>
-    ${times(count, (r) => `<div class="sk-row">${times(5, (i) => bar(W[(r + i * 3) % W.length], i === 4 ? 20 : 10, i === 4 ? 'pill' : ''))}</div>`)}
-  </div>`;
-  const tiles = (count) => `<div class="tiles">${times(count, (i) => `<div class="tile sk-tile">${bar('45%', 8)}${bar(W[(i + 2) % W.length], 18)}</div>`)}</div>`;
+
+  // One cell per column type, sized like what normally sits there.
+  const cell = (type, r, i) => ({
+    name: bar(W[(r + i) % W.length], 11),
+    pill: pill(['56px', '70px', '48px'][(r + i) % 3]),
+    when: bar('84px', 9),
+    wide: bar(['92%', '74%', '84%', '66%'][r % 4], 10),
+    num: bar('42px', 10),
+    actions: `<span style="display:flex;gap:6px">${pill('46px')}${pill('46px')}</span>`,
+  }[type] || bar(W[(r + i * 3) % W.length]));
+  const rows = (count, columns = ['name', 'name', 'name', 'name', 'pill']) => {
+    // Wide for a message, narrow for a badge or a time, and the first column a little wider, as in the real tables.
+    const width = (c, i) => (c === 'wide' ? '2.4fr' : ['pill', 'when', 'num', 'actions'].includes(c) ? '.8fr' : i === 0 ? '2fr' : '1fr');
+    const grid = `--sk-cols:${columns.map(width).join(' ')}`;
+    return `<div class="card sk-table">
+      <div class="sk-row th" style="${grid}">${columns.map(() => bar('50%', 8)).join('')}</div>
+      ${times(count, (r) => `<div class="sk-row" style="${grid}">${columns.map((c, i) => cell(c, r, i)).join('')}</div>`)}
+    </div>`;
+  };
+  const tiles = (count) => `<div class="tiles">${times(count, (i) => `<div class="tile sk-tile">${bar('45%', 8)}${bar(W[(i + 2) % W.length], 18)}${bar('35%', 8)}</div>`)}</div>`;
+  const kv = (count, seed = 0) => `<dl class="kv">${times(count, (j) => `<dt>${bar(['70%', '55%', '62%'][j % 3], 9)}</dt><dd>${bar(W[(seed + j * 2) % W.length])}</dd>`)}</dl>`;
+  const actions = (count) => `<div class="card-actions">${times(count, (j) => pill(['84px', '52px', '48px', '92px', '60px'][j % 5]))}</div>`;
+  const head = (left, right) => `<div class="card-head"><div class="sk-stack">${left}</div><div class="head-badges sk-badges">${right}</div></div>`;
+  const meter = (pct) => `<div class="meter"><span class="sk" style="width:${pct}%;height:100%"></span></div>`;
 
   let inner;
-  if (kind === 'cards') {
+  if (kind === 'servers') {
+    // Name and address, status badges, OS and uptime, then the disk / memory / CPU meters.
+    inner = `<div class="grid">${times(n || 3, (i) => `<div class="card">
+      ${head(`<div class="sk-head"><i class="sk dot"></i>${bar(['50%', '42%', '58%'][i % 3], 14)}</div>${bar('62%', 9)}`, `${pill('56px')}${pill('48px')}`)}
+      ${kv(2, i)}
+      <div class="usage">${times(3, (j) => `<div class="usage-cell">
+        <div class="usage-top">${bar('40px', 9)}${bar('54px', 10)}</div>
+        ${meter([46, 63, 28][(i + j) % 3])}
+        <div class="usage-sub">${bar('70%', 8)}</div></div>`)}</div>
+      ${actions(5)}
+    </div>`)}</div>`;
+  } else if (kind === 'apps') {
+    // Name over its repository, three badges, server / address / last deploy, then the CPU, memory and network strip.
+    inner = `<div class="grid">${times(n || 3, (i) => `<div class="card">
+      ${head(`<div class="sk-head">${box(16, 4)}${bar(['46%', '54%', '38%'][i % 3], 14)}</div>${bar('70%', 9)}`, `${pill('48px')}${pill('64px')}${pill('56px')}`)}
+      ${kv(3, i)}
+      <div class="app-usage">${times(3, () => `<div class="app-usage-item">
+        <div class="app-usage-top">${bar('34px', 9)}${bar('40px', 10)}</div>${meter(40)}</div>`)}</div>
+      ${actions(4)}
+    </div>`)}</div>`;
+  } else if (kind === 'accounts') {
+    // Avatar, name and login, a status badge, then what it is connected to.
+    inner = `<div class="grid">${times(n || 3, (i) => `<div class="card">
+      ${head(`<div class="sk-head">${box(38, 19)}<div class="sk-stack">${bar(['55%', '45%', '62%'][i % 3], 14)}${bar('40%', 9)}</div></div>`, pill('52px'))}
+      ${kv(3, i)}
+      ${actions(3)}
+    </div>`)}</div>`;
+  } else if (kind === 'catalog') {
+    // The Installations catalog: an icon, a name, a line about it, how it is installed, and Install.
+    inner = `<div class="cards">${times(n || 8, (i) => `<div class="card install-card">
+      ${box(28, 8)}
+      ${bar(['50%', '62%', '44%'][i % 3], 14)}
+      <div class="tagline sk-stack">${bar('92%', 9)}${bar('64%', 9)}</div>
+      ${bar('120px', 18, 'pill')}
+      <div class="card-actions">${pill('60px')}</div>
+    </div>`)}</div>`;
+  } else if (kind === 'overview') {
+    // A server's or an app's first tab: headline numbers, two cards of details, then a table.
+    inner = `${tiles(4)}
+      <div class="grid">${times(2, (i) => `<div class="card">${bar('34%', 13)}${kv(5, i * 3)}</div>`)}</div>
+      ${rows(n || 4, cols)}`;
+  } else if (kind === 'files') {
+    // The explorer: back / forward / up, the path, a search box, then one row per file.
+    inner = `<div class="card sk-files">
+      <div class="sk-files-bar">${times(3, () => box(28, 7))}${bar('100%', 28, 'btn sk-path')}${bar('160px', 28, 'btn sk-search')}</div>
+      ${times(n || 8, (r) => `<div class="sk-files-row">${box(18, 4)}${bar(W[r % W.length], 11)}${bar('48px', 9)}${bar('92px', 9)}${bar('70px', 9)}</div>`)}
+    </div>`;
+  } else if (kind === 'form') {
+    // Settings and other forms: a label over each field, then the button.
+    inner = `<div class="card sk-stack sk-form">${bar('30%', 14)}${times(n || 4, (i) => `<div class="sk-stack">${bar(['22%', '30%', '18%', '26%'][i % 4], 9)}${bar('100%', 38, 'btn')}</div>`)}${bar('120px', 36, 'btn')}</div>`;
+  } else if (kind === 'activity') {
+    inner = rows(n || 8, ['when', 'name', 'name', 'pill', 'wide']);
+  } else if (kind === 'dashboard') {
+    inner = `${tiles(4)}<div class="card sk-stack">${bar('28%', 12)}<i class="sk" style="width:100%;height:180px;border-radius:10px"></i></div>${rows(n || 5, cols)}`;
+  } else if (kind === 'cards') {
     inner = `<div class="grid">${times(n || 3, (i) => `<div class="card sk-card">
       <div class="sk-head"><i class="sk dot"></i>${bar(['50%', '42%', '58%'][i % 3], 14)}</div>
       ${bar('32%', 9)}
       ${times(3, (j) => bar(W[(i + j * 2 + 2) % W.length]))}
-      <div class="sk-foot">${bar('64px', 20, 'pill')}${bar('84px', 20, 'pill')}</div>
+      <div class="sk-foot">${pill('64px')}${pill('84px')}</div>
     </div>`)}</div>`;
   } else if (kind === 'detail') {
-    inner = `${tiles(4)}${rows(n || 4)}`;
+    inner = `${tiles(4)}${rows(n || 4, cols)}`;
   } else if (kind === 'plans') {
     inner = `<div class="price-grid sk-plans">${times(n || 3, (i) => `<div class="price-card">
       ${bar('40%', 16)}${bar('70%', 10)}${bar('55%', 30)}${bar('100%', 38, 'btn')}
@@ -2270,10 +2354,14 @@ function skeleton(kind = 'table', { n, label = 'Loading…' } = {}) {
   } else if (kind === 'lines') {
     inner = `<div class="card sk-lines">${times(n || 5, (i) => bar(W[i % W.length]))}</div>`;
   } else {
-    inner = rows(n || 6);
+    inner = rows(n || 6, cols);
   }
   return `<div class="sk-wrap" role="status" aria-busy="true"><span class="sr-only">${esc(label)}</span>${inner}</div>`;
 }
+
+/** A detail page's tab rail while it loads: one shimmering entry per tab. */
+const skeletonTabs = (count = 8) => Array.from({ length: count }, (_, i) =>
+  `<div class="tab sk-tab" aria-hidden="true"><i class="sk" style="width:${['70%', '55%', '62%', '48%', '66%'][i % 5]};height:10px"></i></div>`).join('');
 
 function kvCard(title, pairs) {
   const rows = pairs.filter(([, v]) => v !== undefined).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('');
@@ -2521,7 +2609,7 @@ async function loadFileBrowser(path = filesPath, { history = true } = {}) {
   filesSelected = null;
   closeFxMenu();
   const loading = `<p class="muted small" style="margin:12px 16px 0">Reading ${esc(path)} and measuring folder sizes (up to 20 seconds)…</p>
-    ${skeleton('table', { n: 8, label: `Reading ${path}` })}`;
+    ${skeleton(filesData ? 'table' : 'files', { n: 8, label: `Reading ${path}`, cols: ['name', 'num', 'when', 'name'] })}`;
   // Keep the explorer in place while the next folder loads, like Explorer does.
   if ($('#files-table')) {
     $('#files-table').innerHTML = loading;
@@ -3195,7 +3283,7 @@ async function loadServerServices() {
   const box = $('#services-panel');
   if (!box) return;
   tabsLoaded.add('services');
-  box.innerHTML = skeleton('table', { label: 'Reading the service list from the server…' });
+  box.innerHTML = skeleton('table', { label: 'Reading the service list from the server…', cols: ['name', 'pill', 'pill', 'wide', 'actions'] });
   try {
     const r = await api(`/servers/${currentServerId}/services`);
     servicesCache = r.services;
@@ -3458,7 +3546,7 @@ async function loadServerRunners() {
   const box = $('#server-runners-panel');
   if (!box) return;
   tabsLoaded.add('runners');
-  box.innerHTML = skeleton('table', { label: 'Checking the runners on this server…' });
+  box.innerHTML = skeleton('table', { label: 'Checking the runners on this server…', cols: ['name', 'pill', 'name', 'when', 'actions'] });
 
   const head = `
     <div class="section-head">
@@ -4704,7 +4792,7 @@ $('#btn-reopen-popup').addEventListener('click', () => {
 
 async function loadGitList() {
   const box = $('#git-list');
-  box.innerHTML = skeleton('cards');
+  box.innerHTML = skeleton('accounts');
   try {
     const list = await api('/credentials?provider=git');
     if (!list.length) {
@@ -4847,7 +4935,7 @@ $('#git-body').addEventListener('click', async (e) => {
 
   if (branchBtn) {
     const { repo, branch } = branchBtn.dataset;
-    box.innerHTML = skeleton('table', { label: 'Loading commits…' });
+    box.innerHTML = skeleton('table', { label: 'Loading commits…', cols: ['wide', 'name', 'when'] });
     try {
       const r = await api(`/credentials/${currentGitId}/git/commits`, { method: 'POST', body: { repo, branch } });
       box.innerHTML = `
@@ -4869,7 +4957,7 @@ $('#git-body').addEventListener('click', async (e) => {
 
   if (!repoBtn) return;
   const repo = repoBtn.dataset.repo;
-  box.innerHTML = skeleton('table', { label: 'Loading branches…' });
+  box.innerHTML = skeleton('table', { label: 'Loading branches…', cols: ['name', 'pill', 'when'] });
   try {
     const r = await api(`/credentials/${currentGitId}/git/branches`, { method: 'POST', body: { repo } });
     box.innerHTML = `
@@ -7502,7 +7590,7 @@ cfModal.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('clic
 
 async function loadCloudflareList() {
   const box = $('#cf-list');
-  box.innerHTML = skeleton('cards');
+  box.innerHTML = skeleton('accounts');
   const list = await api('/credentials?provider=cloudflare');
   if (!list.length) {
     box.innerHTML = '<div class="empty">No Cloudflare accounts yet. Click <b>+ Connect Cloudflare</b> and sign in on Cloudflare.</div>';
@@ -8435,7 +8523,7 @@ const CRED_HINTS = {
 /** Docker Hub accounts, on their tab under Account management. */
 async function loadCredentials() {
   const box = $('#cred-list');
-  box.innerHTML = skeleton('cards');
+  box.innerHTML = skeleton('accounts');
   const creds = await api('/credentials?provider=dockerhub');
   if (!creds.length) {
     box.innerHTML = '<div class="empty">No Docker Hub accounts yet. Click <b>+ Connect Docker Hub</b> and sign in on Docker Hub.</div>';
@@ -9068,7 +9156,7 @@ setInterval(() => { if (document.querySelector('[data-since]')) tickElapsed(); }
 
 async function loadApps({ quiet = false } = {}) {
   const box = $('#app-list');
-  if (!quiet) box.innerHTML = skeleton('cards');
+  if (!quiet) box.innerHTML = skeleton('apps');
   try {
     const apps = await api('/apps');
     if (!apps.length) {
@@ -9104,7 +9192,7 @@ async function loadServerApps({ quiet = false } = {}) {
       <div class="section-tools">${tools}</div>
     </div>`;
 
-  if (!quiet) box.innerHTML = `${head('')}${skeleton('cards', { label: 'Loading apps…' })}`;
+  if (!quiet) box.innerHTML = `${head('')}${skeleton('apps', { n: 2, label: 'Loading apps…' })}`;
   try {
     const apps = await api(`/apps?server_id=${currentServerId}`);
     setTabCount('apps', apps.length);
@@ -9837,8 +9925,8 @@ async function openAppDetails(id, tab = detailsTab) {
     $('#ad-title').textContent = 'Loading…';
     $('#ad-sub').textContent = '';
     $('#ad-state').innerHTML = '';
-    $('#ad-tabs').innerHTML = '';
-    $('#ad-body').innerHTML = skeleton('detail', { label: 'Reading the service…' });
+    $('#ad-tabs').innerHTML = skeletonTabs(7);
+    $('#ad-body').innerHTML = skeleton('overview', { label: 'Reading the service…' });
     $('#ad-actions').innerHTML = '';
     $('#btn-app-detail-back').textContent = detailsFrom === 'server' ? `← ${currentServer?.name || 'Server'}` : '← Apps';
     show('app-detail');
@@ -9940,7 +10028,7 @@ function renderAppDetails(a) {
       ${ifCan('edit', `<p style="margin-top:12px">${btn('edit', 'Edit these settings', 'primary')}</p>`)}`,
     live: `<div id="ad-live-panel" data-app="${a.id}"></div>`,
     auto: `${deployBanner(a)}<div id="ad-auto-panel" data-app="${a.id}">${autoSummaryHtml(a)}</div>`,
-    history: `${deployBanner(a)}<div id="ad-history-panel" data-app="${a.id}">${skeleton('table', { label: 'Reading the deploy history…' })}</div>`,
+    history: `${deployBanner(a)}<div id="ad-history-panel" data-app="${a.id}">${skeleton('table', { label: 'Reading the deploy history…', cols: ['when', 'pill', 'wide', 'name', 'num'] })}</div>`,
     domains: `
       ${(a.domains || []).length ? table(
     [{ label: 'Domain' }, { label: 'Status' }, { label: 'How' }, { label: 'Port', num: true }, { label: '' }],
@@ -11086,7 +11174,7 @@ async function loadCatalog() {
 
 async function loadInstallsView() {
   const box = $('#install-catalog');
-  box.innerHTML = skeleton('cards');
+  box.innerHTML = skeleton('catalog');
   try {
     await loadCatalog();
     box.innerHTML = catalog.map((c) => `
@@ -11110,7 +11198,7 @@ async function loadInstallsView() {
 /** Everything the panel has installed, across every server. */
 async function loadInstallList() {
   const box = $('#install-list-panel');
-  box.innerHTML = skeleton('table', { label: 'Loading installed services…' });
+  box.innerHTML = skeleton('table', { label: 'Loading installed services…', cols: ['name', 'name', 'pill', 'num', 'actions'] });
   try {
     const installs = await api('/installs');
     box.innerHTML = `
@@ -11573,7 +11661,7 @@ async function loadServerDocker() {
   const box = $('#docker-panel');
   if (!box) return;
   tabsLoaded.add('docker');
-  box.innerHTML = skeleton('detail', { label: 'Reading Docker…' });
+  box.innerHTML = skeleton('detail', { label: 'Reading Docker…', cols: ['name', 'name', 'pill', 'num', 'actions'] });
 
   const head = (extra = '') => `
     <div class="section-head">
@@ -12920,7 +13008,7 @@ async function loadServerCron() {
   const box = $('#cron-panel');
   if (!box) return;
   tabsLoaded.add('cron');
-  box.innerHTML = skeleton('detail', { label: 'Reading the schedule…' });
+  box.innerHTML = skeleton('table', { label: 'Reading the schedule…', cols: ['name', 'wide', 'when', 'actions'] });
 
   const head = (tools = '') => `
     <div class="section-head">
@@ -13169,7 +13257,7 @@ async function loadServerUsers() {
     return;
   }
 
-  box.innerHTML = `${head()}${skeleton('table', { label: 'Checking permission and reading the users…' })}`;
+  box.innerHTML = `${head()}${skeleton('table', { label: 'Checking permission and reading the users…', cols: ['name', 'num', 'name', 'pill', 'actions'] })}`;
   try {
     const { users } = await api(`/servers/${currentServerId}/users`);
     osUsers = users;
@@ -13551,7 +13639,7 @@ async function loadServerNginx() {
   const box = $('#nginx-panel');
   if (!box) return;
   tabsLoaded.add('nginx');
-  box.innerHTML = skeleton('detail', { label: 'Reading nginx…' });
+  box.innerHTML = skeleton('detail', { label: 'Reading nginx…', cols: ['name', 'name', 'pill', 'actions'] });
 
   const head = (tools = '') => `
     <div class="section-head">
@@ -14907,7 +14995,7 @@ async function loadSettings() {
   $('#settings-tabs').innerHTML = visible.map((t) =>
     `<button class="tab ${t.key === settingsTab ? 'active' : ''}" data-settings-tab="${t.key}"><span>${esc(t.label)}</span></button>`).join('');
 
-  box.innerHTML = skeleton('detail');
+  box.innerHTML = skeleton('form');
 
   try {
     const [team, orgs] = await Promise.all([
@@ -15217,7 +15305,7 @@ $('#form-org').addEventListener('submit', async (e) => {
 /* ------------------------------------------------------------ activity */
 
 async function loadActivity() {
-  $('#activity-list').innerHTML = skeleton('table', { n: 8 });
+  $('#activity-list').innerHTML = skeleton('activity', { n: 8 });
   const rows = await api('/activity');
   $('#activity-list').innerHTML = rows.length
     ? `<table><thead><tr><th>When</th><th>Who</th><th>Entity</th><th>Action</th><th>Message</th></tr></thead><tbody>
@@ -15312,7 +15400,7 @@ async function loadPlatform() {
   pf.loaded = new Set();
   $('#pf-body').innerHTML = PF_TABS.map((t) => `
     <div class="tab-panel" data-panel="${t.key}" ${t.key === pf.tab ? '' : 'hidden'}>
-      <div id="pf-panel-${t.key}">${skeleton('detail')}</div>
+      <div id="pf-panel-${t.key}">${skeleton(t.key === 'dashboard' ? 'dashboard' : 'table')}</div>
     </div>`).join('');
   showPfTab(pf.tab);
 }
@@ -17702,8 +17790,9 @@ $('#app-docs-search').addEventListener('input', renderDocsNav);
  */
 function showPendingPage() {
   const [a, b] = location.hash.replace(/^#\/?/, '').split('/');
-  const kind = /^\d+$/.test(b || '') || (a === 'databases' && b === 'mysql') ? 'detail'
-    : !a || LIST_VIEWS.includes(a) ? 'cards' : 'table';
+  const kind = /^\d+$/.test(b || '') || (a === 'databases' && b === 'mysql') ? 'overview'
+    : ({ servers: 'servers', apps: 'apps', installs: 'catalog', accounts: 'accounts', activity: 'activity',
+      billing: 'plans', settings: 'form', platform: 'dashboard' })[a || 'servers'] || (LIST_VIEWS.includes(a) ? 'cards' : 'table');
   $$('.view').forEach((v) => v.classList.add('hidden'));
   const box = $('#view-loading');
   box.innerHTML = skeleton(kind);
