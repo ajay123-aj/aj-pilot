@@ -10,10 +10,11 @@
 import { Router } from 'express';
 import { all, one, run, logActivity } from '../db/index.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
-import { connectionFromRow, withConnection } from '../lib/ssh.js';
-import { byKey, publicCatalog, containerPlan, publicSettings, extraPortPlan } from '../lib/catalog.js';
+import { connectionFromRow, withConnection, exec } from '../lib/ssh.js';
+import { byKey, publicCatalog, containerPlan, publicSettings, extraPortPlan, requirementsOf } from '../lib/catalog.js';
 import { resolveEnvironmentChoice } from '../lib/environments.js';
 import { installAnalyzer } from '../lib/nginxLogs.js';
+import { installNginx } from '../lib/nginx.js';
 import {
   dockerState, requireDocker, DockerMissingError, runContainer, recreateContainer,
   containerAction, containerLogs, removeContainer, installEngine, installCompose,
@@ -61,6 +62,43 @@ installsRouter.get('/catalog', (req, res) => {
   res.json({ catalog: publicCatalog() });
 });
 
+/**
+ * What `entry` needs on the server that is not there yet, each with the
+ * catalog entry that installs it — so the form can warn and offer it first.
+ */
+async function missingRequirements(conn, server, entry) {
+  const missing = [];
+  for (const key of requirementsOf(entry)) {
+    const label = byKey(key)?.label || key;
+    if (key === 'docker') {
+      const state = await dockerState(conn, server);
+      if (!state.installed) missing.push({ key, label, problem: `${label} is not installed on this server.` });
+      else if (!state.running) missing.push({ key, label, installed: true, problem: `${label} is installed but not running on this server. Start it, or install it again.` });
+    } else if (key === 'nginx') {
+      const r = await exec(conn, 'command -v nginx >/dev/null 2>&1 || [ -x /usr/sbin/nginx ] && echo yes || echo no', { timeout: 15000 });
+      if (!/yes/.test(r.stdout)) missing.push({ key, label, problem: `${label} is not installed on this server.` });
+    }
+  }
+  return missing;
+}
+
+/** Asked as soon as a server is picked: is everything this service needs already there? */
+installsRouter.get('/requirements', async (req, res, next) => {
+  try {
+    const entry = byKey(String(req.query.kind || ''));
+    if (!entry) return res.status(400).json({ error: 'Pick something from the catalog to install' });
+    const server = await getServer(Number(req.query.server_id), req.orgId);
+    if (!server) return res.status(400).json({ error: 'Pick the server to install on' });
+    if (!requirementsOf(entry).length) return res.json({ missing: [] });
+    try {
+      const missing = await withConnection(connectionFromRow(server), (conn) => missingRequirements(conn, server, entry));
+      res.json({ missing });
+    } catch (err) {
+      res.status(400).json({ error: `Could not reach this server: ${err.message}` });
+    }
+  } catch (err) { next(err); }
+});
+
 /* ---------------------------------------------------------------- list */
 
 installsRouter.get('/', async (req, res, next) => {
@@ -96,10 +134,14 @@ installsRouter.post('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-/** Docker Engine and the compose plugin. */
+/** Docker Engine, the compose plugin, nginx and the log analyser — onto the machine itself. */
 async function installOnHost(entry, server, req, res) {
   try {
     const result = await withConnection(connectionFromRow(server), async (conn) => {
+      // Docker keeps its own check below, which the form recognises; anything else needed is refused here.
+      const missing = (await missingRequirements(conn, server, { requires: requirementsOf(entry).filter((k) => k !== 'docker') }));
+      if (missing.length) throw new Error(`${missing[0].problem} Install ${missing[0].label} first, then try again.`);
+      if (entry.key === 'nginx') return installNginx(conn, server);
       if (entry.key === 'nginx-logs') return installAnalyzer(conn, server);
       if (entry.key === 'compose') await requireDocker(conn, server);
       return entry.key === 'docker' ? installEngine(conn, server) : installCompose(conn, server);

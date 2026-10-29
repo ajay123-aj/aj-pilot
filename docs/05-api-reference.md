@@ -239,7 +239,7 @@ Source: [src/routes/servers.js](../src/routes/servers.js)
 | `POST` | `/api/servers/:id/files/extract` | create |  |
 | `DELETE` | `/api/servers/:id/files` | delete |  |
 
-### Deployed apps, auto deploy, domains, usage — `/api/apps` (26)
+### Deployed apps, auto deploy, domains, usage — `/api/apps` (27)
 
 Source: [src/routes/apps.js](../src/routes/apps.js)
 
@@ -247,12 +247,13 @@ Source: [src/routes/apps.js](../src/routes/apps.js)
 |---|---|---|---|
 | `POST` | `/api/apps/folders` | create | The folders in a branch that hold a project of their own, for a repository with several apps in it |
 | `POST` | `/api/apps/inspect` | create | Is this repository (or this folder of it) something the panel can deploy, and with what settings? |
+| `POST` | `/api/apps/ports` | create | Body `{ server_id, ports[], app_id? }` → `{ busy: [{ port, by }], checked }`. Host ports already published by another app on that server, or listening there (`ss -ltnH` over SSH). `app_id` leaves that app's own ports out. `checked: false` when the server could not be reached (only the panel's own apps were compared) |
 | `GET` | `/api/apps` | view | Each app carries `health` — its latest recorded level (`ok` / `warning` / `critical`), or null |
 | `GET` | `/api/apps/stats` | view | What every app uses right now — `{ apps: { [id]: usage | { error } } }`; one SSH session per server; `?server_id=` narrows it |
 | `GET` | `/api/apps/:id` | view |  |
 | `GET` | `/api/apps/:id/metrics` | view | CPU and memory (as a share of the server) over `?range=daily|weekly|monthly` |
 | `GET` | `/api/apps/:id/stats/stream` | view | SSE: one app's containers every `?every=` ms — `sample` = `{ at, host, containers[], usage }`; at most `APP_STATS_STREAMS_PER_ORG` open per organisation (else `429`) |
-| `POST` | `/api/apps` | create |  |
+| `POST` | `/api/apps` | create | `409` when a chosen host port is already used on the server (same check as `/api/apps/ports`) |
 | `GET` | `/api/apps/:id/auto-deploy` | view | The settings, with the webhook address — secret, so only for people who can edit |
 | `PUT` | `/api/apps/:id/auto-deploy` | edit | Turn auto deploy on or off, choose "every push" or "merged requests only", and (re)add the webhook |
 | `POST` | `/api/apps/:id/auto-deploy/check` | create | "Check now" |
@@ -267,18 +268,19 @@ Source: [src/routes/apps.js](../src/routes/apps.js)
 | `DELETE` | `/api/apps/:id/domains/:domainId` | delete | Take one domain off an app |
 | `GET` | `/api/apps/:id/env` | view | The variables as they are, so they can be edited rather than retyped |
 | `PUT` | `/api/apps/:id/env` | edit | Replace the environment of a service that is already running |
-| `PUT` | `/api/apps/:id/containers` | edit | Add or remove containers, and give each one the port it publishes on |
+| `PUT` | `/api/apps/:id/containers` | edit | Add or remove containers, and give each one the port it publishes on. `409` when a new port is already used on the server |
 | `POST` | `/api/apps/:id/action` | create |  |
 | `GET` | `/api/apps/:id/logs` | view |  |
 | `DELETE` | `/api/apps/:id` | delete | Removing takes a while — stopping containers, deleting the image, Cloudflare, nginx and the certificate for every domain — longer than a pro |
 
-### Catalog installations — `/api/installs` (9)
+### Catalog installations — `/api/installs` (10)
 
 Source: [src/routes/installs.js](../src/routes/installs.js)
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| `GET` | `/api/installs/catalog` | view | What can be installed, and the form each one needs |
+| `GET` | `/api/installs/catalog` | view | What can be installed, and the form each one needs; each entry carries `requires` — the services that must be on the server first |
+| `GET` | `/api/installs/requirements` | view | `?server_id=&kind=` → `{ missing: [{ key, label, problem }] }` — the services `kind` needs (catalog `requires`: `docker`, `nginx`) that the server lacks, checked over SSH. `POST /api/installs` refuses the same cases |
 | `GET` | `/api/installs` | view |  |
 | `GET` | `/api/installs/:id` | view |  |
 | `POST` | `/api/installs` | create |  |

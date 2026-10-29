@@ -60,6 +60,17 @@ export const CATALOG = [
     fields: [],
   },
   {
+    key: 'nginx',
+    label: 'Nginx',
+    tagline: 'The web server your domains, sites and certificates run on',
+    icon: '🌐',
+    kind: 'host',
+    detail: 'Installs nginx from the Ubuntu packages, starts it and enables it at boot, and opens HTTP and HTTPS in ufw '
+      + 'when a firewall is on. Already installed: it is only started and enabled. Docker is not needed. Sites and '
+      + 'certificates are then managed on the server\'s Nginx tab.',
+    fields: [],
+  },
+  {
     key: 'nginx-logs',
     label: 'Nginx Log Analyzer',
     tagline: 'Traffic, errors, attackers and IP restrictions — with fixes',
@@ -68,6 +79,7 @@ export const CATALOG = [
     detail: 'Adds a log format with response times and host names to nginx, and an IP blocklist, both tested with nginx -t '
       + 'before reloading. The server\'s Nginx Logs tab then analyses traffic, errors, slow endpoints, scanners, brute force '
       + 'and IP restriction mistakes, and gives the fix for each. Needs nginx on the server.',
+    requires: ['nginx'],
     fields: [],
   },
   {
@@ -224,6 +236,9 @@ grep -qs '^vm.max_map_count' /etc/sysctl.d/99-auto-deploy.conf || echo 'vm.max_m
 export const byKey = (key) => CATALOG.find((c) => c.key === key) || null;
 
 /** The catalog as the browser needs it — the same shape, nothing secret in it. */
+/** What must already be on the server before this one can go on: Docker, nginx, or nothing. */
+export const requirementsOf = (entry) => entry.requires || (entry.requiresDocker ? ['docker'] : []);
+
 export const publicCatalog = () => CATALOG.map((c) => ({
   key: c.key,
   label: c.label,
@@ -232,6 +247,7 @@ export const publicCatalog = () => CATALOG.map((c) => ({
   kind: c.kind,
   detail: c.detail,
   requiresDocker: Boolean(c.requiresDocker),
+  requires: requirementsOf(c),
   image: c.image || null,
   defaultTag: c.defaultTag || null,
   tags: c.tags || [],

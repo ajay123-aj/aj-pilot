@@ -163,7 +163,11 @@ sequenceDiagram
   U->>P: POST /api/apps/inspect (repo, branch)
   P->>G: Read package.json, lockfile, angular.json, Dockerfile
   P-->>U: Detected type, Node version, commands, port
+  U->>P: POST /api/apps/ports (server, ports) while typing
+  P->>S: ss -ltnH (who is listening)
+  P-->>U: Ports taken, by which app or process
   U->>P: POST /api/apps (settings)
+  P->>P: Same port check, 409 if taken
   P-->>U: Reply in under 1 s, card shows "in progress"
   P->>S: One script over SSH: clone → write Dockerfile → docker build → [push] → replace containers
   Note over S: Old containers keep running until the image builds

@@ -49,6 +49,14 @@
 </head>
 <body class="booting">
 
+<!-- Only while the panel asks who is signed in: something to look at instead of a blank page. -->
+<div class="boot-screen" role="status" aria-busy="true">
+  <span class="sr-only">Loading…</span>
+  <i class="sk" style="width:180px;height:18px"></i>
+  <i class="sk" style="width:320px;height:10px"></i>
+  <i class="sk" style="width:260px;height:10px"></i>
+</div>
+
 <!-- ------------------------------------------------------- landing page -->
 <div class="landing" id="landing">
   <header class="landing-head" id="landing-head">
@@ -1032,6 +1040,9 @@
     <span>👑 You are inside <b id="sa-banner-org">—</b> as super admin. Changes here are made on this client's behalf.</span>
     <button class="btn tiny" id="btn-sa-leave">Back to super admin</button>
   </div>
+
+  <!-- What is on screen between signing in and the first page arriving. -->
+  <section id="view-loading" class="view hidden"></section>
 
   <!-- ------------------------------------------------------------ docs -->
   <section id="view-docs" class="view hidden">
@@ -2089,6 +2100,7 @@
           </div>
         </div>
         <div id="app-container-rows" class="item-rows"></div>
+        <div id="app-port-msg" class="msg err hidden" style="margin-top:8px"></div>
         <p class="muted small" style="margin:8px 0 0">
           One container per row, each published on the port you give it. Add as many as you need and
           remove the ones you do not — the same list can be changed later without rebuilding.

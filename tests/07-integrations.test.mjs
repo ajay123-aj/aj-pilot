@@ -138,7 +138,13 @@ describe('integrations', () => {
     it('lists what can be installed', async () => {
       const c = expectStatus(await viewer.get('/api/installs/catalog'), 200);
       const keys = c.catalog.map((x) => x.key);
-      for (const k of ['docker', 'compose', 'mysql', 'postgres', 'mongo', 'redis']) assert.ok(keys.includes(k), k);
+      for (const k of ['docker', 'compose', 'nginx', 'mysql', 'postgres', 'mongo', 'redis']) assert.ok(keys.includes(k), k);
+      // What has to be on the server first.
+      const req = (k) => c.catalog.find((x) => x.key === k).requires;
+      assert.deepEqual(req('nginx-logs'), ['nginx']);
+      assert.deepEqual(req('mysql'), ['docker']);
+      assert.deepEqual(req('nginx'), []);
+      assert.equal((await viewer.get('/api/installs/requirements?kind=nope&server_id=1')).status, 400);
       expectStatus(await viewer.get('/api/installs'), 200);
     });
 

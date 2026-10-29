@@ -78,8 +78,9 @@ This document lists what each module must do. The IDs (`FR-xx`) can be reference
 
 | ID | Requirement |
 |----|-------------|
-| FR-I1 | The catalog has Docker and Docker Compose (installed on the host) and MySQL, PostgreSQL, MongoDB, Redis, EMQX and Elasticsearch (as containers). |
+| FR-I1 | The catalog has Docker, Docker Compose and Nginx (installed on the host; Nginx needs no Docker) and MySQL, PostgreSQL, MongoDB, Redis, EMQX and Elasticsearch (as containers). |
 | FR-I2 | The user chooses the port, version, network and credentials. Ports can be changed later. Passwords are encrypted at rest. |
+| FR-I1a | Each catalog entry lists what must already be on the server (Docker for containers and Compose, Nginx for the log analyzer). The install form checks the chosen server first and, when something is missing, warns and offers to install it there first; the API refuses the install too. |
 | FR-I3 | Removing an installation keeps its data volume unless the user explicitly asks to delete it. |
 
 ### 2.6 Apps (custom services)
@@ -88,8 +89,9 @@ This document lists what each module must do. The IDs (`FR-xx`) can be reference
 |----|-------------|
 | FR-D1 | Inspect the repository through the git API before cloning. Refuse it if there is no `package.json` or no start command, and say why. |
 | FR-D2 | Detect the project type (Next.js, NestJS, Nuxt, Node service, Angular, React/Vite/Vue, static), the Node version, the package manager and the build/start commands. All are editable. |
-| FR-D3 | Build a Docker image on the target server. Static front ends are served by nginx with an SPA fallback. A repository's own `Dockerfile` can be used instead. |
+| FR-D3 | Build a Docker image on the target server. Static front ends are served by nginx with an SPA fallback. A repository's own `Dockerfile` can be used instead; then no build or start command is required, since the Dockerfile provides both. |
 | FR-D4 | Run one or several containers on chosen ports, with named volumes (default `<name>-data` at `/app/data`), environment variables, a network and a restart policy. |
+| FR-D4a | The new-service form offers only servers whose status is `online`. A host port already published by another app on the same server, or already listening on the server, is flagged while typing and refused on create and on a container change, naming the holder. |
 | FR-D5 | The previous release keeps running until the new image has built. |
 | FR-D6 | Deploys run in the background. The UI shows progress; a second deploy of the same app while one is running is refused; a deploy stuck for 40 minutes is released. |
 | FR-D7 | Optionally push the image to Docker Hub. |

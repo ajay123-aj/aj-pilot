@@ -475,12 +475,16 @@ export function validateAppSpec(body) {
     if (value && COMMAND_BANNED.test(value)) return { error: `The ${field} command must be a single line` };
   }
 
+  // The repository's own Dockerfile builds and starts the app by itself, and the
+  // form disables those fields for it — so neither command is asked for then.
+  const ownDockerfile = body.use_repo_dockerfile === true || body.use_repo_dockerfile === 'true';
+
   // A static build is served by nginx, so it needs no start command at all.
   const start = String(body.start || '').trim();
-  if (type.runtime === 'server' && !start) {
+  if (type.runtime === 'server' && !start && !ownDockerfile) {
     return { error: 'A start command is required — it is what the container runs' };
   }
-  if (type.runtime === 'static' && !String(body.build || '').trim() && type.key !== 'static') {
+  if (type.runtime === 'static' && !String(body.build || '').trim() && type.key !== 'static' && !ownDockerfile) {
     const article = /^[AEIOU]/i.test(type.label) ? 'An' : 'A';
     return { error: `${article} ${type.label} project needs a build command — that is what produces the files nginx serves` };
   }
@@ -526,7 +530,7 @@ export function validateAppSpec(body) {
       env: parsed.pairs,
       network: String(body.network || '').trim(),
       restart: ['no', 'always', 'on-failure', 'unless-stopped'].includes(body.restart) ? body.restart : 'unless-stopped',
-      useRepoDockerfile: body.use_repo_dockerfile === true || body.use_repo_dockerfile === 'true',
+      useRepoDockerfile: ownDockerfile,
       push: body.push === true || body.push === 'true',
     },
   };

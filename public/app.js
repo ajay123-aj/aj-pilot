@@ -314,7 +314,7 @@ function routeFor() {
   const view = $('.view:not(.hidden)')?.id?.replace(/^view-/, '');
   const id = encodeURIComponent;
   switch (view) {
-    case undefined: return null;
+    case undefined: case 'loading': return null;
     case 'server-detail': return currentServerId ? `/servers/${id(currentServerId)}/${currentTab}` : '/servers';
     case 'app-detail': return detailsAppId ? `/apps/${id(detailsAppId)}` : '/apps';
     case 'mysql-detail': return currentMysqlId ? `/databases/mysql/${id(currentMysqlId)}` : '/databases';
@@ -9177,7 +9177,8 @@ function appCard(a) {
  */
 function removingProgress(a) {
   const started = a.removal?.startedAt || a.updated_at;
-  const slow = started && Date.now() - parseWhen(started).getTime() > 2 * 60000;
+  const at = parseWhen(started);
+  const slow = at && Date.now() - at > 2 * 60000;
   return `<div class="deploy-progress">
     <div class="muted small"><span class="spinner"></span>${esc(a.removal?.step || `Removing from ${a.server?.name || 'the server'}`)}…
       ${started ? `<span data-since="${esc(started)}"></span>` : ''}</div>
@@ -10422,6 +10423,7 @@ async function openAppModal(presetServerId = null) {
   $('#app-pick-msg').classList.add('hidden');
   $('#app-deploy-msg').classList.add('hidden');
   $('#app-deploy-log').classList.add('hidden');
+  $('#app-port-msg').classList.add('hidden');
   appInspection = null;
   appStep('pick');
   appModal.classList.remove('hidden');
@@ -10438,10 +10440,12 @@ async function openAppModal(presetServerId = null) {
     ? accounts.map((a) => `<option value="${a.id}">${esc(a.name)}${a.extra?.account?.login ? ` — ${esc(a.extra.account.login)}` : ''}</option>`).join('')
     : '<option value="">No git accounts — connect one first</option>';
 
-  $('#app-server').innerHTML = servers.length
-    ? servers.map((s) => `<option value="${s.id}">${esc(s.name)} — ${esc(s.host)}</option>`).join('')
-    : '<option value="">No servers yet — add one first</option>';
-  if (presetServerId && servers.some((s) => String(s.id) === String(presetServerId))) {
+  // Only servers that are up: a deploy onto one that is offline or rebooting can only fail.
+  const online = servers.filter((s) => s.status === 'online');
+  $('#app-server').innerHTML = online.length
+    ? online.map((s) => `<option value="${s.id}">${esc(s.name)} — ${esc(s.host)}</option>`).join('')
+    : `<option value="">${servers.length ? 'No server is online right now' : 'No servers yet — add one first'}</option>`;
+  if (presetServerId && online.some((s) => String(s.id) === String(presetServerId))) {
     $('#app-server').value = String(presetServerId);
   }
 
@@ -10776,7 +10780,7 @@ function wirePortRows({ box, addButton, name }) {
   const redraw = (ports) => {
     drawPortRows(box, ports, name());
     // The volume note depends on how many containers there are.
-    if (box.id === 'app-container-rows') updateVolumeHint();
+    if (box.id === 'app-container-rows') { updateVolumeHint(); checkAppPorts(); }
   };
 
   addButton.addEventListener('click', () => {
@@ -10805,6 +10809,49 @@ const redrawAppPortRows = wirePortRows({
 
 // Renaming the service renames its containers, so the labels follow along.
 $('#app-name').addEventListener('input', () => redrawAppPortRows(readPortRows($('#app-container-rows'))));
+
+/**
+ * Is each port free on the chosen server? Asked as the ports are typed, so a
+ * clash is said on the row rather than as a deploy that fails minutes later.
+ * The same check runs again on the server when the form is sent.
+ */
+let portCheckTimer = null;
+let portCheckRequest = 0;
+function checkAppPorts() {
+  clearTimeout(portCheckTimer);
+  portCheckTimer = setTimeout(async () => {
+    const box = $('#app-container-rows');
+    const msg = $('#app-port-msg');
+    const inputs = $$('input[data-port]', box);
+    const ports = inputs.map((i) => Number(i.value) || 0);
+    const serverId = $('#app-server').value;
+    const mark = (busy) => {
+      const problems = [];
+      inputs.forEach((input, i) => {
+        const port = ports[i];
+        const twice = port && ports.indexOf(port) !== i;
+        const taken = busy.find((b) => b.port === port);
+        const why = twice ? `Port ${port} is on two rows — each container needs its own.`
+          : taken ? `Port ${port} is already used on ${$('#app-server').selectedOptions[0]?.textContent.split(' — ')[0] || 'this server'} by ${taken.by}.` : '';
+        input.setCustomValidity(why);
+        input.setAttribute('aria-invalid', why ? 'true' : 'false');
+        if (why && !problems.includes(why)) problems.push(why);
+      });
+      msg.textContent = problems.join(' ');
+      msg.classList.toggle('hidden', !problems.length);
+    };
+    mark([]);
+    if (!serverId || !ports.some(Boolean)) return;
+    const mine = ++portCheckRequest;
+    try {
+      const r = await api('/apps/ports', { method: 'POST', body: { server_id: serverId, ports: ports.filter(Boolean) } });
+      if (mine === portCheckRequest) mark(r.busy || []);
+    } catch { /* the server checks again on deploy */ }
+  }, 400);
+}
+
+$('#app-container-rows').addEventListener('input', checkAppPorts);
+$('#app-server').addEventListener('change', checkAppPorts);
 
 /* ------------------------------------------------ volumes on the form */
 
@@ -11226,9 +11273,14 @@ function renderInstallField(f) {
   </label>`;
 }
 
+/** "Install Nginx here first" — opens the same popup on that service, for the same server. */
+const installFirstButton = (key, label, serverId) =>
+  `<button type="button" class="btn tiny" style="margin-top:8px" data-install-first="${esc(key)}" data-server="${esc(serverId)}">Install ${esc(label)} here first</button>`;
+
 /**
- * Selecting a server checks Docker straight away, so "Docker is not installed"
- * is on screen before anything is attempted rather than after.
+ * Selecting a server checks what the service needs straight away, so "Docker
+ * is not installed" or "Nginx is not installed" is on screen before anything
+ * is attempted rather than after.
  */
 async function checkInstallServer() {
   const entry = catalogEntry(installKind);
@@ -11238,6 +11290,40 @@ async function checkInstallServer() {
 
   if (!serverId) {
     box.classList.add('hidden');
+    return;
+  }
+
+  // Anything needed other than Docker (nginx, for the log analyzer) is asked about here;
+  // Docker has its own check below, which also reads the networks and ports.
+  const requires = entry.requires || [];
+  if (requires.some((k) => k !== 'docker')) {
+    setInstallState(box, 'info', '<span class="spinner"></span>Checking what this server already has…');
+    $('#btn-install-go').disabled = true;
+    try {
+      const r = await api(`/installs/requirements?server_id=${encodeURIComponent(serverId)}&kind=${encodeURIComponent(entry.key)}`);
+      if (installKind !== entry.key || $('#install-server').value !== serverId) return;
+      if (r.missing.length) {
+        setInstallState(box, 'err', r.missing.map((m) =>
+          `<b>${esc(m.problem)}</b> ${esc(entry.label)} needs it first.${m.installed ? '' : `<br />${installFirstButton(m.key, m.label, serverId)}`}`).join('<br />'));
+        return;
+      }
+    } catch (err) {
+      setInstallState(box, 'err', esc(err.message));
+      return;
+    }
+    if (!requires.includes('docker')) {
+      setInstallState(box, 'ok', `Everything ${esc(entry.label)} needs is on this server.`);
+      $('#btn-install-go').disabled = false;
+      return;
+    }
+  }
+
+  // Nothing needed first (nginx itself): ready straight away.
+  if (!requires.length && entry.key !== 'docker') {
+    setInstallState(box, 'info', entry.key === 'nginx'
+      ? 'Nginx is installed on the server itself — Docker is not needed. Already there: it is only started and enabled at boot.'
+      : `${esc(entry.label)} needs nothing else on the server first.`);
+    $('#btn-install-go').disabled = false;
     return;
   }
   if (entry.key === 'docker') {
@@ -11274,7 +11360,7 @@ async function checkInstallServer() {
     if (!r.docker.installed) {
       setInstallState(box, 'err',
         `<b>Docker is not installed on this server.</b> Everything except Docker itself runs as a container, so there is nothing to install into.
-         <button type="button" class="btn tiny" style="margin-top:8px" data-install-docker="${esc(serverId)}">Install Docker here first</button>`);
+         ${installFirstButton('docker', 'Docker', serverId)}`);
       return;
     }
     if (!r.docker.running) {
@@ -11326,8 +11412,8 @@ $('#install-port').addEventListener('input', warnIfPortTaken);
 $('#install-extra-ports').addEventListener('input', warnIfPortTaken);
 
 $('#modal-install').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-install-docker]');
-  if (btn) openInstallModal('docker', btn.dataset.installDocker);
+  const btn = e.target.closest('button[data-install-first]');
+  if (btn) openInstallModal(btn.dataset.installFirst, btn.dataset.server);
 });
 
 installForm.addEventListener('submit', async (e) => {
@@ -11370,12 +11456,11 @@ installForm.addEventListener('submit', async (e) => {
       ? `${entry.label} installed${r.version ? ` — ${r.version}` : ''}`
       : `${entry.label} is running as "${r.name}" on port ${r.port}${r.connection ? ` — added to Databases as "${r.connection.name}"` : ''}`);
     if (!$('#view-installs').classList.contains('hidden')) loadInstallList();
-    if (!$('#view-server-detail').classList.contains('hidden')) refreshServerTab(entry.key === 'nginx-logs' ? 'nginxlogs' : 'docker');
+    if (!$('#view-server-detail').classList.contains('hidden')) refreshServerTab({ 'nginx-logs': 'nginxlogs', nginx: 'nginx' }[entry.key] || 'docker');
   } catch (err) {
     formMsg(msg, err.message, 'err');
     if (err.body?.dockerMissing) {
-      msg.innerHTML += ' <button type="button" class="btn tiny" style="margin-top:8px" '
-        + `data-install-docker="${esc(fd.get('server_id'))}">Install Docker here first</button>`;
+      msg.innerHTML += ` ${installFirstButton('docker', 'Docker', fd.get('server_id'))}`;
     }
     if (err.detail) {
       log.textContent = err.detail;
@@ -17609,9 +17694,26 @@ $('#app-docs-body').addEventListener('click', (e) => {
 $('#app-docs-search').addEventListener('input', renderDocsNav);
 
 /** Everything that happens once there is a signed-in person. */
+/**
+ * A skeleton shaped like the page the address points at, shown the moment the
+ * panel appears — the organisation and plan are still being asked for, and an
+ * empty page in the meantime looked broken. Not through show(): this is not a
+ * page, so the address bar must stay where it is.
+ */
+function showPendingPage() {
+  const [a, b] = location.hash.replace(/^#\/?/, '').split('/');
+  const kind = /^\d+$/.test(b || '') || (a === 'databases' && b === 'mysql') ? 'detail'
+    : !a || LIST_VIEWS.includes(a) ? 'cards' : 'table';
+  $$('.view').forEach((v) => v.classList.add('hidden'));
+  const box = $('#view-loading');
+  box.innerHTML = skeleton(kind);
+  box.classList.remove('hidden');
+}
+
 async function enterApp({ keepOrgPicker = false } = {}) {
   applyIdentity();
   closeAuth();
+  showPendingPage();
   if (!keepOrgPicker) await loadOrgSwitcher();
   // An admin or super admin without a mobile number adds one first.
   if (session.user.needsPhone) openProfile({ mustAddPhone: true });

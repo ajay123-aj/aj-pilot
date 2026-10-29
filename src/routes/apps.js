@@ -28,6 +28,7 @@ import { createRepoWebhook, deleteRepoWebhook, branchHead } from '../lib/git.js'
 import { newWebhookToken, webhookUrl, isPublicUrl, checkApp } from '../lib/autoDeploy.js';
 import { siteUrl } from '../lib/landing.js';
 import { collectContainerStats, appUsage } from '../lib/liveStats.js';
+import { portsInUse, portClashMessage } from '../lib/portCheck.js';
 import { metricSeries, latestLevels } from '../lib/metrics.js';
 import {
   domainConfigFrom, publicDomainConfig, setupAppDomains, setupDomain, removeAppDomain, domainView,
@@ -175,6 +176,17 @@ appsRouter.post('/folders', async (req, res, next) => {
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
+  } catch (err) { next(err); }
+});
+
+/** Which of these host ports are already taken on a server — asked while the form is being filled in. */
+appsRouter.post('/ports', async (req, res, next) => {
+  try {
+    const server = await getServer(Number(req.body.server_id), req.orgId);
+    if (!server) return res.status(400).json({ error: 'Pick the server first' });
+    const ports = (Array.isArray(req.body.ports) ? req.body.ports : []).slice(0, MAX_CONTAINERS);
+    const appId = req.body.app_id ? Number(req.body.app_id) : null;
+    res.json(await portsInUse(server, ports, { exceptAppId: appId }));
   } catch (err) { next(err); }
 });
 
@@ -452,6 +464,9 @@ appsRouter.post('/', async (req, res, next) => {
     if (await one('SELECT id FROM apps WHERE server_id = ? AND name = ?', [server.id, spec.name])) {
       return res.status(409).json({ error: `${server.name} already has an app called "${spec.name}"` });
     }
+
+    const clash = await portsInUse(server, plannedContainers(spec).map((c) => c.port));
+    if (clash.busy.length) return res.status(409).json({ error: portClashMessage(server, clash.busy), busy: clash.busy });
 
     // A Docker Hub account is optional: with one the image is pushed, without
     // one it simply stays on the server it was built on.
@@ -1320,6 +1335,12 @@ appsRouter.put('/:id/containers', async (req, res, next) => {
 
     const network = req.body.network !== undefined ? String(req.body.network || '').trim() : row.network;
     const was = plannedContainers(containerSpecOf(row)).map((c) => c.port);
+
+    const server = await getServer(row.server_id, req.orgId);
+    if (server) {
+      const clash = await portsInUse(server, ports.value, { exceptAppId: row.id });
+      if (clash.busy.length) return res.status(409).json({ error: portClashMessage(server, clash.busy), busy: clash.busy });
+    }
 
     return recreate(row, req, res, {
       changes: { ports: ports.value, network: network || null },

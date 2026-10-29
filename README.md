@@ -347,19 +347,28 @@ default port and its own settings.
 | -------------- | ---------------------------------------------------------------------------- | ---------------------- |
 | Docker Engine  | on the host, from `get.docker.com`                                           | —                      |
 | Docker Compose | on the host, the compose v2 plugin                                           | —                      |
+| Nginx          | on the host, from the Ubuntu packages, started and enabled at boot           | 80 + 443               |
 | MySQL          | container — `mysql`, named volume at `/var/lib/mysql`                        | 3306                   |
 | MongoDB        | container — `mongo`, named volume at `/data/db`                              | 27017                  |
 | Redis          | container — `redis`, append-only persistence at `/data`                      | 6379                   |
 | EMQX           | container — `emqx`, named volume at `/opt/emqx/data`                         | 1883 + dashboard 18083 |
 | Elasticsearch  | container — `elasticsearch`, named volume at `/usr/share/elasticsearch/data` | 9200                   |
 
-**Nothing but Docker is installed onto the machine.** Databases are never apt-installed; they run as
+**Nothing but Docker and Nginx is installed onto the machine.** Databases are never apt-installed; they run as
 containers with a named volume, so the data survives a rebuild and nothing is left behind on the host when
 you remove them.
 
-**A server without Docker says so.** Picking a server checks it straight away, and if Docker is missing you
-get _"Docker is not installed on this server"_ with a button to install it there first — before anything is
-attempted, not after it fails. The same check guards the API, so it cannot be worked around.
+**Nginx** goes onto the host because it fronts everything else: it is the web server your domains, sites
+and certificates live on. It does not need Docker. If Nginx is already there, installing again just makes
+sure it is running and starts at boot; if a firewall (ufw) is on, HTTP and HTTPS are opened in it. Its
+sites, certificates and logs are then managed on the server's **Nginx** tab.
+
+**A missing requirement is said first.** Some services need another one on the server before they can be
+installed: every container service and Docker Compose need **Docker**, and the **Nginx Log Analyzer** needs
+**Nginx**. Picking a server checks it straight away, and if what is needed is missing you get a warning such
+as _"Nginx is not installed on this server"_ with a button to install it there first — the **Install**
+button stays off until it is. This happens before anything is attempted, not after it fails, and the same
+check guards the API, so it cannot be worked around. Docker and Nginx themselves need nothing first.
 
 Each service's form covers the version, the container name, the **port**, which Docker network to join, and
 whether it is reachable from anywhere or only from the server itself, plus its own settings — root password
@@ -436,7 +445,8 @@ did not install.
 ## Custom services
 
 **Apps → + Custom service** deploys a Node.js repository from one of your connected git accounts onto one of
-your servers, as a container.
+your servers, as a container. Only servers that are **online** are offered: one that is offline, failing its
+checks or rebooting is left out of the list until it is back.
 
 ### It checks the project first
 
@@ -484,6 +494,12 @@ typed over — they do not have to be consecutive, so `app-1` on 3000 and `app-2
 container runs the same image and gets an `INSTANCE` variable of its own. Start, stop, restart and remove
 act on the whole set.
 
+**A port that is already taken on the server is caught as you type it.** The panel checks the chosen server
+for another of your services on that port and for anything else already listening on it, marks the row, and
+says which one holds it — for example _"Port 3000 is already used on web-1 by shop-api"_. The same check runs
+again when you press **Build & deploy** and when you change ports on an existing service, so the deploy never
+starts on a port it cannot have. The same port typed on two rows is refused too.
+
 The same list is on each card afterwards, under **Containers**: add one, remove one or move one to another
 port and press **Apply**. The containers are recreated from the image already on the server, so this takes
 seconds — nothing is cloned, nothing is rebuilt and no code changes. A service that was stopped stays
@@ -495,6 +511,11 @@ The deployment happens in one pass over SSH: clone the branch into `/opt/auto-de
 Dockerfile (unless the repository has one you chose to use), `docker build` once, then replace the
 containers. **The previous release keeps running until the new image has built**, so a broken commit leaves
 the site up.
+
+With **Use the Dockerfile in the repository** ticked, your Dockerfile decides how the app is installed,
+built and started, so the install and build commands are greyed out and no build or start command is asked
+for — an Angular or React project with its own Dockerfile deploys without one. Set **Port inside the
+container** to the port your Dockerfile's app listens on.
 
 The form also carries the port inside the container, volumes, environment variables, the Docker network to
 join and the restart policy.
@@ -1115,14 +1136,16 @@ page, the same line under its name, kept up to date while you are on it.
 | `POST`                    | `/api/servers/:id/nginx/ssl`                                                                                                       | get a Let's Encrypt certificate and install it into the vhost                                  |
 | `POST`                    | `/api/servers/:id/nginx/ssl/renew`                                                                                                 | renew one certificate, or everything that is due                                               |
 | `GET`                     | `/api/installs/catalog`                                                                                                            | what can be installed, and the form each one needs                                             |
+| `GET`                     | `/api/installs/requirements`                                                                                                       | `?server_id=&kind=` — what that service needs that the server does not have yet                |
 | `GET`                     | `/api/installs`                                                                                                                    | list installations; `?server_id=` to filter                                                    |
-| `POST`                    | `/api/installs`                                                                                                                    | install onto the host (Docker, compose) or as a container                                      |
+| `POST`                    | `/api/installs`                                                                                                                    | install onto the host (Docker, compose, Nginx) or as a container                               |
 | `POST`                    | `/api/installs/:id/refresh`                                                                                                        | live container state                                                                           |
 | `POST`                    | `/api/installs/:id/action`                                                                                                         | `start` / `stop` / `restart`                                                                   |
 | `GET`                     | `/api/installs/:id/logs`                                                                                                           | the container's last lines                                                                     |
 | `PUT`                     | `/api/installs/:id/port`                                                                                                           | rebuild on a new port / network, keeping the volume                                            |
 | `DELETE`                  | `/api/installs/:id`                                                                                                                | remove the container; `?delete_data=1` drops the volume too                                    |
 | `POST`                    | `/api/apps/inspect`                                                                                                                | is this repository a deployable Node project, and with what settings                           |
+| `POST`                    | `/api/apps/ports`                                                                                                                  | which of these ports are already taken on a server, and by what                                |
 | `GET`                     | `/api/apps`                                                                                                                        | list custom services; `?server_id=` to filter                                                  |
 | `POST`                    | `/api/apps`                                                                                                                        | start a deployment; answers `202` at once and builds in the background                         |
 | `POST`                    | `/api/apps/:id/deploy`                                                                                                             | start a rebuild; `409` if one is already running                                               |

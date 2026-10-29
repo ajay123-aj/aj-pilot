@@ -1347,6 +1347,12 @@ form .otp-boxes input {
    signed in (the panel). Nothing is drawn until the answer arrives, so the
    landing page never flashes at somebody who is already signed in. */
 body.booting .landing, body.booting .sidebar, body.booting .shell, body.booting .gate { display: none; }
+.boot-screen { display: none; }
+body.booting .boot-screen {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; min-height: 100vh; padding: 0 16px;
+}
+.boot-screen .sk { max-width: 100%; }
 /* The whole panel column goes while signed out — left in place, its room for the
    sidebar pushed the landing page sideways and past the right edge. */
 body.signed-out .sidebar, body.signed-out .shell { display: none; }
