@@ -664,7 +664,6 @@ $('#auth-gate').addEventListener('click', (e) => { if (e.target.id === 'auth-gat
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAuth(); });
 
 $('#btn-open-signin').addEventListener('click', () => openAuth('login'));
-$('#btn-open-signup').addEventListener('click', () => openAuth('signup'));
 $('#btn-open-setup').addEventListener('click', () => openAuth('setup'));
 // "Get started" leads to the contact form — or, on a panel nobody has set up yet, to the setup card.
 const getStarted = () => (needsSetup ? openAuth('setup') : goToLeadForm());
@@ -685,7 +684,6 @@ function showLanding(setupNeeded) {
 
   $('#btn-open-setup').classList.toggle('hidden', !needsSetup);
   $('#btn-open-signin').classList.toggle('hidden', needsSetup);
-  $('#btn-open-signup').classList.toggle('hidden', needsSetup || !signupOpen);
   $$('[data-signup-only]').forEach((el) => { el.hidden = !signupOpen; });
   $$('[data-signup-closed]').forEach((el) => { el.hidden = signupOpen; });
   $('#btn-hero-primary').textContent = needsSetup ? 'Set up your panel' : 'Get started free';
@@ -1161,12 +1159,26 @@ $('#form-login').addEventListener('submit', async (e) => {
       await enterApp();
     }
   } catch (err) {
+    if (err.body?.noAccount) {
+      busy(btn, false);
+      return openSignupFor(loginMethod === 'mobile' ? form.phone.value : form.login.value, err.message);
+    }
     showServerFieldError(form, err);
     formMsg(msg, err.message, 'err');
   }
   busy(btn, false);
   return undefined;
 });
+
+/** Signing in with an email or number nobody has used: on to sign-up, with it filled in. */
+function openSignupFor(login, say) {
+  const value = String(login || '').trim();
+  openAuth('signup');
+  signupForm[value.includes('@') ? 'email' : 'phone'].value = value;
+  signupForm.password.value = '';
+  formMsg($('#signup-msg'), say, 'info');
+  signupForm.name.focus();
+}
 
 /* ------------------------------------------------- sign-in field checks */
 
@@ -1695,14 +1707,8 @@ async function pollServerStatuses() {
     const card = $(`#server-list .card[data-server="${s.id}"]`);
     if (!card) continue;
 
-    const dot = $('.dot', card);
-    if (dot) dot.className = `dot ${s.status}`;
-
-    const badge = $('.card-head .badge', card);
-    if (badge && badge.textContent !== s.status) {
-      badge.className = `badge ${statusTone(s.status)}`;
-      badge.textContent = s.status;
-    }
+    const strip = $('[data-status-strip]', card);
+    if (strip) strip.innerHTML = serverStatusStrip(s);
 
     // Going offline makes a server critical; coming back puts its recorded level back.
     const base = card.dataset.healthBase === 'none' ? null : card.dataset.healthBase;
@@ -1713,9 +1719,6 @@ async function pollServerStatuses() {
       if (hb) hb.outerHTML = healthBadge(level);
       healthChanged = true;
     }
-
-    const note = $('[data-status-note]', card);
-    if (note) note.innerHTML = statusNote(s);
 
     // The reason a server is unreachable belongs on the card, and goes away
     // again the moment it answers.
@@ -1750,6 +1753,32 @@ function statusNote(s) {
       + `· signed in ${esc(agoWords(s.signInCheckedAt))}</span>`;
   }
   return line;
+}
+
+const STATUS_WORDS = { online: 'Online', offline: 'Offline', error: 'Error' };
+
+/**
+ * The bar under a server card's name: reachable or not, how fast its SSH port
+ * answers, when it was last checked, and whether the panel can still sign in.
+ */
+function serverStatusStrip(s) {
+  const tone = statusTone(s.status);
+  const items = [`<span class="srv-pill ${tone || 'none'}"><i aria-hidden="true"></i>${esc(STATUS_WORDS[s.status] || 'Checking…')}</span>`];
+  if (s.status === 'online' && s.latencyMs != null) {
+    const slow = s.latencyMs >= 300 ? 'warn' : '';
+    items.push(`<span class="srv-fact ${slow}" title="Time for the SSH port to answer">${ui('bolt')}<b>${s.latencyMs} ms</b></span>`);
+  }
+  if (s.checkedAt) {
+    items.push(`<span class="srv-fact" title="Last checked at ${esc(clockTime(s.checkedAt))}">${ui('clock')}Checked ${esc(agoWords(s.checkedAt))}</span>`);
+  }
+  if (s.signIn === false) {
+    items.push(`<span class="srv-fact err" title="${esc(s.signInError || 'The panel could not sign in')}">${ui('key')}<b>Cannot sign in</b></span>`);
+  } else if (s.signIn === true) {
+    const when = s.signInCheckedAt ? ` ${esc(agoWords(s.signInCheckedAt))}` : '';
+    const tip = s.signInCheckedAt ? `Last signed in at ${esc(clockTime(s.signInCheckedAt))}` : 'The panel can sign in';
+    items.push(`<span class="srv-fact ok" title="${tip}">${ui('key')}Signed in${when}</span>`);
+  }
+  return items.join('');
 }
 
 /** How long ago, in the units a person would say it in. */
@@ -1854,16 +1883,13 @@ function serverCard(s) {
   return `
   <div class="card" data-server="${s.id}" data-health-level="${level || 'none'}" data-health-base="${base || 'none'}">
     <div class="card-head">
-      <div>
-        <h3><span class="dot ${esc(s.status)}"></span> ${esc(s.name)}</h3>
-        <div class="muted small">${esc(s.username)}@${esc(s.host)}:${s.port} · ${s.auth_type === 'key' ? 'SSH key' : 'password'}</div>
-        <div class="muted small" data-status-note></div>
+      <div class="srv-ident">
+        <h3>${esc(s.name)}</h3>
+        <div class="srv-addr"><code>${esc(s.username)}@${esc(s.host)}:${s.port}</code><span class="srv-auth">${s.auth_type === 'key' ? 'SSH key' : 'Password'}</span></div>
       </div>
-      <div class="head-badges">
-        <span class="badge ${statusTone(s.status)}">${esc(s.status)}</span>
-        ${healthBadge(level, s.health)}
-      </div>
+      <div class="head-badges">${healthBadge(level, s.health)}</div>
     </div>
+    <div class="srv-status" data-status-strip>${serverStatusStrip({ status: s.status, checkedAt: s.last_checked_at })}</div>
     ${s.tags.length ? `<div class="chips" style="margin-top:10px">${s.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
     ${sum ? `
       <dl class="kv">
@@ -1992,7 +2018,7 @@ async function openServer(id) {
     pollServerStatuses();
 
     const panels = s.facts ? renderFactTabs(s.facts) : null;
-    const noFacts = '<div class="empty">No system details yet. Click <b>Fetch system details</b> to connect and read this server.</div>';
+    const noFacts = '<div class="empty">No system details yet. Click <b>Fetch details</b> above to connect and read this server.</div>';
 
     $('#detail-tabs').innerHTML = serverTabs().map((t) => `<button class="tab ${t.key === currentTab ? 'active' : ''}" data-tab="${t.key}"><span>${esc(t.label)}</span><span class="tab-count" id="tab-count-${t.key}"></span></button>`).join('');
 
@@ -2006,10 +2032,51 @@ async function openServer(id) {
       </div>`).join('');
 
     showServerTab(currentTab);
+    pollTabCounts();
   } catch (err) {
     $('#detail-body').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
   }
 }
+
+/**
+ * The numbers beside the tabs, without opening each tab: one light check when
+ * the page opens and again every few seconds while it is on screen. A tab that
+ * is open keeps drawing its own count too; both read the server the same way.
+ */
+const TAB_COUNTS_MS = 8000;
+let tabCountsBusy = false;
+
+async function pollTabCounts() {
+  if (tabCountsBusy || !currentServerId || document.hidden || $('#view-server-detail').classList.contains('hidden')) return;
+  const id = currentServerId;
+  tabCountsBusy = true;
+  try {
+    const r = await api(`/servers/${id}/counts`);
+    if (String(id) === String(currentServerId)) drawTabCounts(r.counts);
+  } catch (err) {
+    // The server may be down: the apps count still comes from the panel's own records.
+    if (String(id) === String(currentServerId) && err.body?.counts) drawTabCounts(err.body.counts);
+  } finally {
+    tabCountsBusy = false;
+  }
+}
+
+function drawTabCounts(c) {
+  if (c.apps !== undefined) setTabCount('apps', c.apps);
+  if (c.docker) setTabCount('docker', c.docker.running, c.docker.problem ? 'err' : '');
+  if (c.nginx) {
+    setTabCount('nginx', c.nginx.installed ? c.nginx.sites : '—', c.nginx.installed && (!c.nginx.running || !c.nginx.configOk) ? 'err' : '');
+  }
+  if (c.cron) setTabCount('cron', c.cron.installed ? c.cron.jobs + c.cron.system : '—', c.cron.installed && !c.cron.running ? 'err' : '');
+  if (c.services) setTabCount('services', c.services.running, c.services.failed ? 'err' : '');
+  if (c.runners) setTabCount('runners', c.runners.units ? c.runners.running : null, c.runners.units > c.runners.running ? 'err' : '');
+  // The Users tab itself is for roles that may manage accounts; others see its lock instead.
+  if (c.users !== undefined && canDo('edit') && $('#tab-count-users')?.textContent !== '🔒') setTabCount('users', c.users);
+}
+
+setInterval(pollTabCounts, TAB_COUNTS_MS);
+// Back to a hidden browser tab: catch up at once rather than on the next tick.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollTabCounts(); });
 
 const liveTabPanelId = (key) => ({
   live: 'live-panel', apps: 'server-apps-panel', docker: 'docker-panel', nginx: 'nginx-panel', nginxlogs: 'nginx-logs-panel',
@@ -2206,18 +2273,20 @@ $('#detail-body').addEventListener('click', (e) => {
 });
 
 $('#btn-detail-test').addEventListener('click', async (e) => {
-  busy(e.target, true, 'Testing…');
+  const btn = e.currentTarget;
+  busy(btn, true, 'Testing…');
   try {
     const r = await api(`/servers/${currentServerId}/test`, { method: 'POST' });
     toast(`Connected to ${r.hostname} as ${r.user} (${r.latencyMs}ms)`);
   } catch (err) {
     toast(err.message, 'err');
   }
-  busy(e.target, false);
+  busy(btn, false);
 });
 
 $('#btn-detail-refresh').addEventListener('click', async (e) => {
-  busy(e.target, true, 'Collecting…');
+  const btn = e.currentTarget;
+  busy(btn, true, 'Collecting…');
   try {
     await api(`/servers/${currentServerId}/facts`, { method: 'POST' });
     toast('System details updated');
@@ -2225,7 +2294,7 @@ $('#btn-detail-refresh').addEventListener('click', async (e) => {
   } catch (err) {
     toast(err.message, 'err');
   }
-  busy(e.target, false);
+  busy(btn, false);
 });
 
 /* ----------------------------------------------------- facts rendering */
@@ -2624,6 +2693,8 @@ const UI_ICON = {
   open: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/>',
   extract: '<path d="M4 7h16v13H4zM4 7l2-3h12l2 3M12 11v6M9 14l3 3 3-3"/>', rename: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>', clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2"/>',
   perms: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
 };
 const ui = (name) => `<svg class="fx-ui" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${UI_ICON[name]}</svg>`;
@@ -9548,12 +9619,11 @@ function appCard(a) {
         <div class="muted small"><code>${esc(a.repo)}</code>${a.root_dir ? ` › <code>${esc(a.root_dir)}</code>` : ''} · ${esc(a.branch)}${a.deployedCommit ? ` · <code title="${esc(a.deployedCommit.message)}">${esc(a.deployedCommit.short)}</code>` : ''}</div>
       </div>
       <div class="head-badges">
-        ${a.autoDeploy?.enabled ? `<span class="badge ok" title="${a.autoDeploy.trigger === 'merge' ? 'Merged pull / merge requests' : 'Every push'} to ${esc(a.branch)} deploys it">⚡ auto</span>` : ''}
         <span class="badge type">${mark.icon} ${esc(mark.label)}</span>
-        <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'in progress' : esc(a.status)}</span>
         ${busyNow || a.status === 'removing' ? '' : healthBadge(level, a.health)}
       </div>
     </div>
+    <div class="srv-status">${appStatusStrip(a)}</div>
     ${a.status === 'removing' ? removingProgress(a) : ''}
     ${busyNow && a.currentDeploy ? deployBanner(a, { compact: true }) : busyNow ? `<div class="deploy-progress">
       <div class="muted small"><span class="spinner"></span>${a.currentStep ? `${esc(a.currentStep)}…` : 'Starting…'}
@@ -9564,7 +9634,6 @@ function appCard(a) {
     <dl class="kv">
       <dt>Server</dt><dd>${a.server ? `<b>${esc(a.server.name)}</b> <span class="muted small">${esc(a.server.host)}</span>` : '—'}</dd>
       <dt>Address</dt><dd>${appAddress(a)}</dd>
-      <dt>Last deployed</dt><dd>${a.last_deployed_at ? `${esc(agoWords(a.last_deployed_at))}` : '<span class="muted">never</span>'}</dd>
     </dl>
     <div class="app-usage" data-app-usage="${a.id}" data-status="${esc(a.status)}">${appUsageHtml(a)}</div>
     ${appProblem(a)}
@@ -9577,6 +9646,34 @@ function appCard(a) {
       ${a.status === 'remove_failed' ? removeRetryButtons(a) : ''}
     </div>
   </div>`;
+}
+
+const APP_STATUS_WORDS = {
+  running: 'Running', deploying: 'Deploying', stopped: 'Stopped', exited: 'Exited', error: 'Error', failed: 'Deploy failed',
+  pending: 'Not deployed', missing: 'Missing', removing: 'Removing', remove_failed: 'Removal failed',
+};
+
+/**
+ * The bar under an app card's name, like a server card's: its state, how many
+ * of its containers are up, when it was last deployed, and whether it deploys itself.
+ */
+function appStatusStrip(a) {
+  const working = a.status === 'deploying' || a.status === 'removing';
+  const tone = a.status === 'stopped' || a.status === 'pending' ? 'none' : (APP_BADGE[a.status] ?? (a.status === 'failed' ? 'err' : 'none'));
+  const items = [`<span class="srv-pill ${tone}">${working ? '<span class="spinner"></span>' : '<i aria-hidden="true"></i>'}${esc(APP_STATUS_WORDS[a.status] || a.status)}</span>`];
+  const known = (a.containers || []).filter((c) => c.state);
+  if (known.length && !working) {
+    const up = known.filter((c) => c.state === 'running').length;
+    const t = up === known.length ? 'ok' : up ? 'warn' : 'err';
+    items.push(`<span class="srv-fact ${a.status === 'stopped' ? '' : t}" title="${esc(known.map((c) => `${c.name}: ${c.state}`).join(', '))}">${ui('icons')}<b>${up}/${known.length}</b> up</span>`);
+  }
+  items.push(a.last_deployed_at
+    ? `<span class="srv-fact" title="Last deployed at ${esc(clockTime(a.last_deployed_at))}">${ui('clock')}Deployed ${esc(agoWords(a.last_deployed_at))}</span>`
+    : `<span class="srv-fact">${ui('clock')}Never deployed</span>`);
+  if (a.autoDeploy?.enabled) {
+    items.push(`<span class="srv-fact ok" title="${a.autoDeploy.trigger === 'merge' ? 'Merged pull / merge requests' : 'Every push'} to ${esc(a.branch)} deploys it">${ui('bolt')}Auto deploy</span>`);
+  }
+  return items.join('');
 }
 
 /**
@@ -10275,6 +10372,68 @@ async function openAppDetails(id, tab = detailsTab) {
   renderAppDetails(a);
 }
 
+const AD_ICON = {
+  deploy: '<path d="M12 3v12M7 8l5-5 5 5M5 21h14"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  start: '<path d="M7 4.5v15l12-7.5z"/>',
+  restart: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>',
+  logs: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6"/>',
+  refresh: '<path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/>',
+  manage: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+};
+const adIcon = (name) => `<svg class="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${AD_ICON[name]}</svg>`;
+
+/**
+ * The bar above a service's tabs. The things done every day stay in view —
+ * Redeploy, Stop / Start and Restart together, Logs — and the rest (settings,
+ * environment, containers, domains, the deploy log, removing it) live in one
+ * "Manage" menu, each with a line saying what it opens.
+ */
+function appActionBar(a, { busyNow, btn }) {
+  const n = esc(a.name);
+  const refresh = `<button class="btn tiny ghost ad-icon-btn" data-ad-refresh="1" title="Refresh" aria-label="Refresh">${adIcon('refresh')}</button>`;
+  if (removalState(a)) {
+    return `<div class="ad-bar">
+      ${a.status === 'removing' ? '<span class="badge warn"><span class="spinner"></span>removing…</span>' : removeRetryButtons(a)}
+      <span class="ad-bar-gap"></span>${refresh}</div>`;
+  }
+  const item = (action, label, about, extra = '') => `<button class="act-item ${extra}" role="menuitem" data-app-action="${action}" data-id="${a.id}" data-name="${n}">
+      <span class="ad-item"><b>${label}</b><small>${about}</small></span></button>`;
+  const manage = [
+    a.hasLog && !busyNow ? item('progress', 'Deploy log', 'the output of the last deploy') : '',
+    busyNow ? '' : ifCan('edit', item('edit', 'Edit settings', 'build, start command, ports, resources')),
+    busyNow ? '' : ifCan('edit', item('env', 'Environment', 'variables and volumes')),
+    busyNow ? '' : ifCan('edit', item('containers', 'Containers', 'how many, and their ports')),
+    busyNow ? '' : ifCan('create', item('domain-add', 'Add a domain', 'put it on your own address with SSL')),
+  ].filter(Boolean);
+  const remove = ifCan('delete', `<button class="act-item danger" role="menuitem" data-app-action="delete" data-id="${a.id}" data-name="${n}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">
+      <span class="ad-item"><b>Remove the service</b><small>stops it and deletes it from the server</small></span></button>`);
+  const menu = manage.length || remove ? `<div class="ad-manage">
+      <button type="button" class="act-toggle ad-manage-toggle" aria-haspopup="menu" aria-expanded="false">${adIcon('manage')}<span>Manage</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="act-menu ad-menu" role="menu" hidden>${manage.join('')}${manage.length && remove ? '<hr class="act-sep" />' : ''}${remove}</div>
+    </div>` : '';
+  const running = a.status === 'running';
+
+  if (busyNow) {
+    return `<div class="ad-bar">
+      ${btn('progress', '<span class="spinner"></span>Check progress', 'primary')}
+      ${a.currentDeploy ? '' : `<div class="ad-group">${deployControls(a)}</div>`}
+      ${btn('logs', `${adIcon('logs')}Logs`)}
+      <span class="ad-bar-gap"></span>${menu}${refresh}
+    </div>`;
+  }
+  return `<div class="ad-bar">
+    ${ifCan('create', btn('deploy', `${adIcon('deploy')}Redeploy`, 'primary'))}
+    ${ifCan('create', `<div class="ad-group" role="group" aria-label="Run state">
+      <button class="btn tiny ${running ? '' : 'ok-btn'}" data-app-action="${running ? 'stop' : 'start'}" data-id="${a.id}">${adIcon(running ? 'stop' : 'start')}${running ? 'Stop' : 'Start'}</button>
+      <button class="btn tiny" data-app-action="restart" data-id="${a.id}" ${running ? '' : 'disabled title="Start it first"'}>${adIcon('restart')}Restart</button>
+    </div>`)}
+    ${btn('logs', `${adIcon('logs')}Logs`)}
+    <span class="ad-bar-gap"></span>
+    ${menu}${refresh}
+  </div>`;
+}
+
 function renderAppDetails(a) {
   const n = esc(a.name);
   const s = a.settings || {};
@@ -10286,21 +10445,7 @@ function renderAppDetails(a) {
   $('#ad-title').innerHTML = `🚀 ${n}`;
   $('#ad-state').innerHTML = `<span class="badge type">${mark.icon} ${esc(mark.label)}</span> <span class="badge ${APP_BADGE[a.status] ?? ''}">${busyNow ? 'deploying' : esc(a.status)}</span>`;
   $('#ad-sub').innerHTML = `<code class="small">${esc(a.repo)}</code>${a.root_dir ? ` › <code class="small">${esc(a.root_dir)}</code>` : ''} · ${esc(a.branch)} · 🖥 ${esc(a.server?.name || '—')} (${esc(a.server?.host || '')})`;
-  $('#ad-actions').innerHTML = removalState(a) ? `
-    ${a.status === 'removing' ? '<span class="badge warn"><span class="spinner"></span>removing…</span>' : removeRetryButtons(a)}
-    <button class="btn tiny" data-ad-refresh="1">Refresh</button>` : `
-    ${busyNow ? btn('progress', '<span class="spinner"></span>Check progress', 'primary') : a.hasLog ? btn('progress', 'Deploy log') : ''}
-    ${btn('logs', 'Container logs')}
-    ${busyNow ? '' : ifCan('edit', btn('edit', 'Edit settings'))}
-    ${busyNow ? '' : ifCan('edit', btn('env', 'Environment'))}
-    ${busyNow ? '' : ifCan('edit', btn('containers', 'Containers'))}
-    ${busyNow ? '' : ifCan('create', btn('domain-add', '+ Domain'))}
-    ${busyNow ? '' : ifCan('create', btn('deploy', 'Redeploy', 'primary'))}
-    ${busyNow ? '' : ifCan('create', `<button class="btn tiny" data-app-action="${a.status === 'running' ? 'stop' : 'start'}" data-id="${a.id}">${a.status === 'running' ? 'Stop' : 'Start'}</button>`)}
-    ${busyNow ? '' : ifCan('create', `<button class="btn tiny" data-app-action="restart" data-id="${a.id}">Restart</button>`)}
-    ${busyNow && !a.currentDeploy ? deployControls(a) : ''}
-    <button class="btn tiny" data-ad-refresh="1">Refresh</button>
-    ${ifCan('delete', `<button class="btn tiny danger" data-app-action="delete" data-id="${a.id}" data-name="${n}" data-domain="${esc((a.domains || []).map((d) => d.domain).join(', '))}" data-volumes="${(a.volumes || []).length}">Remove</button>`)}`;
+  $('#ad-actions').innerHTML = appActionBar(a, { busyNow, btn });
 
   const tabs = [['overview', 'Overview'], ['live', 'Live stats'], ['settings', 'Settings'], ['auto', 'Auto deploy'], ['history', 'Deploy history'], ['domains', `Domains (${(a.domains || []).length})`],
     ['containers', `Containers (${a.containers.length})`], ['env', 'Environment & volumes'], ['activity', 'Activity']];
@@ -12293,7 +12438,32 @@ function ctUsage(c) {
       <span title="Disk read / written since it started">💽 <b>${esc(bytes(s.blockReadBytes || 0))}</b> / <b>${esc(bytes(s.blockWriteBytes || 0))}</b></span>
       <span title="Processes inside">⚙ <b>${esc(s.pids ?? 0)}</b></span>
     </div>
+    ${(() => {
+    const h = dkTrack.get(`${currentServerId}:${c.name}`) || { cpu: [], mem: [] };
+    const span = `last ${Math.max(1, Math.round((DK_HISTORY * DOCKER_STATS_EVERY) / 60000))} min`;
+    return `<div class="ct-charts">
+      <div><span class="ct-meter-label">CPU</span>${usageChart(h.cpu, { tone: meterTone(cpu) === 'ok' ? '' : meterTone(cpu), unit: '%', span, label: `${c.name} CPU` })}</div>
+      <div><span class="ct-meter-label">RAM</span>${usageChart(h.mem, { tone: meterTone(mem) === 'ok' ? '' : meterTone(mem), span, label: `${c.name} memory`, fmt: bytes })}</div>
+    </div>`;
+  })()}
   </div>`;
+}
+
+/** Each running container's CPU (share of the server) and memory over the last few polls, for its charts. */
+const dkTrack = new Map();
+const DK_HISTORY = 24; // six minutes at 15s
+
+function trackDockerStats(serverId, r) {
+  const seen = new Set();
+  for (const [name, s] of Object.entries(r.containers || {})) {
+    const key = `${serverId}:${name}`;
+    seen.add(key);
+    const t = dkTrack.get(key) || { cpu: [], mem: [] };
+    t.cpu = [...t.cpu, pctOf(s.cpuPct || 0, r.host.cores * 100)].slice(-DK_HISTORY);
+    t.mem = [...t.mem, s.memoryBytes || 0].slice(-DK_HISTORY);
+    dkTrack.set(key, t);
+  }
+  for (const key of dkTrack.keys()) if (key.startsWith(`${serverId}:`) && !seen.has(key)) dkTrack.delete(key);
 }
 
 /** The strip above the cards: all containers added up, the busiest one, and Docker's disk use. */
@@ -12375,6 +12545,7 @@ async function loadDockerStats() {
       if (serverId !== currentServerId) return;
       dockerStats = r;
       dockerStatsServer = serverId;
+      trackDockerStats(serverId, r);
       renderDockerUsage();
       renderContainerCards();
     } catch (err) {
@@ -12492,7 +12663,11 @@ const CT_EVERY = 3; // seconds between stats samples
 const ctPageOpen = () => !$('#view-container-detail').classList.contains('hidden');
 const ctPath = (rest = '') => `/servers/${currentServerId}/containers/${encodeURIComponent(currentCt)}${rest}`;
 
-async function openContainerPage(serverId, name, tab = 'overview') {
+/** Which server tab the container page was opened from, so ← goes back there. */
+let ctFrom = 'docker';
+const ctBackLabel = () => `← ${currentServer?.name || 'Server'} · ${ctFrom === 'live' ? 'Live' : 'Docker'}`;
+
+async function openContainerPage(serverId, name, tab = 'overview', { from = 'docker' } = {}) {
   const otherServer = String(serverId) !== String(currentServerId);
   const switching = otherServer || name !== currentCt || !ctPageOpen();
   if (otherServer) {
@@ -12504,6 +12679,7 @@ async function openContainerPage(serverId, name, tab = 'overview') {
   currentCtTab = CT_TABS.includes(tab) ? tab : 'overview';
 
   if (!switching) return showCtTab(currentCtTab);
+  ctFrom = from;
 
   stopCtLive();
   ctData = null;
@@ -12513,7 +12689,7 @@ async function openContainerPage(serverId, name, tab = 'overview') {
   $('#ct-actions').innerHTML = '';
   $('#ct-tabs').innerHTML = skeletonTabs(CT_TABS.length);
   $('#ct-body').innerHTML = skeleton('overview', { label: 'Inspecting the container…' });
-  $('#btn-ct-back').textContent = `← ${currentServer?.name || 'Server'} · Docker`;
+  $('#btn-ct-back').textContent = ctBackLabel();
   show('container-detail');
   setHeading('Servers');
   window.scrollTo(0, 0);
@@ -12527,7 +12703,7 @@ async function openContainerPage(serverId, name, tab = 'overview') {
       $('#ct-body').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
       return;
     }
-    $('#btn-ct-back').textContent = `← ${currentServer.name} · Docker`;
+    $('#btn-ct-back').textContent = ctBackLabel();
   }
   startCtLive();
   await loadContainerPage();
@@ -12549,7 +12725,7 @@ async function loadContainerPage() {
 }
 
 function backToDocker() {
-  currentTab = 'docker';
+  currentTab = ctFrom === 'live' ? 'live' : 'docker';
   openServer(currentServerId);
 }
 
@@ -13344,7 +13520,7 @@ let statsHistory = [];
 let statsSeenAlerts = new Set();
 let statsBusyContainer = null;
 
-const HISTORY = 60; // samples kept for the sparklines — five minutes at 5s
+const HISTORY = 60; // samples kept for the "peak" line — five minutes at 5s
 
 function stopLiveStats() {
   if (statsStream) {
@@ -13360,9 +13536,11 @@ function startLiveStats() {
   tabsLoaded.add('live');
   statsHistory = [];
   statsSeenAlerts = new Set();
+  ctTrack.clear();
 
   box.innerHTML = liveFrame();
-  loadMetricsCharts(box);
+  box.classList.remove('live-stalled');
+  fillLiveSkeleton(box);
   setLiveState('connecting', 'Opening a session on the server…');
 
   const stream = new EventSource(`/api/servers/${currentServerId}/stats/stream?every=5000`);
@@ -13380,6 +13558,8 @@ function startLiveStats() {
     if (statsStream !== stream) return;
     const { error } = JSON.parse(e.data);
     setLiveState('problem', error);
+    // Nothing to wait for: the placeholders stop shimmering until a sample does arrive.
+    box.classList.toggle('live-stalled', !statsHistory.length);
   });
 
   stream.addEventListener('end', () => {
@@ -13413,6 +13593,36 @@ const liveKpi = (key, label, prefix = 'live') => `
     <div class="live-spark" id="${prefix}-${key}-spark"></div>
   </div>`;
 
+/**
+ * Until the first sample arrives (the server is being signed in to), every slot
+ * shimmers in the shape of what will fill it. The first sample replaces them all.
+ */
+function fillLiveSkeleton(box) {
+  const bar = (w, h = 10, cls = '') => `<i class="sk ${cls}" style="width:${w};height:${h}px"></i>`;
+  const times = (count, fn) => Array.from({ length: count }, (_, i) => fn(i)).join('');
+  $$('.live-kpi', box).forEach((k, i) => {
+    $('.live-kpi-value', k).innerHTML = bar(['52%', '44%', '36%', '58%'][i % 4], 26);
+    $$('.live-kpi-sub', k).forEach((s, j) => { s.innerHTML = bar(j ? '46%' : '72%', 9); });
+    $('.live-spark', k).innerHTML = bar('100%', 5);
+    const tag = $('.live-kpi-tag', k);
+    if (tag) tag.innerHTML = bar('48px', 16, 'pill');
+  });
+  const rows = (count) => `<div class="live-sk-rows">${times(count, (i) => `<div class="live-sk-row">${bar(['22%', '30%', '18%', '26%'][i % 4], 9)}<div class="meter"><i class="sk" style="width:${[46, 68, 30, 55, 40][i % 5]}%;height:100%"></i></div>${bar('34px', 9)}</div>`)}</div>`;
+  $('#live-cores', box).innerHTML = rows(4);
+  $('#live-disks', box).innerHTML = rows(3);
+  $('#live-docker-counts', box).innerHTML = times(3, (i) => bar(['64px', '84px', '70px'][i], 26, 'pill'));
+  $('#live-docker', box).innerHTML = `<div class="lct-grid">${times(3, (i) => `<div class="lct-card">
+    <div class="lct-top"><div class="lct-ident">${bar(['60%', '48%', '54%'][i], 13)}${bar('80%', 9)}</div>${bar('72px', 20, 'pill')}</div>
+    ${bar('40%', 9)}
+    <div class="usage lct-usage">${times(2, (j) => `<div class="usage-cell"><div class="usage-top">${bar('40px', 9)}${bar('36px', 10)}</div><div class="meter"><i class="sk" style="width:${[38, 62][(i + j) % 2]}%;height:100%"></i></div><div class="usage-sub">${bar('70%', 8)}</div></div>`)}</div>
+    <div class="lct-actions">${times(3, (j) => bar(['46px', '48px', '60px'][j], 26, 'pill'))}</div>
+  </div>`)}</div>`;
+  const procs = `<div class="live-sk-rows">${times(5, (i) => `<div class="live-sk-row procs">${bar(['58%', '42%', '66%', '50%', '38%'][i], 10)}${bar('40px', 9)}${bar('36px', 9)}</div>`)}</div>`;
+  $('#live-top-cpu', box).innerHTML = procs;
+  $('#live-top-mem', box).innerHTML = procs;
+  $('#live-footer', box).innerHTML = bar('260px', 9);
+}
+
 /** The frame, drawn once; every id in here is patched by drawLiveSample. */
 function liveFrame() {
   return `
@@ -13433,7 +13643,6 @@ function liveFrame() {
       ${liveKpi('net', 'Network')}
     </div>
 
-    ${metricsSlot('server', currentServerId)}
 
     <div class="live-split">
       <div class="live-card">
@@ -13447,7 +13656,8 @@ function liveFrame() {
     </div>
 
     <div class="live-card flush">
-      <div class="live-card-head"><h3>Containers</h3><div class="section-tools" id="live-docker-counts"></div></div>
+      <div class="live-card-head live-ct-head"><h3>Containers</h3>
+        <div class="section-tools"><div class="chips" id="live-docker-counts"></div>${searchBox('live-ct-q', 'Find a container', liveCtView.q)}</div></div>
       <div id="live-docker"></div>
     </div>
 
@@ -13462,6 +13672,39 @@ function liveFrame() {
  * value, so the line only shows the shape — no axis, no legend, no tooltip.
  * A second series (`values2`) is drawn as a thinner, dashed line.
  */
+/**
+ * A small bar chart of recent readings, one bar per sample, newest on the right.
+ * Every slot is drawn from the start, and a reading near zero still gets a
+ * visible stub — so an idle container shows a low row of bars, not nothing.
+ * Bars are scaled to the highest reading shown, so small changes stay visible.
+ */
+function miniBars(values, { slots = 24, tone = '', label = '' } = {}) {
+  const shown = values.slice(-slots);
+  const top = Math.max(...shown, 0) * 1.15 || 1;
+  const w = 100 / slots;
+  const empty = slots - shown.length;
+  const bars = Array.from({ length: slots }, (_, i) => {
+    const x = (i * w + w * 0.12).toFixed(2);
+    const bw = (w * 0.76).toFixed(2);
+    if (i < empty) return `<rect class="none" x="${x}" y="28.5" width="${bw}" height="1.5" rx=".4" />`;
+    const v = shown[i - empty];
+    const h = Math.max(1.5, (v / top) * 30);
+    return `<rect class="${i === slots - 1 ? 'now' : ''}" x="${x}" y="${(30 - h).toFixed(2)}" width="${bw}" height="${h.toFixed(2)}" rx=".4" />`;
+  }).join('');
+  return `<svg class="mbars ${tone}" viewBox="0 0 100 30" preserveAspectRatio="none" role="img" aria-label="${esc(label)}">${bars}</svg>`;
+}
+
+/** A mini bar chart with what it covers and its peak and average above it. */
+function usageChart(values, { tone = '', unit = '', span = '', label = '', fmt = null } = {}) {
+  const show = fmt || ((v) => `${Math.round(v * 10) / 10}${unit}`);
+  const peak = values.length ? Math.max(...values) : null;
+  const avg = values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  return `<div class="ucharts" title="${esc(`${label}: ${values.length} reading${values.length === 1 ? '' : 's'}${span ? `, ${span}` : ''}`)}">
+    <div class="ucharts-head"><span>${esc(span)}</span><span>${peak === null ? 'collecting…' : `peak <b>${esc(show(peak))}</b> · avg <b>${esc(show(avg))}</b>`}</span></div>
+    ${miniBars(values, { tone, label: `${label} over time` })}
+  </div>`;
+}
+
 function sparkline(values, { max = 100, color = 'var(--accent)', label = '', values2 = null }) {
   if (values.length < 2) return '';
   const w = 200;
@@ -13709,6 +13952,7 @@ const liveTable = (headers, rows, emptyText) => (rows.length
   : `<p class="muted small live-empty">${esc(emptyText)}</p>`);
 
 function drawLiveSample(s) {
+  $('#live-panel')?.classList.remove('live-stalled');
   statsHistory.push(s);
   if (statsHistory.length > HISTORY) statsHistory.shift();
 
@@ -13724,42 +13968,34 @@ function drawLiveSample(s) {
     tag: `${s.load.cores} cores`,
     sub: `${s.cpu.iowaitPct}% waiting on disk${s.cpu.stealPct ? ` · ${s.cpu.stealPct}% stolen` : ''}`,
     sub2: `peak ${Math.max(...cpuHistory)}% · last ${uptimeWords(cpuHistory.length * 5)}`,
-    spark: sparkline(cpuHistory, { color: toneColor(s.cpu.usedPct), label: `CPU over the last ${cpuHistory.length} samples, now ${s.cpu.usedPct}%` }),
+    spark: liveBar(s.cpu.usedPct),
   });
 
-  const memHistory = statsHistory.map((h) => h.memory.usedPct);
   setKpi('mem', {
     value: `${s.memory.usedPct}%`,
     tone: meterClass(s.memory.usedPct),
     tag: bytes(s.memory.totalBytes),
     sub: `${bytes(s.memory.usedBytes)} used · ${bytes(Math.max(0, s.memory.totalBytes - s.memory.usedBytes))} free`,
     sub2: s.memory.swapTotalBytes ? `swap ${s.memory.swapUsedPct}% of ${bytes(s.memory.swapTotalBytes)}` : 'no swap',
-    spark: sparkline(memHistory, { color: toneColor(s.memory.usedPct), label: `Memory over the last ${memHistory.length} samples, now ${s.memory.usedPct}%` }),
+    spark: liveBar(s.memory.usedPct),
   });
 
   // A load of 1 per core is a busy machine; 4 per core is the meter's end.
   const loadPct = (s.load.perCore / 4) * 100;
-  const loadHistory = statsHistory.map((h) => h.load.one);
   setKpi('load', {
     value: s.load.one.toFixed(2),
     tone: meterClass(loadPct),
     tag: `${s.load.perCore} / core`,
     sub: `${s.load.five} · ${s.load.fifteen} <span class="muted">over 5 / 15 min</span>`,
     sub2: s.load.processes ? `${s.load.processes} processes` : '',
-    spark: sparkline(loadHistory, {
-      max: Math.max(s.load.cores, ...loadHistory) || 1, color: toneColor(loadPct),
-      label: `Load average over the last ${loadHistory.length} samples, now ${s.load.one}`,
-    }),
+    spark: liveBar(Math.min(100, loadPct)),
   });
 
-  const rx = statsHistory.map((h) => h.network.rxBytesPerSec);
-  const tx = statsHistory.map((h) => h.network.txBytesPerSec);
   setKpi('net', {
     value: `↓ ${rate(s.network.rxBytesPerSec)}`,
     tag: 'in / out',
     sub: `↑ ${rate(s.network.txBytesPerSec)} <span class="muted">out</span>`,
     sub2: `disk ${rate(s.diskIo.readBytesPerSec)} read · ${rate(s.diskIo.writeBytesPerSec)} write`,
-    spark: sparkline(rx, { max: Math.max(...rx, ...tx) || 1, values2: tx, label: `Network in (solid) and out (dashed) over the last ${rx.length} samples` }),
   });
 
   /* --- per core --- */
@@ -13785,7 +14021,8 @@ function drawLiveSample(s) {
     </div>`).join('') : '<p class="muted small" style="margin:0">No filesystems reported.</p>';
 
   /* --- containers --- */
-  drawLiveDocker(s.docker);
+  trackContainers(s.docker, s.at);
+  drawLiveDocker(s.docker, s.load.cores);
 
   /* --- processes --- */
   const procRows = (list) => liveTable(
@@ -13815,10 +14052,53 @@ function uptimeWords(seconds) {
 
 const CONTAINER_TONE = { running: 'ok', restarting: 'err', dead: 'err', exited: '', paused: 'warn', created: '' };
 
-function drawLiveDocker(d) {
+/** Which containers the Live tab shows: a state filter and a search, kept across samples. */
+const liveCtView = { pick: 'all', q: '' };
+let liveDockerLast = null;
+
+/**
+ * Each container's network speed — Docker only gives totals, so speed is the
+ * change between two samples.
+ */
+const ctTrack = new Map();
+
+function trackContainers(d, at) {
+  const when = Date.parse(at) || Date.now();
+  const seen = new Set();
+  for (const c of d?.containers || []) {
+    seen.add(c.name);
+    if (c.state !== 'running') { ctTrack.delete(c.name); continue; }
+    const t = ctTrack.get(c.name) || {};
+    const secs = t.at ? (when - t.at) / 1000 : 0;
+    if (secs > 0 && c.netRxBytes != null && t.rx != null && c.netRxBytes >= t.rx) {
+      t.rxRate = (c.netRxBytes - t.rx) / secs;
+      t.txRate = Math.max(0, (c.netTxBytes - t.tx) / secs);
+    }
+    Object.assign(t, { at: when, rx: c.netRxBytes, tx: c.netTxBytes });
+    ctTrack.set(c.name, t);
+  }
+  for (const name of ctTrack.keys()) if (!seen.has(name)) ctTrack.delete(name);
+}
+
+const ctProblem = (c) => ['restarting', 'dead'].includes(c.state) || c.health === 'unhealthy';
+const CT_PICKS = {
+  all: () => true,
+  running: (c) => c.state === 'running' && !ctProblem(c),
+  problem: (c) => ctProblem(c) || c.state === 'paused',
+  stopped: (c) => ['exited', 'created'].includes(c.state),
+};
+const CT_WORDS = { running: 'Running', restarting: 'Restarting', dead: 'Dead', exited: 'Stopped', paused: 'Paused', created: 'Created' };
+
+/**
+ * The containers on the Live tab, as cards: problems first, then the busiest.
+ * Each says what it is (name, image, ports), how it is doing (state, how long,
+ * CPU and memory bars, traffic) and what can be done (logs, stop/start, restart).
+ */
+function drawLiveDocker(d, cores = 1) {
   const counts = $('#live-docker-counts');
   const box = $('#live-docker');
   if (!counts || !box) return;
+  liveDockerLast = { d, cores };
 
   if (!d.installed) {
     counts.innerHTML = '';
@@ -13831,44 +14111,106 @@ function drawLiveDocker(d) {
     return;
   }
 
-  counts.innerHTML = `
-    <span class="badge ok">${d.counts.running} running</span>
-    ${d.counts.restarting ? `<span class="badge err">${d.counts.restarting} restarting</span>` : ''}
-    ${d.counts.paused ? `<span class="badge warn">${d.counts.paused} paused</span>` : ''}
-    ${d.counts.exited ? `<span class="badge">${d.counts.exited} stopped</span>` : ''}
-    ${d.counts.dead ? `<span class="badge err">${d.counts.dead} dead</span>` : ''}
-    <span class="muted small">${d.counts.total} in total</span>`;
+  const list = d.containers || [];
+  const n = (k) => list.filter(CT_PICKS[k]).length;
+  counts.innerHTML = [['all', 'All', ''], ['running', 'Running', 'ok'], ['problem', 'Needs attention', 'err'], ['stopped', 'Stopped', '']]
+    .filter(([k]) => k === 'all' || k === liveCtView.pick || n(k))
+    .map(([k, label, tone]) => `<button type="button" class="chip-btn ${tone} ${k === liveCtView.pick ? 'active' : ''}" data-ct-pick="${k}">${label} <b>${n(k)}</b></button>`)
+    .join('');
 
-  // A container being acted on keeps its row still until the action comes back.
+  // A container being acted on keeps its card still until the action comes back.
   if (statsBusyContainer) return;
 
-  box.innerHTML = liveTable(
-    [{ label: 'Container' }, { label: 'State' }, { label: 'CPU', num: true }, { label: 'Memory', num: true }, { label: 'Network', num: true }, { label: '' }],
-    d.containers.map((c) => [
-      `<div class="live-ct">
-         <i class="live-ct-dot ${CONTAINER_TONE[c.state] ?? ''}"></i>
-         <div><b>${esc(c.name)}</b>
-           <div class="muted small live-ct-image">${esc(c.image)}${c.ports ? ` · ${esc(c.ports)}` : ''}</div></div>
-       </div>`,
-      `<span class="badge ${CONTAINER_TONE[c.state] ?? ''}">${esc(c.state)}</span>
-       ${c.health === 'unhealthy' ? '<span class="badge err">unhealthy</span>' : ''}
-       <div class="muted small">${esc(c.status)}</div>`,
-      c.cpuPct === undefined ? '<span class="muted">—</span>' : `${c.cpuPct}%`,
-      c.memoryBytes === undefined || c.memoryBytes === null
-        ? '<span class="muted">—</span>'
-        : `${bytes(c.memoryBytes)}<div class="muted small">${c.memoryPct}%</div>`,
-      c.netRxBytes === undefined || c.netRxBytes === null
-        ? '<span class="muted">—</span>'
-        : `↓ ${bytes(c.netRxBytes)}<div class="muted small">↑ ${bytes(c.netTxBytes)}</div>`,
-      `<div class="live-ct-actions">
-        <button class="btn tiny" data-container="logs" data-name="${esc(c.name)}">Logs</button>
-        ${ifCan('create', `<button class="btn tiny" data-container="${c.state === 'running' ? 'stop' : 'start'}" data-name="${esc(c.name)}">${c.state === 'running' ? 'Stop' : 'Start'}</button>`)}
-        ${ifCan('create', `<button class="btn tiny" data-container="restart" data-name="${esc(c.name)}">Restart</button>`)}
-      </div>`,
-    ]),
-    'This server is running no containers.'
-  );
+  if (!list.length) {
+    box.innerHTML = '<p class="muted small live-empty">This server is running no containers.</p>';
+    return;
+  }
+  const q = liveCtView.q.trim().toLowerCase();
+  const rank = (c) => (ctProblem(c) ? 0 : c.state === 'paused' ? 1 : c.state === 'running' ? 2 : 3);
+  const shown = list
+    .filter(CT_PICKS[liveCtView.pick] || CT_PICKS.all)
+    .filter((c) => !q || `${c.name} ${c.image} ${c.ports || ''}`.toLowerCase().includes(q))
+    .sort((a, b) => rank(a) - rank(b) || (b.cpuPct || 0) - (a.cpuPct || 0) || a.name.localeCompare(b.name));
+
+  box.innerHTML = shown.length
+    ? `<div class="lct-grid">${shown.map((c) => liveContainerCard(c, cores)).join('')}</div>`
+    : `<p class="muted small live-empty">No container matches${q ? ` “${esc(liveCtView.q)}”` : ''} here.
+        <button type="button" class="btn tiny" data-ct-pick="all" data-ct-clear="1">Show all</button></p>`;
 }
+
+function liveContainerCard(c, cores) {
+  const problem = ctProblem(c);
+  const tone = problem ? 'err' : (CONTAINER_TONE[c.state] ?? '');
+  const running = c.state === 'running';
+  const ports = String(c.ports || '').split(',').map((p) => p.trim()).filter(Boolean);
+  const hasCpu = running && c.cpuPct !== undefined && c.cpuPct !== null;
+  const hasMem = running && c.memoryBytes !== undefined && c.memoryBytes !== null;
+  // Docker counts CPU per core, so 200% is two whole cores; the bar is the share of the machine.
+  const cpuOfHost = hasCpu ? Math.round(c.cpuPct / Math.max(1, cores)) : 0;
+  const t = ctTrack.get(c.name);
+  // The same small meters as a server card: name and percentage, a thin bar, what it is out of.
+  const cpuCell = usageCell('cpu', 'CPU', hasCpu ? cpuOfHost : null,
+    hasCpu ? `${c.cpuPct}% of one core · ${cores} cores` : '', hasCpu ? `${c.cpuPct}% of one core — ${cpuOfHost}% of all ${cores} cores` : '');
+  const memCell = usageCell('memory', 'Memory', hasMem ? (c.memoryPct || 0) : null,
+    hasMem ? (c.memoryLimitBytes ? usedOf(c.memoryBytes, c.memoryLimitBytes) : bytes(c.memoryBytes)) : '', 'of the memory it may use');
+  const netIn = t?.rxRate != null ? rate(t.rxRate) : c.netRxBytes != null ? bytes(c.netRxBytes) : '—';
+  const netOut = t?.txRate != null ? rate(t.txRate) : c.netTxBytes != null ? bytes(c.netTxBytes) : '—';
+  const facts = [
+    `<span title="Network now${c.netRxBytes != null ? ` — ${bytes(c.netRxBytes)} in, ${bytes(c.netTxBytes)} out since it started` : ''}"><em>${t?.rxRate != null ? 'Network now' : 'Network total'}</em><b>↓ ${netIn}</b><b>↑ ${netOut}</b></span>`,
+    c.blockReadBytes != null ? `<span title="Disk read and written since it started"><em>Disk I/O</em><b>R ${bytes(c.blockReadBytes)}</b><b>W ${bytes(c.blockWriteBytes)}</b></span>` : '',
+    c.pids != null ? `<span title="Processes inside the container"><em>Processes</em><b>${c.pids}</b></span>` : '',
+  ].filter(Boolean).join('');
+  return `
+  <div class="lct-card ${tone}">
+    <div class="lct-top">
+      <div class="lct-ident">
+        <button type="button" class="lct-name" data-live-ct="${esc(c.name)}" title="Open ${esc(c.name)}: details, live stats, logs, volumes">${esc(c.name)}</button>
+        <code class="lct-image" title="${esc(c.image)}">${esc(c.image)}</code>
+      </div>
+      <span class="srv-pill ${tone || 'none'}"><i aria-hidden="true"></i>${esc(CT_WORDS[c.state] || c.state)}</span>
+    </div>
+    <div class="lct-meta">
+      <span title="What Docker reports">${esc(c.status || '')}</span>
+      ${c.health === 'unhealthy' ? '<span class="badge err">health check failing</span>' : c.health === 'healthy' ? '<span class="badge ok">healthy</span>' : ''}
+    </div>
+    ${ports.length ? `<div class="lct-ports">${ports.slice(0, 4).map((p) => `<code>${esc(p)}</code>`).join('')}${ports.length > 4 ? `<span class="muted small">+${ports.length - 4} more</span>` : ''}</div>` : ''}
+    ${running ? `<div class="usage lct-usage">${cpuCell}${memCell}</div>
+    <div class="lct-facts">${facts}</div>`
+    : `<p class="lct-idle">${problem ? 'Not running properly — open its logs to see why.' : 'Not running — nothing to measure.'}</p>`}
+    <div class="lct-actions">
+      <button class="btn tiny primary" data-live-ct="${esc(c.name)}">Details</button>
+      <button class="btn tiny" data-container="logs" data-name="${esc(c.name)}">Logs</button>
+      ${ifCan('create', `<button class="btn tiny ${running ? '' : 'ok-btn'}" data-container="${running ? 'stop' : 'start'}" data-name="${esc(c.name)}">${running ? 'Stop' : 'Start'}</button>`)}
+      ${ifCan('create', `<button class="btn tiny" data-container="restart" data-name="${esc(c.name)}">Restart</button>`)}
+    </div>
+  </div>`;
+}
+
+// A container's name or Details: the same container page the Docker tab opens, with ← back to Live.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-live-ct]');
+  if (!b) return;
+  stopLiveStats();
+  openContainerPage(currentServerId, b.dataset.liveCt, 'overview', { from: 'live' });
+});
+
+// The filter chips and the search redraw from the last sample, without waiting for the next one.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ct-pick]');
+  if (!b) return;
+  liveCtView.pick = b.dataset.ctPick;
+  if (b.dataset.ctClear) {
+    liveCtView.q = '';
+    const input = $('#live-ct-q');
+    if (input) input.value = '';
+  }
+  if (liveDockerLast) drawLiveDocker(liveDockerLast.d, liveDockerLast.cores);
+});
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'live-ct-q') return;
+  liveCtView.q = e.target.value;
+  if (liveDockerLast) drawLiveDocker(liveDockerLast.d, liveDockerLast.cores);
+});
 
 /**
  * Alerts, worst first — and a toast the first time each one appears, so a
@@ -14135,17 +14477,136 @@ function cronWords(schedule) {
   return '';
 }
 
+/* When a schedule runs next. cron reads a schedule on the server's clock, so the
+   times are worked out in the server's UTC offset and shown in its time zone. */
+
+const CRON_ALIAS = {
+  '@hourly': '0 * * * *', '@daily': '0 0 * * *', '@midnight': '0 0 * * *',
+  '@weekly': '0 0 * * 0', '@monthly': '0 0 1 * *', '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *',
+};
+const CRON_NAMES = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
+};
+
+/** One field ("*\/15", "1-5", "mon,wed", "0-30/10") as the set of values it allows, or null if it is not one. */
+function cronField(text, lo, hi) {
+  const out = new Set();
+  const val = (v) => (CRON_NAMES[String(v).toLowerCase()] ?? (/^\d+$/.test(v) ? Number(v) : NaN));
+  for (const part of String(text).split(',')) {
+    const [range, stepText] = part.split('/');
+    const step = stepText === undefined ? 1 : Number(stepText);
+    if (!Number.isInteger(step) || step < 1) return null;
+    let a; let b;
+    if (range === '*') { a = lo; b = hi; } else if (range.includes('-')) {
+      [a, b] = range.split('-').map(val);
+    } else {
+      a = val(range);
+      b = stepText === undefined ? a : hi;
+    }
+    if (Number.isNaN(a) || Number.isNaN(b) || a < lo || b > hi + (hi === 6 ? 1 : 0) || a > b) return null;
+    for (let v = a; v <= b; v += step) out.add(hi === 6 && v === 7 ? 0 : v);
+  }
+  return out;
+}
+
+/**
+ * The next `count` times a schedule fires after `fromMs`, as UTC milliseconds,
+ * or null for @reboot or a schedule this cannot read. Walks forward a day, an
+ * hour or a minute at a time — whichever the first field that does not match
+ * allows — and gives up after a year and a bit.
+ */
+function cronNextRuns(schedule, { fromMs = Date.now(), offsetMinutes = 0, count = 1 } = {}) {
+  const raw = String(schedule || '').trim().toLowerCase();
+  if (raw === '@reboot') return null;
+  const parts = (CRON_ALIAS[raw] || raw).split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [mins, hours, doms, months, dows] = [
+    cronField(parts[0], 0, 59), cronField(parts[1], 0, 23), cronField(parts[2], 1, 31), cronField(parts[3], 1, 12), cronField(parts[4], 0, 6),
+  ];
+  if (!mins || !hours || !doms || !months || !dows) return null;
+  const domAny = parts[2] === '*';
+  const dowAny = parts[4] === '*';
+  const shift = offsetMinutes * 60000;
+  // Server wall time, kept in a Date read with the UTC getters.
+  let t = Math.floor((fromMs + shift) / 60000) * 60000 + 60000;
+  const end = t + 400 * 86400000;
+  const found = [];
+  while (t < end && found.length < count) {
+    const d = new Date(t);
+    const dayOk = domAny && dowAny ? true
+      : domAny ? dows.has(d.getUTCDay())
+        : dowAny ? doms.has(d.getUTCDate())
+          : doms.has(d.getUTCDate()) || dows.has(d.getUTCDay());
+    if (!months.has(d.getUTCMonth() + 1)) {
+      t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+    } else if (!dayOk) {
+      t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+    } else if (!hours.has(d.getUTCHours())) {
+      t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours() + 1);
+    } else if (!mins.has(d.getUTCMinutes())) {
+      t += 60000;
+    } else {
+      found.push(t - shift);
+      t += 60000;
+    }
+  }
+  return found;
+}
+
+/** The server's offset, from the cron answer — or the browser's, said so, when the server did not say. */
+function cronClock() {
+  const c = cronCache?.clock;
+  if (c && Number.isFinite(c.offsetMinutes)) return { offsetMinutes: c.offsetMinutes, zone: c.zone || utcLabel(c.offsetMinutes), server: true };
+  const own = -new Date().getTimezoneOffset();
+  return { offsetMinutes: own, zone: 'your time', server: false };
+}
+
+const utcLabel = (m) => `UTC${m < 0 ? '−' : '+'}${String(Math.floor(Math.abs(m) / 60)).padStart(2, '0')}:${String(Math.abs(m) % 60).padStart(2, '0')}`;
+
+/** "in 3 h 12 min" */
+function untilWords(ms) {
+  const mins = Math.max(0, Math.round(ms / 60000));
+  if (mins < 1) return 'in under a minute';
+  if (mins < 60) return `in ${mins} min`;
+  const h = Math.floor(mins / 60);
+  if (h < 48) return `in ${h} h${mins % 60 ? ` ${mins % 60} min` : ''}`;
+  return `in ${Math.round(h / 24)} days`;
+}
+
+/** "today 03:00", "tomorrow 03:00", "Mon 4 Nov 03:00" — on the server's clock. */
+function serverWhen(ms, offsetMinutes) {
+  const d = new Date(ms + offsetMinutes * 60000);
+  const now = new Date(Date.now() + offsetMinutes * 60000);
+  const hm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  const dayNo = (x) => Math.floor(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()) / 86400000);
+  const diff = dayNo(d) - dayNo(now);
+  if (diff === 0) return `today ${hm}`;
+  if (diff === 1) return `tomorrow ${hm}`;
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  return `${wd} ${d.getUTCDate()} ${mo} ${hm}`;
+}
+
+/** "Every day at 03:00", or the closest honest thing for a schedule with no short reading. */
+function cronHeadline(schedule) {
+  const words = cronWords(schedule);
+  if (words) return words.charAt(0).toUpperCase() + words.slice(1);
+  return 'Custom schedule';
+}
+
+/* -------------------------------------------------------- the cron tab */
+
+const cronView = { tab: 'mine', q: '' };
+
+const CRON_CLOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+const CRON_LOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+
 async function loadServerCron() {
   const box = $('#cron-panel');
   if (!box) return;
   tabsLoaded.add('cron');
-  box.innerHTML = skeleton('table', { label: 'Reading the schedule…', cols: ['name', 'wide', 'when', 'actions'] });
-
-  const head = (tools = '') => `
-    <div class="section-head">
-      <h2>Scheduled jobs</h2>
-      <div class="section-tools">${tools}<button class="btn tiny" data-cron-reload="1">Refresh</button></div>
-    </div>`;
+  box.innerHTML = `${cronHead()}${skeleton('cards', { n: 3, label: 'Reading the schedule…' })}`;
 
   try {
     const { cron: c } = await api(`/servers/${currentServerId}/cron`);
@@ -14153,95 +14614,158 @@ async function loadServerCron() {
 
     if (!c.installed) {
       setTabCount('cron', '—');
-      box.innerHTML = `${head()}
-        <div class="card">
-          <div class="msg info" style="margin-top:0">
-            <b>cron is not installed on this server.</b><br />
-            Nothing here runs on a schedule until it is — no backups, no cleanups, no certificate renewals.
-          </div>
-          ${ifCan('create', '<div class="card-actions"><button class="btn tiny primary" data-cron="install">Install cron on this server</button></div>')}
+      box.innerHTML = `${cronHead()}
+        <div class="card cron-empty">
+          <div class="cron-empty-icon">${CRON_CLOCK_ICON}</div>
+          <h3>cron is not installed on this server</h3>
+          <p class="muted">Nothing here runs on a schedule until it is — no backups, no cleanups, no certificate renewals.</p>
+          ${ifCan('create', '<button class="btn primary" data-cron="install">Install cron on this server</button>')}
         </div>`;
       return;
     }
 
-    const editable = c.users.flatMap((u) => u.jobs);
-    const readOnly = [...c.system.jobs, ...c.dropins.flatMap((f) => f.jobs)];
-    setTabCount('cron', editable.length + readOnly.length, c.running ? '' : 'err');
-
-    box.innerHTML = `${head(ifCan('create', '<button class="btn tiny primary" data-cron="add">+ Add a job</button>'))}
-
-      ${c.running
-    ? ''
-    : `<div class="msg err" style="margin-bottom:12px"><b>The cron service is ${esc(c.active)}.</b>
-         Jobs are written down but nothing is running them.</div>`}
-
-      <div class="tiles" style="margin-bottom:14px">
-        ${tile('Service', c.running ? '<span class="badge ok">running</span>' : `<span class="badge err">${esc(c.active)}</span>`,
-    `${esc(c.unit || 'cron')} · ${esc(c.enabled)} at boot`)}
-        ${tile('Your jobs', String(editable.length), `in ${c.users.length} crontab${c.users.length === 1 ? '' : 's'}`)}
-        ${tile('System jobs', String(readOnly.length), '/etc/crontab and /etc/cron.d')}
-        ${tile('Scripts', String(c.runParts.length), 'in cron.hourly, .daily, .weekly, .monthly')}
-      </div>
-
-      ${section('Crontabs', c.users.length
-    ? c.users.map((u) => cronUserCard(u)).join('')
-    : `<div class="card"><p class="muted small" style="margin:0">No user on this server has a crontab yet.
-         <b>+ Add a job</b> writes the first one.</p></div>`)}
-
-      ${readOnly.length ? section('System schedule', `
-        ${table(
-    [{ label: 'When' }, { label: 'As' }, { label: 'Command' }, { label: 'From' }],
-    readOnly.map((j) => [
-      `<code class="small">${esc(j.schedule)}</code>
-             ${cronWords(j.schedule) ? `<div class="muted small">${esc(cronWords(j.schedule))}</div>` : ''}`,
-      `<span class="small">${esc(j.user || 'root')}</span>`,
-      `<code class="small">${esc(j.command)}</code>`,
-      `<span class="muted small">${esc(j.source)}</span>`,
-    ])
-  )}
-        <p class="muted small" style="margin:10px 0 0">These belong to the system and its packages, so the panel
-          shows them but will not edit them. Change them on the server itself.</p>`) : ''}
-
-      ${c.runParts.length ? section('Scripts run by the hour, day, week and month', `
-        <div class="card"><div class="chips">
-          ${c.runParts.map((p) => `<span class="chip"><b>${esc(p.name)}</b>
-            <span class="muted">${esc(p.directory.replace('/etc/cron.', ''))}</span></span>`).join('')}
+    const mine = c.users.flatMap((u) => u.jobs);
+    const system = [...c.system.jobs, ...c.dropins.flatMap((f) => f.jobs)];
+    setTabCount('cron', mine.length + system.length, c.running ? '' : 'err');
+    box.innerHTML = `${cronHead(ifCan('create', '<button class="btn tiny primary" data-cron="add">+ Add a job</button>'))}
+      ${cronStatusBar(c, mine.length, system.length)}
+      ${c.running ? '' : `<div class="msg err" style="margin:0 0 12px"><b>The cron service is ${esc(c.active)}.</b> Jobs are written down but nothing is running them.</div>`}
+      <div class="cron-toolbar">
+        <div class="seg" role="tablist" aria-label="What to show" id="cron-tabs">
+          ${[['mine', 'Your jobs', mine.length], ['system', 'System', system.length], ['scripts', 'Scripts', c.runParts.length], ['log', 'Log', c.recent.length]]
+    .map(([k, label, n]) => `<button type="button" role="tab" data-cron-tab="${k}" class="${cronView.tab === k ? 'active' : ''}" aria-selected="${cronView.tab === k}">${label} <span class="cron-count">${n}</span></button>`).join('')}
         </div>
-        <p class="muted small" style="margin:10px 0 0">Anything dropped into these directories is run by
-          <code>run-parts</code> on that cadence.</p></div>`) : ''}
-
-      ${c.recent.length ? section('What cron logged recently', `<pre class="log">${esc(c.recent.join('\n'))}</pre>`) : ''}`;
+        ${searchBox('cron-q', 'Search command, schedule or user', cronView.q)}
+      </div>
+      <div id="cron-body"></div>`;
+    drawCronBody();
   } catch (err) {
     setTabCount('cron', '!', 'err');
-    box.innerHTML = `${head()}<div class="msg err">${esc(err.message)}</div>`;
+    box.innerHTML = `${cronHead()}<div class="msg err">${esc(err.message)}</div>`;
   }
 }
 
-/** One user's crontab, with the jobs the panel may change. */
-function cronUserCard(u) {
-  return `
-    <div class="card" style="margin-bottom:12px">
-      <div class="card-head">
-        <div><h3>${esc(u.user)}</h3>
-          <div class="muted small">${u.jobs.length} job${u.jobs.length === 1 ? '' : 's'}${u.settings.length ? ` · ${u.settings.map(esc).join(' · ')}` : ''}</div>
-        </div>
-        ${ifCan('create', `<button class="btn tiny" data-cron="add" data-user="${esc(u.user)}">+ Add</button>`)}
-      </div>
-      ${table(
-    [{ label: 'When' }, { label: 'Command' }, { label: '' }],
-    u.jobs.map((j) => [
-      `<code class="small">${esc(j.schedule)}</code>
-         ${cronWords(j.schedule) ? `<div class="muted small">${esc(cronWords(j.schedule))}</div>` : ''}`,
-      `<code class="small">${esc(j.command)}</code>`,
-      `<div class="row-actions">
-          ${ifCan('edit', `<button class="btn tiny" data-cron="edit" data-user="${esc(u.user)}" data-line="${esc(j.raw)}">Edit</button>`)}
-          ${ifCan('delete', `<button class="btn tiny danger" data-cron="delete" data-user="${esc(u.user)}" data-line="${esc(j.raw)}">Delete</button>`)}
-        </div>`,
-    ]),
-    'This crontab has no jobs'
-  )}
-    </div>`;
+function cronHead(tools = '') {
+  return `<div class="section-head">
+    <h2>Scheduled jobs</h2>
+    <div class="section-tools">${tools}<button class="btn tiny" data-cron-reload="1">Refresh</button></div>
+  </div>`;
 }
+
+/** Is cron running, does it start at boot, what time the server thinks it is, and how much is scheduled. */
+function cronStatusBar(c, mine, system) {
+  const clock = cronClock();
+  const now = c.clock?.now ? serverWhen(Date.parse(c.clock.now), clock.offsetMinutes).replace(/^today /, '') : null;
+  return `<div class="srv-status cron-status">
+    <span class="srv-pill ${c.running ? 'ok' : 'err'}"><i aria-hidden="true"></i>${c.running ? 'cron is running' : `cron is ${esc(c.active)}`}</span>
+    <span class="srv-fact ${c.enabled === 'enabled' ? 'ok' : 'warn'}" title="${esc(c.unit || 'cron')} service">${c.enabled === 'enabled' ? 'Starts at boot' : `Boot: ${esc(c.enabled)}`}</span>
+    ${clock.server ? `<span class="srv-fact" title="Schedules are read in this time zone">${CRON_CLOCK_ICON}Server time <b>${esc(now || '')}</b>&nbsp;${esc(clock.zone)} <span class="muted">(${utcLabel(clock.offsetMinutes)})</span></span>` : ''}
+    <span class="srv-fact"><b>${mine}</b>&nbsp;your job${mine === 1 ? '' : 's'} · <b>${system}</b>&nbsp;system · <b>${c.runParts.length}</b>&nbsp;script${c.runParts.length === 1 ? '' : 's'}</span>
+  </div>`;
+}
+
+const cronMatch = (j, q) => !q || `${j.schedule} ${cronWords(j.schedule)} ${j.command} ${j.user || ''} ${j.source || ''}`.toLowerCase().includes(q);
+
+/** The part under the switch: one kind of thing at a time. */
+function drawCronBody() {
+  const body = $('#cron-body');
+  const c = cronCache;
+  if (!body || !c) return;
+  const q = cronView.q.trim().toLowerCase();
+  const nothing = (text) => `<div class="card cron-none"><p class="muted" style="margin:0">${text}</p></div>`;
+
+  if (cronView.tab === 'mine') {
+    const settings = c.users.filter((u) => u.settings.length);
+    const jobs = c.users.flatMap((u) => u.jobs.map((j) => ({ ...j, user: j.user || u.user }))).filter((j) => cronMatch(j, q));
+    body.innerHTML = `
+      ${settings.length ? `<p class="muted small cron-settings">${settings.map((u) => `<b>${esc(u.user)}</b>'s crontab sets ${u.settings.map((s) => `<code>${esc(s)}</code>`).join(' ')}`).join(' · ')}</p>` : ''}
+      ${jobs.length ? `<div class="cron-list">${jobs.map((j) => cronJobCard(j, { editable: true })).join('')}</div>`
+    : q ? nothing(`No job matches “${esc(cronView.q)}”.`)
+      : `<div class="card cron-empty">
+          <div class="cron-empty-icon">${CRON_CLOCK_ICON}</div>
+          <h3>No scheduled jobs yet</h3>
+          <p class="muted">Run a backup every night, clean up Docker every week, or start something at boot.</p>
+          ${ifCan('create', '<button class="btn primary" data-cron="add">+ Add your first job</button>')}
+        </div>`}`;
+    return;
+  }
+
+  if (cronView.tab === 'system') {
+    const jobs = [...c.system.jobs, ...c.dropins.flatMap((f) => f.jobs)].filter((j) => cronMatch(j, q));
+    body.innerHTML = `
+      <p class="muted small cron-settings">${CRON_LOCK_ICON} These belong to Ubuntu and its packages (<code>/etc/crontab</code>, <code>/etc/cron.d</code>), so the panel shows them but does not change them.</p>
+      ${jobs.length ? `<div class="cron-list">${jobs.map((j) => cronJobCard(j, { editable: false })).join('')}</div>`
+    : nothing(q ? `No system job matches “${esc(cronView.q)}”.` : 'No system jobs on this server.')}`;
+    return;
+  }
+
+  if (cronView.tab === 'scripts') {
+    const CADENCE = [['hourly', 'Hourly', 'once an hour'], ['daily', 'Daily', 'once a day'], ['weekly', 'Weekly', 'once a week'], ['monthly', 'Monthly', 'once a month']];
+    const list = c.runParts.filter((p) => !q || p.name.toLowerCase().includes(q));
+    body.innerHTML = `
+      <p class="muted small cron-settings">Scripts dropped into these folders are run by <code>run-parts</code> on that cadence. Read-only here.</p>
+      <div class="cron-scripts">${CADENCE.map(([k, label, words]) => {
+    const names = list.filter((p) => p.directory.endsWith(k));
+    return `<div class="cron-script-col">
+          <div class="cron-script-head"><b>${label}</b><span class="muted small">${words} · <code>/etc/cron.${k}</code></span><span class="cron-count">${names.length}</span></div>
+          ${names.length ? names.map((p) => `<div class="cron-script"><code>${esc(p.name)}</code></div>`).join('') : '<p class="muted small" style="margin:0">Nothing here</p>'}
+        </div>`;
+  }).join('')}</div>`;
+    return;
+  }
+
+  const lines = c.recent.filter((l) => !q || l.toLowerCase().includes(q));
+  body.innerHTML = `
+    <p class="muted small cron-settings">What cron logged most recently — the quickest answer to "did it run?".</p>
+    ${lines.length ? `<pre class="log">${esc(lines.join('\n'))}</pre>` : nothing('cron has logged nothing recently.')}`;
+}
+
+/** One job: when in words, the raw fields, when it runs next, the command, who runs it, and what can be done. */
+function cronJobCard(j, { editable }) {
+  const clock = cronClock();
+  const reboot = String(j.schedule).trim().toLowerCase() === '@reboot';
+  const next = reboot ? null : cronNextRuns(j.schedule, { offsetMinutes: clock.offsetMinutes });
+  const nextHtml = reboot
+    ? '<b>At every boot</b><span>when the server starts</span>'
+    : next?.length
+      ? `<b>${esc(untilWords(next[0] - Date.now()))}</b><span title="${clock.server ? 'On the server\'s clock' : 'On your clock — the server did not say its time zone'}">${esc(serverWhen(next[0], clock.offsetMinutes))} ${esc(clock.zone)}</span>`
+      : next ? '<b class="muted">Never</b><span>no date matches this schedule</span>' : '<b class="muted">—</b><span>could not work it out</span>';
+  const user = j.user || 'root';
+  return `<div class="cron-job ${editable ? '' : 'ro'}">
+    <div class="cron-when">
+      <span class="cron-ico">${editable ? CRON_CLOCK_ICON : CRON_LOCK_ICON}</span>
+      <div class="cron-when-text">
+        <b>${esc(cronHeadline(j.schedule))}</b>
+        <code title="minute · hour · day of month · month · day of week">${esc(j.schedule)}</code>
+      </div>
+    </div>
+    <div class="cron-next"><em>Next run</em>${nextHtml}</div>
+    <div class="cron-cmd"><code title="${esc(j.command)}">${esc(j.command)}</code><button type="button" class="btn tiny ghost" data-lp-copy>Copy</button></div>
+    <div class="cron-side">
+      <span class="cron-user" title="Runs as this Linux user">${esc(user)}</span>
+      ${editable ? `<div class="cron-actions">
+        ${ifCan('edit', `<button class="btn tiny" data-cron="edit" data-user="${esc(user)}" data-line="${esc(j.raw)}">Edit</button>`)}
+        ${ifCan('delete', `<button class="btn tiny danger" data-cron="delete" data-user="${esc(user)}" data-line="${esc(j.raw)}">Delete</button>`)}
+      </div>` : `<span class="muted small cron-src" title="${esc(j.source || '')}">${esc(String(j.source || '').replace('/etc/', ''))}</span>`}
+    </div>
+  </div>`;
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cron-tab]');
+  if (!b) return;
+  cronView.tab = b.dataset.cronTab;
+  $$('#cron-tabs [data-cron-tab]').forEach((x) => {
+    x.classList.toggle('active', x === b);
+    x.setAttribute('aria-selected', String(x === b));
+  });
+  drawCronBody();
+});
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'cron-q') return;
+  cronView.q = e.target.value;
+  drawCronBody();
+});
 
 /* ------------------------------------------------- add / edit a job */
 
@@ -14262,10 +14786,22 @@ $('#cron-presets').addEventListener('click', (e) => {
 // Say what the schedule means as it is typed, so a wrong one is obvious here
 // rather than at three in the morning.
 $('#cron-schedule').addEventListener('input', () => {
-  const words = cronWords($('#cron-schedule').value);
-  $('#cron-schedule-hint').textContent = words
-    ? `Runs ${words}.`
-    : 'minute · hour · day of month · month · day of week';
+  const value = $('#cron-schedule').value;
+  const words = cronWords(value);
+  const hint = $('#cron-schedule-hint');
+  if (!value.trim()) {
+    hint.textContent = 'minute · hour · day of month · month · day of week';
+    return;
+  }
+  const clock = cronClock();
+  const runs = cronNextRuns(value, { offsetMinutes: clock.offsetMinutes, count: 3 });
+  const when = String(value).trim().toLowerCase() === '@reboot'
+    ? 'Runs every time the server starts.'
+    : runs === null ? 'cron will not read this — check the five fields.'
+      : !runs.length ? 'No date ever matches this schedule, so it would never run.'
+      : `${words ? `Runs ${words}. ` : ''}Next: ${runs.map((t) => serverWhen(t, clock.offsetMinutes)).join(' · ')} ${clock.zone}`;
+  hint.textContent = when;
+  hint.classList.toggle('err-text', runs === null && String(value).trim().toLowerCase() !== '@reboot');
 });
 
 function openCronModal({ user = 'root', job = null } = {}) {
@@ -14359,7 +14895,6 @@ $('#view-server-detail').addEventListener('click', (e) => {
  * "You are not permitted" and nothing else.
  */
 let osUsers = null;
-let osShowSystem = false;
 let osEditing = null;
 let osKeysFor = null;
 const USEFUL_GROUPS = ['docker', 'www-data', 'adm', 'systemd-journal', 'users', 'plugdev', 'lxd'];
@@ -14405,73 +14940,128 @@ async function loadServerUsers() {
   }
 }
 
-const osPasswordBadge = (u) => ({
-  set: '<span class="badge ok">password</span>',
-  locked: `<span class="badge ${u.kind === 'user' && !u.keys.length ? 'warn' : ''}">no password</span>`,
-  empty: '<span class="badge err">empty password</span>',
-}[u.password] || '<span class="badge">unknown</span>');
+/** What the Users tab shows: one group at a time, and a search. */
+const osView = { pick: 'people', q: '' };
+const OS_PICKS = {
+  people: (u) => u.kind !== 'system',
+  admins: (u) => u.kind !== 'system' && (u.sudo || u.kind === 'root'),
+  online: (u) => u.sessions > 0,
+  system: (u) => u.kind === 'system',
+};
 
-function osUserRow(u) {
-  const mine = u.isLogin ? '<span class="badge info" title="The panel connects to this server as this user">panel login</span>' : '';
-  const kindBadge = u.kind === 'system' ? '<span class="badge">system</span>' : '';
+const osIcon = (path) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+const OS_ICON = {
+  shield: osIcon('<path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6z"/>'),
+  key: osIcon('<circle cx="8" cy="15" r="4"/><path d="M10.8 12.2 20 3M16 7l3 3M14 9l2 2"/>'),
+  lock: osIcon('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+  term: osIcon('<path d="m4 17 6-5-6-5"/><path d="M12 19h8"/>'),
+  clock: osIcon('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  users: osIcon('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6.5 6.5-6.5s6.5 2.9 6.5 6.5M16 4.5a3.5 3.5 0 0 1 0 7M18 13.7c2.1.8 3.5 2.9 3.5 5.3"/>'),
+};
+
+/** How this account signs in, in words: password, keys, both, or nothing usable. */
+function osLoginWords(u) {
+  if (!u.canLogin) return { text: 'Cannot log in (no shell)', tone: '' };
+  if (u.locked) return { text: 'Locked — logins refused', tone: 'err' };
+  if (u.password === 'empty') return { text: 'Empty password — anyone can log in', tone: 'err' };
+  const pw = u.password === 'set';
+  const keys = u.keys.length;
+  if (pw && keys) return { text: `Password and ${keys} SSH key${keys > 1 ? 's' : ''}`, tone: 'ok' };
+  if (pw) return { text: 'Password only', tone: '' };
+  if (keys) return { text: `${keys} SSH key${keys > 1 ? 's' : ''}, no password`, tone: 'ok' };
+  return { text: 'No password and no key', tone: u.kind === 'user' ? 'warn' : '' };
+}
+
+function osUserCard(u) {
   const locked = Boolean(u.locked);
-  const groups = u.groups.filter((g) => g !== 'sudo' && g !== u.name);
   const editable = u.kind !== 'system';
-  const actions = editable ? [
-    u.kind === 'user' ? ifCan('edit', `<button class="btn tiny" data-osu="edit" data-name="${esc(u.name)}">Edit</button>`) : '',
-    u.kind === 'root' ? ifCan('edit', `<button class="btn tiny" data-osu="password" data-name="${esc(u.name)}">Change password</button>`) : '',
-    `<button class="btn tiny" data-osu="keys" data-name="${esc(u.name)}">SSH keys</button>`,
-    u.kind === 'user' && !u.isLogin ? ifCan('edit', `<button class="btn tiny" data-osu="${locked ? 'unlock' : 'lock'}" data-name="${esc(u.name)}">${locked ? 'Unlock' : 'Lock login'}</button>`) : '',
-    u.kind === 'user' && !u.isLogin ? ifCan('delete', `<button class="btn tiny danger" data-osu="delete" data-name="${esc(u.name)}">Delete</button>`) : '',
-  ].filter(Boolean).join('') : '<span class="muted small">read-only</span>';
+  const login = osLoginWords(u);
+  const groups = u.groups.filter((g) => g !== 'sudo' && g !== u.name);
+  const role = u.kind === 'root' ? ['Superuser', 'warn']
+    : u.kind === 'system' ? ['System account', '']
+      : u.sudo ? [`Administrator${u.noPasswordSudo ? ' · sudo without password' : ''}`, 'warn'] : ['Standard user', ''];
+  const status = locked ? ['Locked', 'err'] : u.sessions ? [`Signed in${u.sessions > 1 ? ` ×${u.sessions}` : ''}`, 'ok'] : ['Offline', 'none'];
+  const last = u.sessions ? 'now' : u.lastLogin ? u.lastLogin.replace(/ [+-]\d{4}/, '') : u.lastLogin === null ? 'never' : '—';
 
-  return [
-    `<div class="osu-who">
-       <span class="osu-avatar ${u.kind}">${esc((u.fullName || u.name).slice(0, 1).toUpperCase())}</span>
-       <div><b>${esc(u.name)}</b> ${kindBadge} ${mine}
-         <div class="muted small">${u.fullName && u.fullName !== u.name ? `${esc(u.fullName)} · ` : ''}UID ${u.uid}</div></div>
-     </div>`,
-    u.sudo ? `<span class="badge warn">sudo${u.noPasswordSudo ? ' · no password' : ''}</span>` : '<span class="muted small">—</span>',
-    `${u.locked ? '<span class="badge err">locked</span> ' : ''}${osPasswordBadge(u)} ${u.keys.length ? `<span class="badge ok">${u.keys.length} key${u.keys.length > 1 ? 's' : ''}</span>` : ''}
-     ${!u.canLogin ? '<span class="badge">no shell</span>' : ''}`,
-    groups.length ? `<div class="chips osu-chips">${groups.slice(0, 4).map((g) => `<span class="chip">${esc(g)}</span>`).join('')}${groups.length > 4 ? `<span class="chip muted">+${groups.length - 4}</span>` : ''}</div>` : '<span class="muted small">—</span>',
-    `<code class="small">${esc(u.shell)}</code>`,
-    u.sessions ? `<span class="badge ok">${u.sessions} signed in</span>` : `<span class="muted small">${u.lastLogin ? esc(u.lastLogin.replace(/ [+-]\d{4}/, '')) : u.lastLogin === null ? 'never' : '—'}</span>`,
-    `<div class="row-actions">${actions}</div>`,
-  ];
+  const more = editable ? [
+    u.kind === 'root' ? ifCan('edit', `<button class="act-item" role="menuitem" data-osu="password" data-name="${esc(u.name)}">Change password</button>`) : '',
+    u.kind === 'user' && !u.isLogin ? ifCan('edit', `<button class="act-item" role="menuitem" data-osu="${locked ? 'unlock' : 'lock'}" data-name="${esc(u.name)}">${locked ? 'Unlock login' : 'Lock login'}</button>`) : '',
+    u.kind === 'user' && !u.isLogin ? ifCan('delete', `<hr class="act-sep" /><button class="act-item danger" role="menuitem" data-osu="delete" data-name="${esc(u.name)}">Delete user</button>`) : '',
+  ].filter(Boolean).join('') : '';
+
+  return `<div class="osu-card ${u.kind} ${locked ? 'locked' : ''}">
+    <div class="osu-card-top">
+      <span class="osu-avatar ${u.kind}">${esc((u.fullName || u.name).slice(0, 1).toUpperCase())}</span>
+      <div class="osu-card-name">
+        <b title="${esc(u.name)}">${esc(u.name)}</b>
+        <span class="muted small">${u.fullName && u.fullName !== u.name ? `${esc(u.fullName)} · ` : ''}UID ${u.uid}</span>
+      </div>
+      <span class="srv-pill ${status[1]}"><i aria-hidden="true"></i>${status[0]}</span>
+    </div>
+    ${u.isLogin ? '<div class="osu-panel-note">The panel connects to this server as this user</div>' : ''}
+    <ul class="osu-facts">
+      <li class="${role[1]}">${OS_ICON.shield}<span>${esc(role[0])}</span></li>
+      <li class="${login.tone}">${OS_ICON.key}<span>${esc(login.text)}</span></li>
+      <li>${OS_ICON.term}<span><code>${esc(u.shell)}</code></span></li>
+      <li>${OS_ICON.clock}<span>Last login: ${esc(last)}</span></li>
+      ${groups.length ? `<li>${OS_ICON.users}<span class="osu-card-groups">${groups.slice(0, 5).map((g) => `<span class="chip">${esc(g)}</span>`).join('')}${groups.length > 5 ? `<span class="chip muted">+${groups.length - 5}</span>` : ''}</span></li>` : ''}
+    </ul>
+    <div class="osu-card-foot">
+      ${!editable ? '<span class="muted small">Belongs to a package — read-only</span>' : `
+        ${u.kind === 'user' ? ifCan('edit', `<button class="btn tiny primary" data-osu="edit" data-name="${esc(u.name)}">Edit</button>`) : ''}
+        <button class="btn tiny" data-osu="keys" data-name="${esc(u.name)}">${OS_ICON.key} SSH keys${u.keys.length ? ` <b>${u.keys.length}</b>` : ''}</button>
+        ${more ? `<span class="osu-more"><button type="button" class="act-toggle" aria-haspopup="menu" aria-expanded="false" aria-label="More for ${esc(u.name)}"><span>More</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button><div class="act-menu" role="menu" hidden>${more}</div></span>` : ''}`}
+    </div>
+  </div>`;
 }
 
 function renderServerUsers() {
   const box = $('#users-panel');
   if (!box || !osUsers) return;
-  const people = osUsers.users.filter((u) => u.kind !== 'system');
-  const system = osUsers.users.filter((u) => u.kind === 'system');
-  const shown = osShowSystem ? osUsers.users : people;
+  const all = osUsers.users;
+  const people = all.filter(OS_PICKS.people);
+  const n = (k) => all.filter(OS_PICKS[k]).length;
   setTabCount('users', people.length);
 
   box.innerHTML = `
     <div class="section-head">
       <h2>Server users</h2>
       <div class="section-tools">
-        <label class="check osu-toggle"><input type="checkbox" data-osu-system ${osShowSystem ? 'checked' : ''} /> <span>Show ${system.length} system accounts</span></label>
         ${ifCan('create', '<button class="btn tiny primary" data-osu="add">+ Add user</button>')}
         <button class="btn tiny" data-osu="reload">Refresh</button>
       </div>
     </div>
-    <div class="msg ok osu-perm" style="margin:0 0 14px"><b>Permitted.</b> The panel logs in as <code>${esc(osUsers.login)}</code>, which can become root on this server.</div>
-    <div class="tiles" style="margin-bottom:14px">
-      ${tile('Users', String(people.length), 'root and people (UID ≥ 1000)')}
-      ${tile('Administrators', String(people.filter((u) => u.sudo).length), 'can use sudo')}
-      ${tile('SSH keys', String(people.reduce((n, u) => n + u.keys.length, 0)), `on ${people.filter((u) => u.keys.length).length} account(s)`)}
-      ${tile('Signed in now', String(people.reduce((n, u) => n + u.sessions, 0)), 'open sessions')}
+    <div class="srv-status osu-status">
+      <span class="srv-pill ok" title="The panel can manage accounts here"><i aria-hidden="true"></i>Permitted</span>
+      <span class="srv-fact">Signs in as <b>&nbsp;${esc(osUsers.login)}</b>, which can become root</span>
+      <span class="srv-fact"><b>${people.length}</b>&nbsp;user${people.length === 1 ? '' : 's'} · <b>${n('admins')}</b>&nbsp;admin${n('admins') === 1 ? '' : 's'} · <b>${people.reduce((t, u) => t + u.keys.length, 0)}</b>&nbsp;SSH key${people.reduce((t, u) => t + u.keys.length, 0) === 1 ? '' : 's'} · <b>${n('online')}</b>&nbsp;signed in</span>
     </div>
-    ${table(
-    [{ label: 'User' }, { label: 'Sudo' }, { label: 'Login' }, { label: 'Groups' }, { label: 'Shell' }, { label: 'Last login' }, { label: '' }],
-    shown.map(osUserRow),
-    'No users'
-  )}
-    <p class="muted small" style="margin:10px 0 0">root can only have its password and SSH keys changed. System accounts belong to packages and are shown read-only.
+    <div class="cron-toolbar">
+      <div class="seg" role="tablist" aria-label="Which accounts" id="osu-tabs">
+        ${[['people', 'People'], ['admins', 'Admins'], ['online', 'Signed in'], ['system', 'System']]
+    .map(([k, label]) => `<button type="button" role="tab" data-osu-pick="${k}" class="${osView.pick === k ? 'active' : ''}" aria-selected="${osView.pick === k}">${label} <span class="cron-count">${n(k)}</span></button>`).join('')}
+      </div>
+      ${searchBox('osu-q', 'Search name, group or shell', osView.q)}
+    </div>
+    <div id="osu-body"></div>
+    <p class="muted small" style="margin:12px 0 0">root can only have its password and SSH keys changed. System accounts belong to packages and are shown read-only.
       The account the panel logs in with cannot be deleted, locked or taken out of sudo.</p>`;
+  drawOsUserCards();
+}
+
+/** The cards for the chosen group and search, people with sessions first. */
+function drawOsUserCards() {
+  const body = $('#osu-body');
+  if (!body || !osUsers) return;
+  const q = osView.q.trim().toLowerCase();
+  const rank = (u) => (u.kind === 'root' ? 0 : u.isLogin ? 1 : u.sessions ? 2 : 3);
+  const shown = osUsers.users
+    .filter(OS_PICKS[osView.pick] || OS_PICKS.people)
+    .filter((u) => !q || `${u.name} ${u.fullName || ''} ${u.groups.join(' ')} ${u.shell}`.toLowerCase().includes(q))
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  body.innerHTML = shown.length
+    ? `<div class="osu-grid">${shown.map(osUserCard).join('')}</div>`
+    : `<div class="card cron-none"><p class="muted" style="margin:0">${q ? `No account matches “${esc(osView.q)}”.` : osView.pick === 'online' ? 'Nobody is signed in to this server right now.' : 'No accounts here.'}</p></div>`;
 }
 
 const osUser = (name) => osUsers?.users.find((u) => u.name === name) || null;
@@ -14744,10 +15334,20 @@ $('#view-server-detail').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-osu]');
   if (btn) osUserAction(btn);
 });
-$('#view-server-detail').addEventListener('change', (e) => {
-  if (!e.target.matches('[data-osu-system]')) return;
-  osShowSystem = e.target.checked;
-  renderServerUsers();
+$('#view-server-detail').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-osu-pick]');
+  if (!b) return;
+  osView.pick = b.dataset.osuPick;
+  $$('#osu-tabs [data-osu-pick]').forEach((x) => {
+    x.classList.toggle('active', x === b);
+    x.setAttribute('aria-selected', String(x === b));
+  });
+  drawOsUserCards();
+});
+$('#view-server-detail').addEventListener('input', (e) => {
+  if (e.target.id !== 'osu-q') return;
+  osView.q = e.target.value;
+  drawOsUserCards();
 });
 
 /* ------------------------------------------------------- the nginx tab */

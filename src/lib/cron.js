@@ -123,6 +123,10 @@ for unit in cron crond; do
     break
   fi
 done
+# The server's own clock: cron reads schedules in its time zone, not the browser's.
+echo "now=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "offset=$(date +%z)"
+echo "zone=$(date +%Z)"
 echo "users=$(ls -1 /var/spool/cron/crontabs 2>/dev/null | tr '\\n' ' ')$(ls -1 /var/spool/cron 2>/dev/null | tr '\\n' ' ')"
 echo '@@@usercrontabs'
 # Every user who has a crontab, and the crontab itself, framed by its name.
@@ -179,6 +183,17 @@ echo ok`;
       return { directory, name };
     }),
     recent: lines(s.lastruns).slice(-10),
+    clock: clockOf(kv),
+  };
+}
+
+/** "+0530" → 330: the offset the schedules are read in, and when the server thinks it is. */
+function clockOf(kv) {
+  const m = /^([+-])(\d{2})(\d{2})$/.exec(kv.offset || '');
+  return {
+    now: kv.now || null,
+    offsetMinutes: m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : null,
+    zone: kv.zone || null,
   };
 }
 

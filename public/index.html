@@ -49,12 +49,17 @@
 </head>
 <body class="booting">
 
-<!-- Only while the panel asks who is signed in: something to look at instead of a blank page. -->
-<div class="boot-screen" role="status" aria-busy="true">
-  <span class="sr-only">Loading…</span>
-  <i class="sk" style="width:180px;height:18px"></i>
-  <i class="sk" style="width:320px;height:10px"></i>
-  <i class="sk" style="width:260px;height:10px"></i>
+<!-- Only while the panel asks who is signed in: the launch screen, which fades into the page once it knows. -->
+<div class="boot-screen" role="status" aria-live="polite">
+  <div class="boot-glow" aria-hidden="true"></div>
+  <div class="boot-logo" aria-hidden="true">
+    <span class="boot-ring"></span>
+    <span class="boot-ring two"></span>
+    <span class="boot-tile"><svg class="boot-mark" viewBox="0 0 24 24"><path d="M12 2.5 19.5 20.5 12 16.6 4.5 20.5Z" fill="currentColor"/></svg></span>
+  </div>
+  <div class="boot-name"><strong>AJ Pilot</strong><small>autopilot for your servers</small></div>
+  <div class="boot-bar" aria-hidden="true"><span></span></div>
+  <p class="boot-note"><span class="sr-only">Loading AJ Pilot… </span><span class="boot-slow">Taking longer than usual — still connecting…</span></p>
 </div>
 
 <!-- ------------------------------------------------------- landing page -->
@@ -67,15 +72,12 @@
         <a href="#how">How it works</a>
         <a href="#server-setup">Server setup</a>
         <a href="#pricing" class="%%PRICING_HIDDEN%%" id="nav-pricing">Pricing</a>
-        <a href="#faq">FAQ</a>
         <a href="/docs">Docs</a>
-        <a href="/terms">Terms</a>
         <a href="#contact">Contact</a>
       </nav>
       <div class="landing-actions">
         <button type="button" class="icon-btn landing-theme-btn" id="btn-landing-theme" data-theme-flip aria-label="Switch to dark theme" title="Switch to dark theme"><span class="lt-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="lt-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg></span></button>
-        <button class="btn head-btn" id="btn-open-signin" aria-label="Sign in" title="Sign in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg><span class="head-btn-label">Sign in</span></button>
-        <button class="btn primary head-btn" id="btn-open-signup" aria-label="Sign up" title="Sign up — create a free account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="4"/><path d="M2 21c0-3.9 3.1-7 7-7s7 3.1 7 7"/><path d="M19 8v6M16 11h6"/></svg><span class="head-btn-label">Sign up</span></button>
+        <button class="btn primary head-btn" id="btn-open-signin" aria-label="Sign in" title="Sign in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/></svg><span class="head-btn-label">Sign in</span></button>
         <button class="btn primary head-btn hidden" id="btn-open-setup" aria-label="Get started" title="Get started"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4.5c3-1.3 6-1.5 6-1.5s-.2 3-1.5 6L13 14.5 9.5 11z"/><path d="M9.5 11 6 11.5 3.5 14l4 .8M13 14.5l-.5 3.5L10 20.5l-.8-4"/></svg><span class="head-btn-label">Get started</span></button>
         <button type="button" class="landing-burger" aria-controls="landing-nav" aria-expanded="false" aria-label="Menu"><span></span><span></span><span></span></button>
       </div>
@@ -1176,21 +1178,35 @@ sudo bash aj-pilot-setup.sh</code></pre>
         <p class="muted" id="detail-sub">—</p>
         <p class="muted small" id="detail-status">&nbsp;</p>
       </div>
-      <div class="actions">
-        <button class="btn" id="btn-detail-test">Test connection</button>
-        <button class="btn primary" id="btn-detail-terminal" data-needs="edit" title="Run commands on this server">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5"/><path d="M12 19h8"/></svg>
-          Open terminal
-        </button>
-        <button class="btn" id="btn-detail-edit" data-needs="edit">Edit server</button>
-        <button class="btn danger" id="btn-detail-reboot" data-needs="edit" title="Restart this server">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
-          Reboot
-        </button>
-        <button class="btn" id="btn-add-service" data-needs="create">+ Add service</button>
-        <button class="btn primary" id="btn-detail-refresh">Fetch system details</button>
-      </div>
     </header>
+    <!-- The everyday actions stay in view; editing, adding a service and rebooting sit under Manage. -->
+    <div class="actions" id="detail-actions" style="margin:-8px 0 22px">
+      <div class="ad-bar">
+        <button class="btn tiny primary" id="btn-detail-terminal" data-needs="edit" title="Run commands on this server">
+          <svg class="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 17 6-5-6-5"/><path d="M12 19h8"/></svg>Open terminal
+        </button>
+        <div class="ad-group" role="group" aria-label="Check the server">
+          <button class="btn tiny" id="btn-detail-test" title="Sign in over SSH and run one command">
+            <svg class="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17l9-10"/></svg>Test connection
+          </button>
+          <button class="btn tiny" id="btn-detail-refresh" title="Read the server's system profile again: OS, disks, memory, network, processes">
+            <svg class="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>Fetch details
+          </button>
+        </div>
+        <span class="ad-bar-gap"></span>
+        <div class="ad-manage" data-needs="edit">
+          <button type="button" class="act-toggle ad-manage-toggle" aria-haspopup="menu" aria-expanded="false">
+            <svg class="ad-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span>Manage</span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <div class="act-menu ad-menu" role="menu" hidden>
+            <button class="act-item" role="menuitem" id="btn-detail-edit" data-needs="edit"><span class="ad-item"><b>Edit server</b><small>name, address, SSH login, tags</small></span></button>
+            <button class="act-item" role="menuitem" id="btn-add-service" data-needs="create"><span class="ad-item"><b>Add a service</b><small>keep a program running, restarted if it crashes</small></span></button>
+            <hr class="act-sep" />
+            <button class="act-item danger" role="menuitem" id="btn-detail-reboot" data-needs="edit"><span class="ad-item"><b>Reboot the server</b><small>everything on it stops for a minute or two</small></span></button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="tab-layout">
       <nav class="tab-rail" id="detail-tabs"></nav>
       <div id="detail-body" class="tab-content"></div>

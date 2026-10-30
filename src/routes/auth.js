@@ -321,6 +321,9 @@ authRouter.post('/login', async (req, res, next) => {
     for (const c of candidates) if (verifyPassword(req.body.password, c.password_hash)) user = user || c;
     // The same answer, and the same time taken, either way — so this cannot be used to find out who has an account.
     if (!candidates.length) verifyPassword(req.body.password, DUMMY_HASH);
+    // Sign-up already says when an email or number is taken, so with sign-up open this
+    // tells nobody anything new — and sends a newcomer straight to creating an account.
+    if (!candidates.length && signupOpen()) return noAccount(res, byEmail ? 'email' : 'mobile number', 'login');
     if (!user) {
       return res.status(401).json({ error: `That ${byEmail ? 'email' : 'mobile number'} and password do not match an account` });
     }
@@ -331,6 +334,10 @@ authRouter.post('/login', async (req, res, next) => {
     res.json({ ok: true, user: await signIn(req, res, user) });
   } catch (err) { next(err); }
 });
+
+/** Nobody has signed up with this email or number: the sign-in card moves on to sign-up. */
+const noAccount = (res, what, field) => res.status(404)
+  .json({ error: `No account uses that ${what} yet — create one to get started.`, noAccount: true, field });
 
 /** Start the session and say who it is for — shared by every way of signing in. */
 async function signIn(req, res, user) {
@@ -364,7 +371,9 @@ authRouter.post('/login/otp', async (req, res, next) => {
     const wait = Math.max(loginByIp.hit(clientIp(req)), otpByPhone.hit(phoneDigits(phone.value)));
     if (wait) return tooMany(res, wait);
 
-    const known = (await usersByPhone(phone.value)).some((u) => u.status === 'active');
+    const users = await usersByPhone(phone.value);
+    if (!users.length && signupOpen()) return noAccount(res, 'mobile number', 'phone');
+    const known = users.some((u) => u.status === 'active');
     const challenge = await createChallenge({ purpose: 'login', payload: { phone: phone.value }, phone: phone.value, deliver: known });
     res.json({ ok: true, ...challenge });
   } catch (err) { next(err); }

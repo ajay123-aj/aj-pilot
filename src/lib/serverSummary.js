@@ -216,3 +216,80 @@ echo ok`;
     },
   };
 }
+
+/**
+ * The numbers beside a server page's tabs — what the page polls every few
+ * seconds, so it is the light cousin of collectSummary: counts only, nothing
+ * that leaves the machine (no public-IP lookup) and nothing slow (no certbot).
+ */
+export async function collectTabCounts(conn, server) {
+  const script = `export LC_ALL=C
+echo '@@@docker'
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  docker ps -a --format '{{.State}}' 2>/dev/null
+fi
+echo '@@@nginx'
+if command -v nginx >/dev/null 2>&1; then
+  echo "installed=yes"
+  echo "active=$(systemctl is-active nginx 2>/dev/null || echo unknown)"
+  echo "sites=$( (ls -1 /etc/nginx/sites-enabled 2>/dev/null; ls -1 /etc/nginx/conf.d/*.conf 2>/dev/null) | wc -l)"
+  nginx -t >/dev/null 2>&1 && echo "test=ok" || echo "test=fail"
+else
+  echo "installed=no"
+fi
+echo '@@@cron'
+if command -v crontab >/dev/null 2>&1; then
+  echo "installed=yes"
+  echo "active=$(systemctl is-active cron 2>/dev/null || systemctl is-active crond 2>/dev/null || echo unknown)"
+  echo "jobs=$(for u in $(ls -1 /var/spool/cron/crontabs 2>/dev/null; ls -1 /var/spool/cron 2>/dev/null); do
+      crontab -l -u "$u" 2>/dev/null
+    done | grep -vE '^[[:space:]]*(#|$)' | grep -vE '^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' | wc -l)"
+  echo "system=$(cat /etc/crontab /etc/cron.d/* 2>/dev/null | grep -vE '^[[:space:]]*(#|$)' | grep -vE '^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=' | wc -l)"
+else
+  echo "installed=no"
+fi
+echo '@@@services'
+echo "running=$(systemctl list-units --type=service --state=running --no-legend --plain 2>/dev/null | wc -l)"
+echo "failed=$(systemctl list-units --type=service --state=failed --no-legend --plain 2>/dev/null | wc -l)"
+echo '@@@runners'
+systemctl list-units --type=service --all --no-legend --plain 2>/dev/null \
+  | awk '$1 ~ /^(actions\.runner\.|gitlab-runner)/ {print $3}'
+echo '@@@users'
+# root and the people accounts (UID 1000 up to 60000) — the Users tab's own split.
+awk -F: '$3 == 0 || ($3 >= 1000 && $3 < 60000)' /etc/passwd 2>/dev/null | wc -l
+echo '@@@done'
+echo ok`;
+
+  const result = await rootExec(conn, server, script, { timeout: 30000 });
+  const s = splitSections(result.stdout);
+  if (!s.done) {
+    throw new Error(`Could not count what is on this server: ${(result.stderr || '').trim().slice(0, 200)}`);
+  }
+  const states = lines(s.docker).map((l) => l.toLowerCase());
+  const nginx = kv(s.nginx);
+  const cron = kv(s.cron);
+  const services = kv(s.services);
+  const runners = lines(s.runners);
+  return {
+    docker: {
+      running: states.filter((x) => x === 'running').length,
+      total: states.length,
+      problem: states.filter((x) => x === 'restarting' || x === 'dead').length,
+    },
+    nginx: {
+      installed: nginx.installed === 'yes',
+      running: nginx.active === 'active',
+      sites: num(nginx.sites),
+      configOk: nginx.test !== 'fail',
+    },
+    cron: {
+      installed: cron.installed === 'yes',
+      running: cron.active === 'active',
+      jobs: num(cron.jobs),
+      system: num(cron.system),
+    },
+    services: { running: num(services.running), failed: num(services.failed) },
+    runners: { units: runners.length, running: runners.filter((a) => a === 'active').length },
+    users: num(lines(s.users)[0]),
+  };
+}

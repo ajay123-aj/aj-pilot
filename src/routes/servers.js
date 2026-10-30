@@ -16,7 +16,7 @@ import {
 import { collectLiveStats, collectContainerStats, collectAllContainerStats, appUsage } from '../lib/liveStats.js';
 import { metricSeries, latestLevels } from '../lib/metrics.js';
 import { runnerState } from '../lib/runnerInstall.js';
-import { collectSummary } from '../lib/serverSummary.js';
+import { collectSummary, collectTabCounts } from '../lib/serverSummary.js';
 import {
   cronState, installCron, addJob, updateJob, deleteJob,
   validateUser, validateSchedule, validateCommand,
@@ -745,6 +745,37 @@ serversRouter.get('/:id/summary', serverRoute(async (conn, row, req) => {
     },
   };
 }));
+
+/**
+ * The numbers beside the server page's tabs, which the page asks for every few
+ * seconds. One light SSH pass, reused for a few seconds and shared by every
+ * page asking at once, so ten open tabs still cost one probe.
+ */
+const COUNTS_FRESH_MS = 5000;
+const countsCache = new Map(); // server id → { at, promise }
+
+serversRouter.get('/:id/counts', async (req, res, next) => {
+  try {
+    const row = await getRow(req.params.id, req.orgId);
+    if (!row) return res.status(404).json({ error: 'Server not found' });
+    const apps = await all('SELECT COUNT(*) AS n FROM apps WHERE server_id = ? AND org_id = ?', [row.id, req.orgId]);
+
+    let hit = countsCache.get(row.id);
+    const cached = Boolean(hit && Date.now() - hit.at < COUNTS_FRESH_MS);
+    if (!cached) {
+      hit = { at: Date.now(), promise: withConnection(connectionFromRow(row), (conn) => collectTabCounts(conn, row)) };
+      countsCache.set(row.id, hit);
+      // A failure is not kept: the next ask tries again.
+      hit.promise.catch(() => { if (countsCache.get(row.id) === hit) countsCache.delete(row.id); });
+    }
+    try {
+      const counts = await hit.promise;
+      res.json({ ok: true, at: new Date(hit.at).toISOString(), cached, counts: { ...counts, apps: Number(apps[0]?.n) || 0 } });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message, counts: { apps: Number(apps[0]?.n) || 0 } });
+    }
+  } catch (err) { next(err); }
+});
 
 /* ---------------------------------------------------------------- cron */
 

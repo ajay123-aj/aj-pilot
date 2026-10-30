@@ -9,6 +9,9 @@
 :root,
 :root[data-theme="dark"] {
   color-scheme: dark;
+  /* Loading shimmer: plain grey at low strength, so it stays in the background rather than glowing blue. */
+  --sk-base: rgba(255, 255, 255, .035);
+  --sk-shine: rgba(255, 255, 255, .07);
   --bg: #07080c;
   --bg-2: #0c0f16;            /* header, modals */
   --card: #10131b;            /* cards, tiles, tables */
@@ -50,6 +53,8 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
+  --sk-base: rgba(15, 23, 42, .05);
+  --sk-shine: rgba(15, 23, 42, .09);
   --bg: #f6f8fc;
   --bg-2: #ffffff;
   --card: #ffffff;
@@ -571,6 +576,41 @@ input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospa
 /* A card's title breaks between words, not inside a name, when badges share the row. */
 .card-head h3 .file-name { word-break: normal; overflow-wrap: anywhere; }
 
+/* A server card: name and address on the left, the health badge on the right,
+   then one bar that says whether it answers, how fast, and whether we can sign in. */
+.srv-ident { min-width: 0; }
+.srv-ident h3 { overflow-wrap: anywhere; }
+.srv-addr { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 3px; font-size: 12.5px; color: var(--muted); }
+.srv-addr code { font-size: 12px; background: none; padding: 0; color: inherit; overflow-wrap: anywhere; }
+.srv-auth {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+  padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface-2);
+}
+.srv-status {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px;
+  margin-top: 12px; padding: 8px 10px; min-height: 40px;
+  border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line-soft);
+  font-size: 12.5px; color: var(--muted);
+}
+.srv-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 650;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted);
+}
+.srv-pill i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+.srv-pill.ok { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
+.srv-pill.ok i { animation: live-pulse 2s ease-in-out infinite; }
+.srv-pill.err { color: var(--err); border-color: var(--err-line); background: var(--err-soft); }
+.srv-pill.warn { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
+.srv-pill .spinner { width: 9px; height: 9px; margin: 0; }
+.srv-fact { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.srv-fact svg { width: 14px; height: 14px; flex: none; opacity: .8; }
+.srv-fact b { font-weight: 600; color: var(--text); }
+.srv-fact.ok { color: var(--ok); }
+.srv-fact.warn, .srv-fact.warn b { color: var(--warn); }
+.srv-fact.err, .srv-fact.err b { color: var(--err); }
+@media (prefers-reduced-motion: reduce) { .srv-pill i { animation: none !important; } }
+
 .kv { display: grid; grid-template-columns: minmax(120px, 38%) 1fr; gap: 8px 14px; margin-top: 12px; }
 .kv dt { color: var(--muted); font-size: 12.5px; }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
@@ -788,6 +828,14 @@ td .badge { vertical-align: middle; }
 .live-kpi-sub + .live-kpi-sub { color: var(--muted); }
 /* The sparkline runs to the tile's edges and sits on its floor. */
 .live-spark { margin: auto -16px 0; padding-top: 10px; height: 50px; }
+/* A server's Live tab: no chart — the number, then a thin bar under it (as on a server card), then the details. */
+#live-panel .live-kpi { padding-bottom: 14px; }
+#live-panel .live-kpi-value { order: 1; margin-bottom: 8px; }
+#live-panel .live-spark { order: 2; height: auto; margin: 0 0 8px; padding: 0; }
+#live-panel .live-spark:empty { display: none; }
+#live-panel .live-spark .meter { height: 5px; margin: 0; }
+#live-panel .live-kpi-sub { order: 3; }
+#live-panel .live-kpi-sub + .live-kpi-sub { order: 4; }
 .spark { width: 100%; height: 40px; display: block; overflow: visible; }
 
 .live-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
@@ -835,6 +883,72 @@ td .badge { vertical-align: middle; }
 .live-table th:last-child, .live-table td:last-child { padding-right: 16px; }
 .live-table tbody tr:last-child td { border-bottom: 0; }
 .live-proc { font-family: var(--mono); font-size: 12px; }
+
+/* Live tab containers: filter chips and a search in the head, then a card each. */
+.live-card-head.live-ct-head { flex-wrap: wrap; gap: 8px 12px; }
+.live-ct-head .section-tools { flex: 1 1 420px; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.live-ct-head .chips { margin: 0; gap: 6px; }
+.live-ct-head .chip-btn { padding: 4px 11px; font-size: 12.5px; }
+.live-ct-head .chip-btn.ok:not(.active) b { color: var(--ok); }
+.live-ct-head .chip-btn.err:not(.active) { border-color: var(--err-line); color: var(--err); }
+.live-ct-head .chip-btn.err:not(.active) b { color: var(--err); }
+.live-ct-head .search-box { flex: 0 1 240px; }
+.lct-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; padding: 14px 16px 16px; }
+.lct-card {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  padding: 13px 14px; border-radius: var(--radius-sm);
+  background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line);
+}
+.lct-card.ok { border-left-color: var(--ok); }
+.lct-card.warn { border-left-color: var(--warn); }
+.lct-card.err { border-left-color: var(--err); background: linear-gradient(var(--err-soft), var(--err-soft)), var(--card); }
+.lct-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.lct-ident { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.lct-name {
+  display: block; max-width: 100%; padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  font: inherit; font-size: 14px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lct-name:hover, .lct-name:focus-visible { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; outline: none; }
+.lct-image { font-family: var(--mono); font-size: 11px; color: var(--muted); background: none; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lct-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.lct-ports { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.lct-ports code { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--line-soft); }
+/* CPU and memory: the same small meters as a server card. */
+.lct-card .usage.lct-usage { margin-top: 0; padding-top: 10px; border-top-color: var(--line-soft); }
+
+/* Mini bar charts of recent readings (Docker tab container cards). */
+.ucharts { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; min-width: 0; }
+.ucharts-head { display: flex; justify-content: space-between; gap: 6px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.ucharts-head b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.mbars {
+  display: block; width: 100%; height: 34px; border-radius: 4px;
+  background: repeating-linear-gradient(to top, transparent 0 10px, var(--line-soft) 10px 11px);
+  border-bottom: 1px solid var(--line);
+}
+.mbars rect { fill: var(--accent); opacity: .55; transition: height .3s ease, y .3s ease; }
+.mbars rect.now { opacity: 1; }
+.mbars rect.none { fill: var(--line); opacity: 1; }
+.mbars.warn rect:not(.none) { fill: var(--warn); }
+.mbars.err rect:not(.none) { fill: var(--err); }
+.ct-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding-top: 8px; border-top: 1px dashed var(--line-soft); }
+.ct-charts > div { min-width: 0; }
+/* Network now, disk traffic, processes: a label over its numbers, in one row. */
+.lct-facts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; }
+.lct-facts > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lct-facts em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lct-facts b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Live tab placeholders, until the first sample. */
+.live-sk-rows { display: grid; gap: 14px; padding: 4px 0; }
+.live-card.flush .live-sk-rows { padding: 14px 16px; }
+.live-sk-row { display: grid; grid-template-columns: 90px 1fr 40px; align-items: center; gap: 12px; }
+.live-sk-row.procs { grid-template-columns: 1fr 50px 50px; }
+.live-sk-row .meter { margin: 0; }
+.sk.live-sk-spark { display: block; border-radius: 6px; opacity: .6; }
+.live-stalled .sk { animation: none; opacity: .35; }
+.lct-idle { margin: 0; font-size: 12.5px; color: var(--muted); }
+.lct-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+@media (max-width: 640px) { .lct-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } }
 
 .live-ct { display: flex; align-items: flex-start; gap: 10px; min-width: 180px; }
 .live-ct-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--muted); opacity: .6; }
@@ -1355,12 +1469,70 @@ form .otp-boxes input {
    signed in (the panel). Nothing is drawn until the answer arrives, so the
    landing page never flashes at somebody who is already signed in. */
 body.booting .landing, body.booting .sidebar, body.booting .shell, body.booting .gate { display: none; }
-.boot-screen { display: none; }
-body.booting .boot-screen {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 14px; min-height: 100vh; padding: 0 16px;
+/* The launch screen: the logo flying inside two widening rings, the name, and a
+   sweeping bar. It lies over the page and fades out once the answer arrives. */
+.boot-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+  padding: 0 16px; background: var(--bg); overflow: hidden;
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .45s ease, visibility 0s linear .45s;
 }
-.boot-screen .sk { max-width: 100%; }
+body.booting .boot-screen { opacity: 1; visibility: visible; pointer-events: auto; transition: none; }
+.boot-glow {
+  position: absolute; width: 520px; height: 520px; max-width: 120vw; max-height: 120vw; border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-soft) 0%, transparent 65%);
+  animation: boot-breathe 3.2s ease-in-out infinite;
+}
+.boot-logo { position: relative; width: 84px; height: 84px; display: grid; place-items: center; animation: boot-in .6s cubic-bezier(.2, .8, .2, 1) both; }
+.boot-tile {
+  position: relative; z-index: 1; width: 84px; height: 84px; border-radius: 24px;
+  display: grid; place-items: center; color: #fff;
+  background: linear-gradient(120deg, #1e40af 0%, #2563eb 50%, #3b82f6 100%);
+  box-shadow: 0 18px 40px -14px rgba(37, 99, 235, .75), inset 0 1px 0 rgba(255, 255, 255, .25);
+  overflow: hidden;
+}
+/* A light sweeping across the tile now and then. */
+.boot-tile::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, .35) 50%, transparent 65%);
+  transform: translateX(-120%); animation: boot-shine 2.4s ease-in-out .6s infinite;
+}
+.boot-mark { width: 46px; height: 46px; transform: rotate(45deg); animation: boot-fly 2.4s ease-in-out infinite; }
+.boot-ring {
+  position: absolute; inset: 0; border-radius: 26px; border: 2px solid var(--accent);
+  opacity: 0; animation: boot-ring 2.4s cubic-bezier(.2, .6, .3, 1) infinite;
+}
+.boot-ring.two { animation-delay: 1.2s; }
+.boot-name { position: relative; text-align: center; animation: boot-in .6s cubic-bezier(.2, .8, .2, 1) .12s both; }
+.boot-name strong { display: block; font-size: 24px; font-weight: 800; letter-spacing: -.01em; color: var(--text); }
+.boot-name small { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.boot-bar {
+  position: relative; width: 180px; height: 3px; border-radius: 99px; overflow: hidden;
+  background: var(--line); animation: boot-in .6s ease .24s both;
+}
+.boot-bar span {
+  position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: boot-sweep 1.3s ease-in-out infinite;
+}
+.boot-note { position: relative; margin: 0; min-height: 18px; font-size: 12.5px; color: var(--muted); }
+/* Only said when the answer is slow to come: a busy server or a poor connection. */
+.boot-slow { opacity: 0; animation: boot-in .4s ease 6s forwards; }
+
+@keyframes boot-in { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes boot-fly {
+  0%, 100% { transform: rotate(45deg) translate(0, 0); }
+  50% { transform: rotate(45deg) translate(2px, -3px); }
+}
+@keyframes boot-ring { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(1.75); opacity: 0; } }
+@keyframes boot-shine { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(120%); } }
+@keyframes boot-sweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
+@keyframes boot-breathe { 0%, 100% { transform: scale(.92); opacity: .75; } 50% { transform: scale(1.05); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .boot-screen *:not(.boot-slow), .boot-screen *::after { animation: none !important; }
+  .boot-ring { display: none; }
+}
 /* The whole panel column goes while signed out — left in place, its room for the
    sidebar pushed the landing page sideways and past the right edge. */
 body.signed-out .sidebar, body.signed-out .shell { display: none; }
@@ -2479,8 +2651,8 @@ kbd { display: inline-block; padding: 1px 6px; font: 600 11px ui-monospace, SFMo
 .nlog-skel-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .nlog-skel {
   border-radius: var(--radius);
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
-  background-size: 200% 100%; animation: nlog-shimmer 1.4s linear infinite;
+  background: linear-gradient(90deg, var(--sk-base) 30%, var(--sk-shine) 50%, var(--sk-base) 70%);
+  background-size: 200% 100%; animation: nlog-shimmer 1.8s ease-in-out infinite;
 }
 @keyframes nlog-shimmer { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) { .nlog-skel { animation: none; } }
@@ -2510,8 +2682,8 @@ body.term-full-open { overflow: hidden; }
 .sk-wrap { grid-column: 1 / -1; display: grid; gap: 16px; }
 .sk {
   display: block; height: 10px; border-radius: 6px; max-width: 100%;
-  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
-  background-size: 200% 100%; animation: nlog-shimmer 1.4s linear infinite;
+  background: linear-gradient(90deg, var(--sk-base) 30%, var(--sk-shine) 50%, var(--sk-base) 70%);
+  background-size: 200% 100%; animation: nlog-shimmer 1.8s ease-in-out infinite;
 }
 .sk.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .sk.pill { height: 20px; border-radius: 99px; }
@@ -3309,3 +3481,150 @@ a.ct-port:hover { background: var(--accent); color: var(--accent-contrast); }
 }
 .su-cmd pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
 .su-cmd .su-copy { position: absolute; top: 9px; right: 9px; padding: 5px 12px; font-size: 12px; min-height: 0; }
+
+/* ---------------------------------------------------------- cron tab */
+.err-text { color: var(--err) !important; }
+.cron-status { margin: 0 0 12px; }
+.cron-status .srv-fact .muted { font-weight: 400; }
+.cron-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.cron-toolbar .seg button { padding: 6px 12px; font-size: 12.5px; }
+.cron-count {
+  display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 99px;
+  font-size: 11px; line-height: 17px; text-align: center; background: var(--surface-3, var(--line)); color: var(--muted);
+}
+.seg button.active .cron-count { background: var(--accent-soft); color: var(--accent); }
+.cron-settings { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.cron-settings svg { width: 14px; height: 14px; flex: none; }
+.cron-list { display: grid; gap: 10px; }
+.cron-job {
+  display: grid; grid-template-columns: minmax(200px, 1.15fr) minmax(150px, .75fr) minmax(0, 2fr) auto;
+  align-items: center; gap: 16px; padding: 14px 16px;
+  background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius-sm);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.cron-job:hover { box-shadow: var(--shadow-sm); }
+.cron-job.ro { border-left-color: var(--line); }
+.cron-when { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cron-ico {
+  flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+}
+.cron-job.ro .cron-ico { background: var(--surface-2); color: var(--muted); }
+.cron-ico svg { width: 19px; height: 19px; }
+.cron-when-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cron-when-text b { font-size: 14px; font-weight: 650; }
+.cron-when-text code { font-size: 11.5px; color: var(--muted); background: none; padding: 0; letter-spacing: .04em; }
+.cron-next { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cron-next em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.cron-next b { font-size: 13.5px; font-weight: 650; color: var(--ok); }
+.cron-next span { font-size: 12px; color: var(--muted); }
+.cron-cmd {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 6px 6px 6px 10px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line-soft);
+}
+.cron-cmd code {
+  flex: 1; min-width: 0; font-size: 12px; background: none; padding: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cron-job:hover .cron-cmd code { white-space: normal; overflow-wrap: anywhere; }
+.cron-cmd .btn { flex: none; }
+.cron-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.cron-user {
+  font-size: 11.5px; font-weight: 600; padding: 1px 9px; border-radius: 99px;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--text);
+}
+.cron-user::before { content: "👤 "; }
+.cron-actions { display: flex; gap: 6px; }
+.cron-src { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cron-empty { text-align: center; padding: 34px 20px; }
+.cron-empty h3 { margin: 10px 0 4px; }
+.cron-empty p { margin: 0 auto 16px; max-width: 460px; }
+.cron-empty-icon {
+  width: 56px; height: 56px; margin: 0 auto; border-radius: 16px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+}
+.cron-empty-icon svg { width: 28px; height: 28px; }
+.cron-none { padding: 18px; }
+.cron-scripts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.cron-script-col { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--line); min-width: 0; }
+.cron-script-head { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding-bottom: 8px; margin-bottom: 2px; border-bottom: 1px solid var(--line-soft); }
+.cron-script-head .muted { grid-column: 1 / 2; }
+.cron-script-head .cron-count { grid-row: 1 / 3; grid-column: 2; align-self: center; }
+.cron-script code { font-size: 12px; background: none; padding: 0; overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .cron-job { grid-template-columns: minmax(0, 1fr) auto; }
+  .cron-cmd { grid-column: 1 / -1; }
+  .cron-side { grid-column: 1 / -1; flex-direction: row; justify-content: space-between; align-items: center; }
+  .cron-scripts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .cron-job { grid-template-columns: minmax(0, 1fr); }
+  .cron-scripts { grid-template-columns: minmax(0, 1fr); }
+  .cron-toolbar .seg { overflow-x: auto; max-width: 100%; }
+}
+
+/* ------------------------------------------- a service's action bar */
+.ad-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line);
+}
+.ad-bar .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; }
+.ad-ico { width: 15px; height: 15px; flex: none; }
+.ad-bar-gap { flex: 1 1 auto; }
+/* Stop / Start and Restart: one control in two halves. */
+.ad-group { display: inline-flex; }
+.ad-group > .btn { border-radius: 0; }
+.ad-group > .btn:first-child { border-radius: 8px 0 0 8px; }
+.ad-group > .btn:last-child { border-radius: 0 8px 8px 0; }
+.ad-group > .btn + .btn { margin-left: -1px; }
+.ad-group > .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.ok-btn { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
+.ad-icon-btn { width: 32px; padding: 0 !important; justify-content: center; }
+.ad-manage-toggle { height: 32px; }
+.ad-manage-toggle .ad-ico { color: var(--muted); }
+.act-menu.ad-menu { min-width: 260px; max-width: 320px; white-space: normal; }
+.ad-item { display: flex; flex-direction: column; gap: 1px; }
+.ad-item b { font-weight: 600; font-size: 13px; }
+.ad-item small { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+.act-item.danger .ad-item small { color: var(--err); opacity: .75; }
+@media (max-width: 560px) {
+  .ad-bar-gap { display: none; }
+  .ad-bar > .btn.primary { flex: 1 1 100%; justify-content: center; }
+}
+#ad-actions > .ad-bar { flex: 1 1 100%; }
+
+/* ------------------------------------------------- server users, as cards */
+.osu-status { margin: 0 0 12px; }
+.osu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.osu-card {
+  display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 14px 16px;
+  background: var(--card); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: var(--radius-sm);
+  transition: box-shadow .15s ease;
+}
+.osu-card:hover { box-shadow: var(--shadow-sm); }
+.osu-card.root { border-top-color: var(--warn); }
+.osu-card.system { border-top-color: var(--line); }
+.osu-card.locked { border-top-color: var(--err); }
+.osu-card-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.osu-card .osu-avatar { width: 40px; height: 40px; flex: 0 0 40px; font-size: 16px; border-radius: 12px; }
+.osu-card-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.osu-card-name b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.osu-panel-note {
+  font-size: 11.5px; font-weight: 600; color: var(--accent); background: var(--accent-soft);
+  border: 1px solid var(--accent-ring); border-radius: 8px; padding: 4px 9px; align-self: flex-start;
+}
+.osu-facts { list-style: none; margin: 0; padding: 10px 0 0; display: grid; gap: 7px; border-top: 1px solid var(--line-soft); }
+.osu-facts li { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; color: var(--text-2, var(--text)); min-width: 0; }
+.osu-facts li > svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--muted); }
+.osu-facts li > span { min-width: 0; overflow-wrap: anywhere; }
+.osu-facts li.ok, .osu-facts li.ok > svg { color: var(--ok); }
+.osu-facts li.warn, .osu-facts li.warn > svg { color: var(--warn); }
+.osu-facts li.err, .osu-facts li.err > svg { color: var(--err); }
+.osu-facts code { font-size: 11.5px; background: none; padding: 0; }
+.osu-card-groups { display: flex; flex-wrap: wrap; gap: 4px; }
+.osu-card-groups .chip { padding: 1px 8px; font-size: 11px; }
+.osu-card-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.osu-card-foot .btn svg { width: 13px; height: 13px; }
+.osu-card-foot .btn { display: inline-flex; align-items: center; gap: 5px; }
+.osu-more { margin-left: auto; }
+.osu-more .act-toggle { height: 28px; }

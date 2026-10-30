@@ -69,11 +69,11 @@ ${THEME}
   <div class="landing-head-inner">
     <a class="landing-brand" href="/" aria-label="AJ Pilot home"><span class="logo" aria-hidden="true">${LOGO}</span><span><strong>AJ Pilot</strong><small>autopilot for your servers</small></span></a>
     <nav class="landing-nav" id="landing-nav" aria-label="Main">
-      <a href="/#features">Features</a><a href="/#how">How it works</a><a href="/docs/ubuntu-server-setup"${path === '/docs/ubuntu-server-setup' ? ' class="active"' : ''}>Server setup</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/docs"${active === 'docs' ? ' class="active"' : ''}>Docs</a><a href="/terms"${active === 'terms' ? ' class="active"' : ''}>Terms</a><a href="/#contact">Contact</a>
+      <a href="/#features">Features</a><a href="/#how">How it works</a><a href="/docs/ubuntu-server-setup"${path === '/docs/ubuntu-server-setup' ? ' class="active"' : ''}>Server setup</a><a href="/#pricing">Pricing</a><a href="/docs"${active === 'docs' ? ' class="active"' : ''}>Docs</a><a href="/#contact">Contact</a>
     </nav>
     <div class="landing-actions">
       <button type="button" class="icon-btn landing-theme-btn" id="btn-landing-theme" aria-label="Switch theme" title="Switch theme"><span class="lt-sun" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg></span><span class="lt-moon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z"/></svg></span></button>
-      <a class="btn" href="/#signin">Sign in</a>
+      <a class="btn primary" href="/#signin">Sign in</a>
       <button type="button" class="landing-burger" aria-controls="landing-nav" aria-expanded="false" aria-label="Menu"><span></span><span></span><span></span></button>
     </div>
   </div>

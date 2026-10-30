@@ -71,7 +71,8 @@ Source: [src/routes/auth.js](../src/routes/auth.js)
 | `POST` | `/api/auth/signup` | public | Anyone can create their own organisation, in three steps |
 | `POST` | `/api/auth/signup/verify` | public | Step 2 |
 | `POST` | `/api/auth/otp/resend` | public | A new code for a sign-up or sign-in that is waiting on one |
-| `POST` | `/api/auth/login` | public | Sign in with an email or a mobile number and the password, then a one-time code |
+| `POST` | `/api/auth/login` | public | Sign in with an email or a mobile number and the password. `{ login, password }` → `{ ok, user }`. Wrong password → `401`. No account with that email/number **and sign-up open** → `404 { error, noAccount: true, field: "login" }` (the UI opens sign-up pre-filled); with sign-up closed, the same `401` as a wrong password |
+| `POST` | `/api/auth/login/otp` | public | Send a sign-in code to a mobile number. No account on that number **and sign-up open** → `404 { error, noAccount: true, field: "phone" }`; otherwise the same answer whether or not the number is known |
 | `POST` | `/api/auth/login/verify` | public | Step 2 of signing in |
 | `POST` | `/api/auth/verify-email/resend` | public | Send the verification link again |
 | `POST` | `/api/auth/logout` | signed in |  |
@@ -191,7 +192,8 @@ Source: [src/routes/servers.js](../src/routes/servers.js)
 | `DELETE` | `/api/servers/:id/docker/volumes/:name` | delete | Remove a named volume — with the data in it |
 | `DELETE` | `/api/servers/:id/docker/networks/:name` | delete |  |
 | `GET` | `/api/servers/:id/summary` | view | What is on this server, counted — one SSH pass for the Overview tab |
-| `GET` | `/api/servers/:id/cron` | view | Everything scheduled on this server, wherever it is written down |
+| `GET` | `/api/servers/:id/counts` | view | The numbers beside the server page's tabs, in one light SSH pass (no outside calls, no certbot): `{ counts: { apps, docker: { running, total, problem }, nginx: { installed, running, sites, configOk }, cron: { installed, running, jobs, system }, services: { running, failed }, runners: { units, running }, users }, at, cached }`. The page asks every 8 s while it is open; answers are reused for 5 s per server, so several open pages cost one probe |
+| `GET` | `/api/servers/:id/cron` | view | Everything scheduled on this server, wherever it is written down. Also `clock: { now, offsetMinutes, zone }` — the server's time (ISO), its UTC offset and zone name — so the UI can say when each job runs next on the server's own clock |
 | `POST` | `/api/servers/:id/cron/install` | create |  |
 | `POST` | `/api/servers/:id/cron/jobs` | create | Add a job to a user's crontab |
 | `PUT` | `/api/servers/:id/cron/jobs` | edit | Change one job |

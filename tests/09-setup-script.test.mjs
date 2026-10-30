@@ -130,6 +130,9 @@ describe('setup file download', () => {
     assert.match(home, /id="server-setup"/);
     assert.match(home, /\/setup\/aj-pilot-setup\.sh/);
     assert.ok(!home.includes('%%SITE_URL%%'));
+    const nav = home.match(/<nav class="landing-nav"[\s\S]*?<\/nav>/)[0];
+    assert.ok(!/#faq|\/terms/.test(nav), 'FAQ and Terms live in the footer only');
+    assert.ok(!home.includes('id="btn-open-signup"'), 'the header has Sign in only');
     const doc = await (await new Client().raw('GET', '/docs/ubuntu-server-setup')).text();
     assert.match(doc, /curl -fsSL https?:\/\/[^/]+\/setup\/aj-pilot-setup\.sh/);
   });

@@ -25,12 +25,17 @@ describe('sign-in with email and password', () => {
     expectStatus(await c.get('/api/platform/dashboard'), 200);
   });
 
-  it('refuses a wrong password with the same answer as an unknown account', async () => {
+  it('refuses a wrong password, and sends an unknown email or number on to sign-up', async () => {
     const a = await new Client().post('/api/auth/login', { login: OWNER.email, password: 'Wrong-Pass-999' });
-    const b = await new Client().post('/api/auth/login', { login: `nobody.${uid()}@test.local`, password: 'Wrong-Pass-999' });
     assert.equal(a.status, 401);
-    assert.equal(b.status, 401);
-    assert.equal(a.body.error, b.body.error);
+    assert.equal(a.body.noAccount, undefined);
+    const b = await new Client().post('/api/auth/login', { login: `nobody.${uid()}@test.local`, password: 'Wrong-Pass-999' });
+    assert.equal(b.status, 404);
+    assert.equal(b.body.noAccount, true);
+    assert.equal(b.body.field, 'login');
+    const c = await new Client().post('/api/auth/login', { login: phone(), password: 'Wrong-Pass-999' });
+    assert.equal(c.status, 404);
+    assert.equal(c.body.noAccount, true);
   });
 
   it('validates the fields', async () => {
@@ -91,13 +96,11 @@ describe('sign-in with mobile and code', () => {
     assert.equal(c.user.email, org.email);
   });
 
-  it('answers the same for a number with no account, then says so only after the code', async () => {
-    const c = new Client();
-    const first = expectStatus(await c.post('/api/auth/login/otp', { phone: phone() }), 200);
-    assert.equal(first.otpRequired, true, 'looks like any other number');
-    const r = await c.post('/api/auth/login/verify', { challenge: first.challenge, otp: OTP });
+  it('sends a number with no account on to sign-up', async () => {
+    const r = await new Client().post('/api/auth/login/otp', { phone: phone() });
     assert.equal(r.status, 404);
-    assert.equal(r.body.restart, true);
+    assert.equal(r.body.noAccount, true);
+    assert.equal(r.body.field, 'phone');
   });
 
   it('a number on two accounts must sign in with email', async () => {

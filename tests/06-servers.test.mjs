@@ -200,6 +200,16 @@ describe('servers over SSH', { skip: !SSH && 'no SSH test server (Docker not ava
     });
   });
 
+  describe('tab counts', () => {
+    it('counts what is on the server in one call, and shares it for a few seconds', async () => {
+      const first = expectStatus(await viewer.get(`/api/servers/${server.id}/counts`), 200);
+      for (const key of ['apps', 'docker', 'nginx', 'cron', 'services', 'runners', 'users']) assert.ok(key in first.counts, key);
+      assert.ok(first.counts.users >= 1, 'at least root');
+      const again = expectStatus(await viewer.get(`/api/servers/${server.id}/counts`), 200);
+      assert.equal(again.cached, true);
+    });
+  });
+
   describe('cron', () => {
     it('adds and removes a job', async () => {
       const marker = `cron-${uid()}`;
@@ -208,6 +218,12 @@ describe('servers over SSH', { skip: !SSH && 'no SSH test server (Docker not ava
       assert.ok(list.includes(marker));
       expectStatus(await org.admin.del(`/api/servers/${server.id}/cron/jobs`, { user: 'deploy', old_line: `*/5 * * * * echo ${marker}` }), 200, 'remove job');
       assert.ok(!JSON.stringify((await viewer.get(`/api/servers/${server.id}/cron`)).body).includes(marker));
+    });
+
+    it('says what time the server thinks it is, for the next-run times', async () => {
+      const { cron: c } = expectStatus(await viewer.get(`/api/servers/${server.id}/cron`), 200);
+      assert.ok(Number.isInteger(c.clock.offsetMinutes), JSON.stringify(c.clock));
+      assert.ok(Math.abs(Date.parse(c.clock.now) - Date.now()) < 10 * 60000, 'the server clock is roughly now');
     });
 
     it('refuses an invalid schedule', async () => {

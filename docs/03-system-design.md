@@ -249,6 +249,7 @@ sequenceDiagram
 |----------|----------|---------|
 | App cards | `GET /api/apps/stats` — one SSH session per server, every app on it in one pass; a failing server only marks its own apps | Browser polls every 20 s while the list is visible |
 | App *Live stats* tab | `GET /api/apps/:id/stats/stream` (SSE), same lifecycle as the server stream, capped by `APP_STATS_STREAMS_PER_ORG` | Every 5 s |
+| Server page tab counts | `GET /api/servers/:id/counts` — `serverSummary.collectTabCounts`, one SSH pass with counts only (containers, nginx sites + `nginx -t`, cron lines, systemd running/failed, runner units, people accounts) plus the app count from the database; the result (or the in-flight probe) is shared per server for 5 s | Browser polls every 8 s while the server page is visible; skipped in a hidden tab |
 
 Network and block I/O come back as totals since the container started; the browser turns two samples into a rate.
 

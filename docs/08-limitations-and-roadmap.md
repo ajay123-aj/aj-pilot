@@ -30,6 +30,7 @@ Everything in sections 1–3 was observed in the code. Section 4 is a recommenda
 | No rollback to a previous release | Redeploy builds the current branch head; there is no "deploy this earlier SHA" |
 | Terminal permission | Editors can open a shell, which is broader than "never delete". Needs a product decision |
 | `projects` table is unused | Left from an early design; can be dropped |
+| No server history chart in the UI | The server *Statistics* chart (CPU, memory, disk over a day, week or month) was taken off the Live tab on request. Samples are still recorded (they drive the cards' health level) and `GET /api/servers/:id/metrics` still answers, so the chart can come back elsewhere, for example on the Overview, if wanted |
 
 ## 3. Engineering health
 

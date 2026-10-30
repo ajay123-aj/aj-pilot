@@ -60,9 +60,19 @@ The import only ever runs into an empty database, so it cannot overwrite live da
 
 Anyone who opens the panel without a session gets a landing page rather than a bare login box: what the
 tool does, how it works, what it does with your secrets, and who it is for — with **Sign in** in the header
-and at the foot of the page. The sign-in card opens over it, and closes again with Escape or a click
-outside. On a panel that has never been set up, those buttons say **Set up your panel** instead and open the
-first-run form.
+and at the foot of the page. The header menu keeps to Features, How it works, Server setup, Pricing, Docs and
+Contact; **FAQ** and **Terms & Conditions** are linked from the foot of the page. The sign-in card opens over
+it, and closes again with Escape or a click outside. On a panel that has never been set up, those buttons say
+**Set up your panel** instead and open the first-run form.
+
+**No account yet?** Just sign in with your email (or mobile number). If no account uses it, the card says so
+and switches straight to **Create your account**, with your email or number already filled in — so there is
+no separate sign-up button to look for. (On a panel where sign-up is turned off you are told to ask an admin
+instead.)
+
+While the page first loads it shows a short launch screen — the AJ Pilot logo with a gentle animation
+and a loading bar — which fades into the front page or the panel as soon as it knows whether you are signed
+in. If that takes more than a few seconds, it says it is still connecting.
 
 Signed in, the landing page is replaced by the panel itself.
 
@@ -146,8 +156,13 @@ organisation under whatever name you type. The console says so when it happens:
 The **×** in the popup's top corner, or the **Esc** key, closes it at any step — choosing how to start,
 the setup guide, or the form — without saving anything.
 
-Use **Fetch system details** any time to re-read a server. Each collection is stored as a snapshot in
-`server_facts`, so you keep a history of how a machine changed.
+Use **Fetch details** on a server's page any time to re-read it. Each collection is stored as a snapshot,
+so you keep a history of how a machine changed.
+
+A server's page has one bar of actions above its tabs, laid out like a custom service's: **Open terminal**
+(highlighted), **Test connection** and **Fetch details** joined as one control, and on the right **Manage ▾**
+with **Edit server**, **Add a service** and — below a divider, in red — **Reboot the server**, each with a
+line saying what it does. Reboot still asks for a clear yes first.
 
 ### Setting up a new machine with one file
 
@@ -209,7 +224,7 @@ loss → Power On*). The guide shows where to find it.
 
 ### Editing a server
 
-**Edit** on a server's card — or **Edit server** on its own page — reopens that form with everything filled
+**Edit** on a server's card — or **Manage → Edit server** on its own page — reopens that form with everything filled
 in: name, host, port, SSH user, authentication, tags and notes. The secret boxes come up empty and say
 _unchanged_; typing in one replaces what is stored, leaving it empty keeps it. **Test connection** works
 here too, so a moved host or a rotated password can be checked before it is saved. Renaming to a name
@@ -254,12 +269,17 @@ rail stays put as you scroll a long panel, and folds into a scrolling row of tab
 | Nginx     | nginx and certbot, every domain it serves and whether each one is on SSL — [Nginx and SSL](#nginx-and-ssl)  |
 | Cron      | everything scheduled on the machine, with add, edit and delete — [Scheduled jobs](#scheduled-jobs)          |
 | Services  | every systemd unit, live — [Services](#services)                                                            |
+| Users     | the Ubuntu accounts on the machine, as cards, with add, edit, SSH keys, lock and delete — [Server users](#server-users) |
 | Runners   | the CI runners installed on this server — [CI runners](#ci-runners)                                         |
 
 Overview, Storage, Network, Processes and System come from the stored profile and are instant. The rest talk
 to the server, so they are only fetched when you first open them — opening a server no longer starts several
-SSH sessions at once — and each carries a count once loaded (live CPU, apps, running services, running
-containers, runners), with a red marker when something has failed. Creating a service, installing something
+SSH sessions at once. **The counts beside the tabs do not wait for that**: as soon as a server's page opens,
+one quick check fills in Apps, Docker (running containers), Nginx (sites), Cron (jobs), Users (people who can
+sign in), Services (running) and Runners (running), and it repeats every 8 seconds while the page is on screen
+— it pauses when the browser tab is in the background. A count turns red when something there needs
+attention: a failed service, a stopped runner, a restarting container, an nginx config that does not pass
+its test, or cron not running. Live shows the CPU once you open it. Creating a service, installing something
 or adding a runner drops you on the tab that now shows it.
 
 ### On this server
@@ -307,18 +327,33 @@ throughput and disk I/O are real rates rather than guesses from single readings.
 
 |             |                                                                                                            |
 | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| CPU         | busy percentage with a five-minute sparkline, time waiting on disk, steal time on a VM, and a bar per core |
-| Memory      | used against total (from `MemAvailable`, not "free"), cache and buffers, swap use, with its own sparkline  |
+| CPU         | busy percentage with a small bar under it, time waiting on disk, steal time on a VM, and a bar per core    |
+| Memory      | used against total (from `MemAvailable`, not "free"), cache and buffers, swap use, with its own small bar   |
 | Load        | 1, 5 and 15 minutes, per core, with how many processes are runnable                                        |
 | Throughput  | network in and out per second, and disk read and write per second                                          |
 | Filesystems | every real mount with used, free and a bar                                                                 |
-| Containers  | how many are running, restarting, paused, stopped or dead                                                  |
+| Containers  | a card each, filterable by state and searchable, with live CPU, memory and network                         |
 | Processes   | the top five by CPU and the top five by memory                                                             |
 
-**Containers are listed with their own live numbers** — CPU, memory against limit, network in and out, from
-`docker stats` — beside their state, health, image and published ports. **Start**, **Stop**, **Restart** and
-**Logs** work on any container on the machine, not only the ones this panel installed. A row is held still
-while an action on it is in flight, so a button is never redrawn under your click.
+**Containers are shown as cards**, one per container, with the ones that need attention first (restarting,
+dead or failing their health check), then the busiest. Each card has the name and image, a **Running** /
+**Stopped** / **Restarting** pill, how long it has been up and its published ports. A running container
+has two small meters, **CPU** and **Memory**, drawn like the ones on a server card: the name and a
+percentage, a thin bar (amber, then red as it fills), and a line underneath — for CPU, its use of one core
+and how many cores the machine has (the percentage is its share of the whole machine, as Docker counts CPU per
+core); for memory, how much it uses of its limit. Under them: **network speed** in and out per second (the total since it
+started until a second sample arrives), **disk I/O** read and written, and the number of **processes**, all
+from `docker stats`. Above the cards, **All / Running / Needs attention / Stopped** chips with
+counts filter the list, and a search box finds a container by name, image or port; both stay put while
+new samples arrive. **Start**, **Stop**, **Restart** and **Logs** work on any container on the machine, not
+only the ones this panel installed. A card is held still while an action on it is in flight, so a button is
+never redrawn under your click. **Details** — or a click on the container's name — opens the same container page the
+Docker tab opens (details, live stats, live logs, volumes, downloads and backup); its back button returns to
+**Live**.
+
+The first time you open **Live**, every part of the page shows a shimmering placeholder in the shape of
+what will fill it, until the first reading arrives a few seconds later. If the server cannot be read, the
+placeholders stop shimmering and the reason is shown at the top.
 
 ### When something is wrong
 
@@ -392,7 +427,7 @@ first.
 
 ### Adding a service
 
-**+ Add service** writes a unit to `/etc/systemd/system`, runs `daemon-reload`, then enables and starts it.
+**Manage → Add a service** on a server's page writes a unit to `/etc/systemd/system`, runs `daemon-reload`, then enables and starts it.
 The form walks through four steps: **what to run** (name, description and the start command, with one-click
 templates for a Node script, an npm start script, a Python script or a shell script), **where and as whom**
 (working directory, user, group), **environment** (variables, an environment file or a saved environment)
@@ -493,7 +528,8 @@ paused or restarting, red exited or dead) and shows:
 
 Every running container's card also shows **what it uses right now**: CPU as a share of the whole server,
 memory with a bar against its limit, network received and sent, disk read and written, and its process
-count. Above the cards, a **Docker usage** strip adds them up — CPU and memory used by all containers
+count, plus two small **bar charts** — CPU and RAM over the last six minutes, one bar per reading, with the
+peak and average above each. Above the cards, a **Docker usage** strip adds them up — CPU and memory used by all containers
 together, the busiest container — and shows **Docker's disk use**: images, containers, volumes and build
 cache, with how much of it could be reclaimed by cleaning up. The numbers load a moment after the page (they
 come from `docker stats` and `docker system df` on the server) and refresh every 15 seconds while the tab
@@ -582,6 +618,11 @@ did not install.
 **Apps → + Custom service** deploys a Node.js repository from one of your connected git accounts onto one of
 your servers, as a container. Only servers that are **online** are offered: one that is offline, failing its
 checks or rebooting is left out of the list until it is back.
+
+Each service's card has a status bar under its name, like a server card: a **Running** / **Stopped** /
+**Deploy failed** pill (amber with a spinner while it deploys or is being removed), how many of its
+containers are up (**2/2 up**, hover for each one), **Deployed 3h ago**, and **Auto deploy** when pushes or
+merges deploy it by themselves. The app type and the health badge sit at the card's top right.
 
 ### It checks the project first
 
@@ -764,6 +805,13 @@ Afterwards each app has **Redeploy** (rebuilds the current branch), **Logs** (th
 the build log when a deployment failed), **Environment**, **Containers**, start/stop/restart, and
 **Remove**, which deletes the containers and the clone.
 
+On a service's own page these sit in one bar above its tabs. The everyday ones stay in view: **Redeploy**
+(highlighted), **Stop / Start** and **Restart** joined as one control (Restart is greyed out while the service
+is stopped), **Logs**, and a refresh button. Everything else is under **Manage**, each item with a line saying
+what it opens: **Deploy log**, **Edit settings**, **Environment**, **Containers**, **Add a domain**, and —
+below a divider, in red — **Remove the service**. While a deploy runs, the bar shows **Check progress** and
+the deploy's own stop / restart buttons instead.
+
 ### The same cards on the server page
 
 A server's **Apps** tab lists everything deployed onto that machine, using those same cards — the tab count
@@ -906,9 +954,19 @@ Cron keeps its work in four places, and the tab reads all of them:
 belong to the distribution and its packages, and quietly rewriting them from a web panel is how a server
 stops doing what its owner expects.
 
+**How the tab is laid out.** A status bar at the top says whether the cron service is running and starts
+at boot, the server's own time and time zone, and how many jobs there are. Under it, **Your jobs / System /
+Scripts / Log** switch between the four kinds of thing, each with its count, and a search box finds a job by
+its command, schedule or user. Each job is a card: the schedule in plain English in large type
+(_"Every day at 03:00"_) with the raw five fields beside it, **when it runs next** (_"in 3 h 12 min · today
+03:00"_, worked out on the server's own clock and time zone, not your browser's), the command in a code box
+(**Copy** button; long ones fold), and who it runs as. System jobs show a lock and the file they come from.
+Scripts are grouped into **Hourly / Daily / Weekly / Monthly** columns.
+
 Every job is read back in plain English next to its schedule — `*/15 * * * *` becomes _"every 15 minutes"_,
 `0 4 * * 0` becomes _"every Sunday at 04:00"_ — and the add form does the same as you type, so a wrong
-schedule is obvious there rather than at three in the morning. There are presets for the usual cadences.
+schedule is obvious there rather than at three in the morning. There are presets for the usual cadences, and
+the form lists the **next three run times** for the schedule as you type it.
 
 **Nothing is written carelessly.** An edit is applied by reading the whole table, changing the one line, and
 handing it back to `crontab`, which parses it and **refuses the lot if any line is wrong** — so a rejected
@@ -919,6 +977,23 @@ one line only, and an unescaped `%` is refused with the reason, because cron rea
 and it is the classic way a job silently does nothing.
 
 The tab also shows what cron most recently logged, which is usually the fastest answer to "did it run?".
+
+## Server users
+
+A server's **Users** tab manages the Ubuntu accounts on that machine. It is for roles that may edit, and only
+when the panel's login can become root there; otherwise it says **You are not permitted** and why.
+
+A status bar at the top says the panel is permitted, which account it signs in as, and how many users, admins,
+SSH keys and signed-in sessions there are. **People / Admins / Signed in / System** switch between groups,
+each with its count, and a search finds an account by name, group or shell.
+
+Each account is a card: a coloured initial (amber for root), the name, full name and UID, and a pill that says
+**Signed in**, **Offline** or **Locked**. Under it, in plain words with an icon each: its role (*Superuser*,
+*Administrator* — and whether sudo asks for a password — or *Standard user*), how it signs in (*Password and 2
+SSH keys*, *Password only*, *No password and no key*; an empty password is shown in red), its shell, its last
+login, and its groups. The account the panel itself logs in with is marked. At the bottom: **Edit**, **SSH keys**
+(with how many) and **More** for **Lock login** / **Unlock login**, **Change password** (root) and, in red,
+**Delete user**. System accounts belong to packages and are read-only.
 
 ## CI runners
 
@@ -1276,7 +1351,7 @@ activity log, as `went_online` or `went_offline`, so a host that stays up does n
 **Every 10 minutes** it actually signs in to each reachable server and runs one command. That is
 the only thing that proves the stored credentials still work, and it is far too expensive to run
 on the fast cadence. A server whose port answers but whose sign-in fails is shown as **online**
-with a **cannot sign in** badge and the reason — which is the truth, and a different problem from
+with **Cannot sign in** on its status bar and the reason — which is the truth, and a different problem from
 being down.
 
 The servers list polls `/api/servers/status` on the same 5-second cadence while it is open. That
@@ -1286,8 +1361,11 @@ redrawn under your cursor.
 
 **When it last updated** is said in three places. Above the list, _"Last updated 14:22:07 · checking
 every 5s"_ — an absolute time, so a page that has quietly stopped refreshing is obvious rather than
-frozen at a plausible-looking "3s ago". On each card, how long the port took to answer and how long
-ago that was, with the exact time on hover, plus when the panel last signed in. And on a server's own
+frozen at a plausible-looking "3s ago". On each card, a status bar under the server's name: an
+**Online** / **Offline** pill (the green dot breathes while the server answers), how long the SSH port
+took to answer (amber from 300 ms), **Checked 3s ago** with the exact time on hover, and **Signed in 2m
+ago** — or a red **Cannot sign in** with the reason on hover. The health badge (Normal / Warning /
+Critical) sits alone at the card's top right. And on a server's own
 page, the same line under its name, kept up to date while you are on it.
 
 ## API
@@ -1343,6 +1421,7 @@ page, the same line under its name, kept up to date while you are on it.
 | `DELETE`                  | `/api/servers/:id/docker/networks/:name`                                                                                           | remove a network                                                                               |
 | `DELETE`                  | `/api/servers/:id/docker/volumes/:name`                                                                                            | remove a named volume and the data in it                                                       |
 | `GET`                     | `/api/servers/:id/summary`                                                                                                         | what is on this server, counted: containers, domains, jobs, services, runners                  |
+| `GET`                     | `/api/servers/:id/counts`                                                                                                          | the numbers beside a server's tabs, refreshed every 8 s while its page is open                 |
 | `GET`                     | `/api/servers/:id/cron`                                                                                                            | every scheduled job on the machine, from all four places cron keeps them                       |
 | `POST`                    | `/api/servers/:id/cron/install`                                                                                                    | install cron and start its service                                                             |
 | `POST`                    | `/api/servers/:id/cron/jobs`                                                                                                       | add a job to a user's crontab                                                                  |
