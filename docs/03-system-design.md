@@ -170,6 +170,7 @@ sequenceDiagram
   P->>P: Same port check, 409 if taken
   P-->>U: Reply in under 1 s, card shows "in progress"
   P->>S: One script over SSH: clone → write Dockerfile → docker build → [push] → replace containers
+  Note over S: Env vars reach the build as a BuildKit secret (temp file, mode 600, deleted after the build)
   Note over S: Old containers keep running until the image builds
   S-->>P: Exit status + log (tokens scrubbed)
   P->>P: apps.status = running / error, plus a deployments row

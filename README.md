@@ -552,6 +552,19 @@ twice keeps the last one, as a shell would. Nothing is uploaded anywhere; the fi
 `PORT` and `INSTANCE` are set for every container by the panel and are refused here, so they cannot fight
 with the port mapping.
 
+**The variables are there during the build too, not only while the app runs.** A Next.js, Vite or React
+build often reads them (`NEXT_PUBLIC_API_URL`, `VITE_API_URL`, a database URL used while pages are
+pre-rendered), and a build that cannot see them fails. The build step gets them for that one command only:
+they are never written into the image, so pulling or inspecting the image does not reveal them. Values a
+framework deliberately bakes into the browser bundle (`NEXT_PUBLIC_*`, `VITE_*`) are of course in the built
+files, exactly as on any other host. A repository with its own Dockerfile can opt in by starting its build
+line with `RUN --mount=type=secret,id=appenv` and loading `/run/secrets/appenv`
+(`set -a; . /run/secrets/appenv; set +a; npm run build`).
+
+**When a build fails**, the message on the card quotes the error lines from the build itself (a type error,
+a missing module, a missing variable) rather than Docker's closing summary. The full build log is under
+**Deploy log** on the card.
+
 Afterwards, **Environment** on a card opens the variables as they are — a row each, with the value shown so
 it can be corrected rather than retyped. Add a row, remove a row, or import another `.env` file to merge it
 in (a key in the file replaces the one on screen). **Restart the containers now** is ticked by default:

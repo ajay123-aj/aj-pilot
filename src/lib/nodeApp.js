@@ -249,11 +249,21 @@ export function buildDockerfile(spec) {
 }
 
 /**
+ * The build line. With environment variables, they are mounted as a BuildKit
+ * secret for this one command — Next.js and Vite read them while building —
+ * and never land in a layer, unlike ARG or ENV would.
+ */
+function buildRun(build, buildEnv) {
+  if (!buildEnv) return `RUN ${build}`;
+  return `RUN --mount=type=secret,id=appenv if [ -f /run/secrets/appenv ]; then set -a; . /run/secrets/appenv; set +a; fi; ${build}`;
+}
+
+/**
  * Angular, React, Vue and anything else that compiles to files: build with
  * Node, then hand the result to nginx. The SPA fallback is what makes client
  * side routing work when somebody reloads a deep link.
  */
-function staticDockerfile({ nodeVersion, install, build, outputDir }) {
+function staticDockerfile({ nodeVersion, install, build, outputDir, buildEnv }) {
   return [
     '# Written by AJ Pilot. Commit a Dockerfile to the repository to take over.',
     `FROM node:${nodeVersion}-alpine AS build`,
@@ -267,7 +277,7 @@ function staticDockerfile({ nodeVersion, install, build, outputDir }) {
     `RUN ${install}`,
     '',
     'COPY . .',
-    ...(build ? ['', `RUN ${build}`] : []),
+    ...(build ? ['', buildRun(build, buildEnv)] : []),
     '',
     '# The built files are all that ships; nothing from node_modules follows.',
     'FROM nginx:alpine',
@@ -297,7 +307,7 @@ export const NGINX_CONF = `server {
 }
 `;
 
-function serverDockerfile({ nodeVersion, install, build, start, port }) {
+function serverDockerfile({ nodeVersion, install, build, start, port, buildEnv }) {
   const lines = [
     '# Written by AJ Pilot. Commit a Dockerfile to the repository to take over.',
     `FROM node:${nodeVersion}-alpine`,
@@ -315,7 +325,7 @@ function serverDockerfile({ nodeVersion, install, build, start, port }) {
   ];
 
   if (build) {
-    lines.push('', `RUN ${build}`);
+    lines.push('', buildRun(build, buildEnv));
     if (install.startsWith('npm')) lines.push('RUN npm prune --omit=dev || true');
   }
 

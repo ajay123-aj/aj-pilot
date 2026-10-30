@@ -92,6 +92,8 @@ This document lists what each module must do. The IDs (`FR-xx`) can be reference
 | FR-D3 | Build a Docker image on the target server. Static front ends are served by nginx with an SPA fallback. A repository's own `Dockerfile` can be used instead; then no build or start command is required, since the Dockerfile provides both. |
 | FR-D4 | Run one or several containers on chosen ports, with named volumes (default `<name>-data` at `/app/data`), environment variables, a network and a restart policy. |
 | FR-D4a | The new-service form offers only servers whose status is `online`. A host port already published by another app on the same server, or already listening on the server, is flagged while typing and refused on create and on a container change, naming the holder. |
+| FR-D4b | The app's environment variables are available to the build command as well as to the running containers, passed as a BuildKit secret (`id=appenv`) so they are never stored in an image layer. A repository's own Dockerfile receives the same secret and may mount it. |
+| FR-D4c | A failed build is explained with the build's own error lines (type errors, missing modules, missing variables), not Docker's closing summary. |
 | FR-D5 | The previous release keeps running until the new image has built. |
 | FR-D6 | Deploys run in the background. The UI shows progress; a second deploy of the same app while one is running is refused; a deploy stuck for 40 minutes is released. |
 | FR-D7 | Optionally push the image to Docker Hub. |

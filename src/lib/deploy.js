@@ -113,6 +113,10 @@ export async function deployApp(conn, server, spec) {
   const image = `${spec.image}:${spec.tag}`;
   const containers = plannedContainers(spec);
 
+  // The build sees the app's variables too (NEXT_PUBLIC_*, VITE_*, URLs used while
+  // pre-rendering), sourced from a BuildKit secret so no image layer keeps them.
+  const buildEnv = (spec.env || []).length ? (spec.env || []).map(([k, v]) => `${k}=${q(v)}`).join('\n') + '\n' : '';
+
   const dockerfile = spec.useRepoDockerfile ? null : buildDockerfile({
     runtime: spec.runtime,
     nodeVersion: spec.nodeVersion,
@@ -121,6 +125,7 @@ export async function deployApp(conn, server, spec) {
     start: spec.start,
     outputDir: spec.outputDir,
     port: spec.containerPort,
+    buildEnv: Boolean(buildEnv),
   });
 
   const runArgs = containers.map((c) => `echo "  ${c.name} on port ${c.port}"
@@ -187,8 +192,13 @@ echo "Building ${image}…"
 cd "$CTX"
 # Every line, as it happens — pulling the base image, installing packages, the build itself.
 # BUILDKIT_PROGRESS=plain makes BuildKit print text instead of redrawing a terminal.
-BUILDKIT_PROGRESS=plain docker build --pull -f "$DOCKERFILE" -t ${q(image)} . 2>&1
-[ "\${PIPESTATUS[0]}" = "0" ] || { echo "The image did not build" >&2; cd /; rm -rf "$NEW"; exit 6; }
+${buildEnv ? `# The variables for the build: outside the build context, readable by root only, gone after.
+ENVFILE="$(mktemp)"; chmod 600 "$ENVFILE"
+echo ${b64(buildEnv)} | base64 -d > "$ENVFILE"` : ''}
+DOCKER_BUILDKIT=1 BUILDKIT_PROGRESS=plain docker build --pull ${buildEnv ? '--secret id=appenv,src="$ENVFILE" ' : ''}-f "$DOCKERFILE" -t ${q(image)} . 2>&1
+BUILD_RC="\${PIPESTATUS[0]}"
+${buildEnv ? 'rm -f "$ENVFILE"' : ''}
+[ "$BUILD_RC" = "0" ] || { echo "The image did not build" >&2; cd /; rm -rf "$NEW"; exit 6; }
 
 ${spec.push ? `${step('push', 'Pushing the image to Docker Hub')}\n${pushBlock(spec)}` : ''}
 
@@ -419,6 +429,22 @@ const scrub = (text) => String(text || '')
   .replace(/(Authorization:\s*Basic\s+)[A-Za-z0-9+/=]+/gi, '$1***')
   .replace(/(gh[pousr]_|glpat-|dckr_pat_)[A-Za-z0-9_-]+/g, '$1***');
 
+/**
+ * What actually broke in a failed `docker build`: the compiler's or npm's own
+ * error lines, without BuildKit's "#12 3.45" prefixes and without its closing
+ * summary (the Dockerfile excerpt and "failed to solve"), which only says that
+ * something failed.
+ */
+export function buildErrorLines(text) {
+  const found = lines(text)
+    .filter((l) => !/^\d+\s*\|/.test(l))
+    .map((l) => l.replace(/^(#\d+\s+)?\d+\.\d+\s+/, ''))
+    .filter((l) => /error|cannot find|can't resolve|not found|is not defined|missing|failed to compile|err!/i.test(l))
+    .filter((l) => !/^#\d+\s+ERROR:|failed to solve|did not complete successfully|The image did not build/i.test(l))
+    .filter((l) => !/^npm (warn|notice)/i.test(l));
+  return [...new Set(found)].slice(-3);
+}
+
 function explainDeployFailure(spec, result, log, logs) {
   const text = `${log}\n${logs.join('\n')}`;
 
@@ -435,7 +461,8 @@ function explainDeployFailure(spec, result, log, logs) {
   }
   if (result.code === 5) return 'You chose to use the repository\'s own Dockerfile, but there is none at its root.';
   if (result.code === 6) {
-    const tail = lines(text).filter((l) => !/^\s*$/.test(l)).slice(-4).join(' · ');
+    const cause = buildErrorLines(text).join(' · ');
+    const tail = cause || lines(text).filter((l) => !/^\s*$/.test(l)).slice(-4).join(' · ');
     return `The image failed to build${tail ? `: ${tail.slice(0, 350)}` : '. The full build log is below.'}`;
   }
   if (result.code === 7) {

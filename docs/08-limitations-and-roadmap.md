@@ -13,6 +13,7 @@ Everything in sections 1–3 was observed in the code. Section 4 is a recommenda
 | L5 | **The front end is one large file** (`public/app.js`, ~18k lines) with no build step | Harder to navigate, test and share between pages | Split into ES modules per feature (still no bundler needed) |
 | L6 | **Ubuntu-centric server scripts** | Other distributions are unsupported | Abstract package-manager calls if demand appears |
 | L7 | **Node.js-only build pipeline** | Python, Go, PHP and others need their own `Dockerfile` | Add buildpacks or templates per language |
+| L8 | **Build-time env needs BuildKit** | The generated Dockerfile uses `RUN --mount=type=secret` when an app has variables; Docker older than 23 without BuildKit cannot build it. A repository's own Dockerfile gets the vars only if it mounts the `appenv` secret itself | Detect the Docker version in the prepare step and explain, or fall back to building without the variables |
 
 ## 2. Product gaps
 
