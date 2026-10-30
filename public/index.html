@@ -65,6 +65,7 @@
       <nav class="landing-nav" id="landing-nav" aria-label="Main">
         <a href="#features">Features</a>
         <a href="#how">How it works</a>
+        <a href="#server-setup">Server setup</a>
         <a href="#pricing" class="%%PRICING_HIDDEN%%" id="nav-pricing">Pricing</a>
         <a href="#faq">FAQ</a>
         <a href="/docs">Docs</a>
@@ -504,6 +505,91 @@
     </ol>
   </section>
 
+  <section class="landing-section" id="server-setup" aria-labelledby="setup-title">
+    <div class="uc-head">
+      <span class="eyebrow">Server setup</span>
+      <h2 id="setup-title">Any PC or laptop becomes a server — <span class="gradient-text">with one file</span></h2>
+      <p class="section-lead">Install Ubuntu, run one setup file, connect. It turns on SSH, keeps the machine awake 24/7 — lid closed,
+        screen off, never sleeping — and adds a firewall and automatic security updates. Then you just type its address into AJ Pilot.</p>
+    </div>
+
+    <div class="su-grid">
+      <ol class="su-steps">
+        <li class="su-step">
+          <span class="su-num">1</span>
+          <div>
+            <h3>Download Ubuntu Server</h3>
+            <p>The <b>LTS</b> version from <a href="https://ubuntu.com/download/server" target="_blank" rel="noopener">ubuntu.com/download/server</a> —
+              "Server", not "Desktop". You need a 64-bit machine with 2 GB RAM (4 GB+ better), 25 GB of disk and a 4 GB USB stick.</p>
+          </div>
+        </li>
+        <li class="su-step">
+          <span class="su-num">2</span>
+          <div>
+            <h3>Make the USB stick and start from it</h3>
+            <p>Write the <code>.iso</code> with <a href="https://etcher.balena.io" target="_blank" rel="noopener">balenaEtcher</a> or
+              <a href="https://rufus.ie" target="_blank" rel="noopener">Rufus</a>. Plug it in, power on and press the boot-menu key —
+              <kbd>F12</kbd> Dell / Lenovo / Acer, <kbd>F9</kbd> HP, <kbd>F8</kbd> ASUS, <kbd>F11</kbd> MSI. Will not start? Turn off <b>Secure Boot</b> in the BIOS.</p>
+          </div>
+        </li>
+        <li class="su-step">
+          <span class="su-num">3</span>
+          <div>
+            <h3>Install Ubuntu</h3>
+            <p>Keep the network cable in, choose <b>Use an entire disk</b> (it erases it), pick a <b>username and password</b> —
+              AJ Pilot signs in with these — and tick <b>Install OpenSSH server</b>. Reboot and remove the stick.</p>
+          </div>
+        </li>
+        <li class="su-step">
+          <span class="su-num">4</span>
+          <div>
+            <h3>Run the setup file</h3>
+            <p>Sign in on the machine and run these three lines — or download the file below and copy it over on a USB stick.</p>
+            <div class="su-cmd">
+              <pre><code>curl -fsSL %%SITE_URL%%/setup/aj-pilot-setup.sh -o aj-pilot-setup.sh
+sudo bash aj-pilot-setup.sh --dry-run
+sudo bash aj-pilot-setup.sh</code></pre>
+              <button type="button" class="btn su-copy" data-lp-copy>Copy</button>
+            </div>
+            <p class="su-note">The <code>--dry-run</code> line only shows what will change. Safe to run again.</p>
+          </div>
+        </li>
+        <li class="su-step">
+          <span class="su-num">5</span>
+          <div>
+            <h3>Connect it in AJ Pilot</h3>
+            <p>The file ends with a <b>Connect it in AJ Pilot</b> box — the address, port and username. Open <b>+ Add server</b>,
+              paste that box, type your password, done.</p>
+          </div>
+        </li>
+      </ol>
+
+      <aside class="su-card">
+        <div class="su-file">
+          <span class="su-file-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="m9 13 2 2-2 2M13 17h2"/></svg></span>
+          <div><b>aj-pilot-setup.sh</b><small>One file · Ubuntu 20.04+ / Debian 11+</small></div>
+        </div>
+        <a class="btn primary big su-download" href="/setup/aj-pilot-setup.sh" download>⬇ Download the setup file</a>
+        <p class="su-small">No account needed. It holds no passwords or keys. Signed in? <b>+ Add server → Start from a blank machine</b> lets you tick each option first.</p>
+        <ul class="su-does">
+          <li>🔐 SSH on, firewall allows it first</li>
+          <li>☕ Never sleeps, suspends or hibernates</li>
+          <li>💻 Laptop keeps running with the lid closed</li>
+          <li>🖥 Screen turns off, the computer stays on</li>
+          <li>📶 Wi-Fi never dozes · Wake-on-LAN</li>
+          <li>🛡 Blocks password guessing (fail2ban)</li>
+          <li>🔄 Security updates install themselves</li>
+          <li>🕒 Time zone and automatic clock</li>
+          <li>🔑 Passwordless sudo for your user</li>
+          <li>💾 Swap on small machines</li>
+        </ul>
+        <p class="su-small">Skips the laptop and power settings on a virtual machine by itself. One thing no file can do: in the BIOS set
+          <b>Restore on AC power loss → Power On</b> so it switches back on after a power cut.</p>
+        <a class="su-more" href="/docs/ubuntu-server-setup">Full guide in the docs →</a>
+      </aside>
+    </div>
+  </section>
+
   <section class="landing-section" id="use-cases">
     <div class="uc-head">
       <span class="eyebrow">Who it's for</span>
@@ -797,6 +883,8 @@
         <span class="foot-title">Resources</span>
         <a href="/docs">Documentation</a>
         <a href="/docs/getting-started">Getting started</a>
+        <a href="/docs/ubuntu-server-setup">Set up an Ubuntu server</a>
+        <a href="/setup/aj-pilot-setup.sh" download>Download the setup file</a>
         <a href="/docs/deploy-an-app">Deploy an app</a>
         <a href="/docs/security">Security</a>
         <a href="/docs/troubleshooting">Troubleshooting</a>
@@ -1328,6 +1416,23 @@
   </section>
 
   <!-- ------------------------------------------ custom service details -->
+  <!-- -------------------------------------------------- one container -->
+  <section id="view-container-detail" class="view hidden">
+    <header class="page-head">
+      <div>
+        <button class="link-back" id="btn-ct-back">← Server · Docker</button>
+        <h2 class="page-title ct-page-title" id="ct-title">—</h2>
+        <p class="muted" id="ct-sub">—</p>
+        <p style="margin:8px 0 0" id="ct-state"></p>
+      </div>
+    </header>
+    <div class="actions ct-actions" id="ct-actions"></div>
+    <div class="tab-layout">
+      <nav class="tab-rail" id="ct-tabs"></nav>
+      <div id="ct-body" class="tab-content"></div>
+    </div>
+  </section>
+
   <section id="view-app-detail" class="view hidden">
     <header class="page-head">
       <div>
@@ -1373,6 +1478,7 @@
 <!-- ----------------------------------------------- add server modal -->
 <div class="modal-backdrop hidden" id="modal-server">
   <div class="modal" id="server-modal-box">
+    <button type="button" class="modal-x" data-close aria-label="Close" title="Close (Esc)">×</button>
     <h2 id="server-modal-title">Add server</h2>
     <p class="muted small" id="server-modal-hint">Ubuntu hosts only. Credentials are encrypted before they touch disk.</p>
 
@@ -1394,7 +1500,7 @@
         </span>
         <span class="srv-option-text">
           <b>Start from a blank machine</b>
-          <small>An old PC, laptop or mini-PC to turn into a server. Step by step: install Ubuntu, turn on SSH, keep it running 24/7, connect.</small>
+          <small>An old PC, laptop or mini-PC to turn into a server. Step by step: install Ubuntu, run one setup file that does the rest (SSH, 24/7, firewall…), connect.</small>
           <span class="srv-option-go">Guide me →</span>
         </span>
       </button>
@@ -1412,6 +1518,12 @@
     </div>
 
     <form id="form-server">
+      <div class="srv-paste" id="srv-paste" hidden>
+        <label>Paste what the setup file printed <span class="muted small">(optional — fills in the address, port and username)</span>
+          <textarea id="srv-paste-text" rows="3" spellcheck="false" placeholder="════ Connect it in AJ Pilot ════&#10;    Host / IP       192.168.1.50&#10;    Port            22&#10;    SSH username    ajay"></textarea>
+        </label>
+        <p class="muted small" id="srv-paste-msg" style="margin:4px 0 0"></p>
+      </div>
       <div class="row">
         <label>Name<input name="name" placeholder="prod-web-01" required /></label>
         <label>Host / IP<input name="host" placeholder="203.0.113.10" required /></label>
@@ -1792,34 +1904,41 @@
 
 <!-- -------------------------------------------------- nginx upstream -->
 <div class="modal-backdrop hidden" id="modal-upstream">
-  <div class="modal" style="max-width:820px">
+  <div class="modal ngx-modal" style="max-width:760px">
     <h2 id="upstream-title">Add upstream</h2>
     <p class="muted small" id="upstream-note"></p>
     <form id="form-upstream">
-      <div class="row">
-        <label>Name<input name="name" id="upstream-name" placeholder="app_backend" autocomplete="off" spellcheck="false" required /></label>
-        <label class="narrow">Balancing
-          <select name="method" id="upstream-method">
-            <option value="round-robin">Round robin</option>
-            <option value="least_conn">Least connections</option>
-            <option value="ip_hash">IP hash (sticky)</option>
-            <option value="hash">Hash on a key</option>
-            <option value="random">Random</option>
-          </select>
+      <div class="ngx-step"><span class="ngx-step-n">1</span> Name it</div>
+      <label>
+        <input name="name" id="upstream-name" placeholder="shop_backend" autocomplete="off" spellcheck="false" required />
+        <span class="muted small" style="display:block;margin-top:4px;font-weight:400">Letters, numbers and underscores. A domain then sends traffic to <code id="upstream-snippet">http://shop_backend</code>.</span>
+      </label>
+
+      <div class="ngx-step"><span class="ngx-step-n">2</span> Servers that share the traffic</div>
+      <div class="ups-picks" id="upstream-picks"></div>
+      <div class="ups-rows" id="upstream-servers"></div>
+      <button type="button" class="btn tiny" id="btn-upstream-add-server" style="margin-top:8px">+ Add a server by address</button>
+
+      <div class="ngx-step"><span class="ngx-step-n">3</span> How traffic is shared</div>
+      <div class="ups-methods" id="upstream-methods"></div>
+      <select name="method" id="upstream-method" class="hidden" tabindex="-1" aria-hidden="true">
+        <option value="round-robin">Take turns</option>
+        <option value="least_conn">Least busy</option>
+        <option value="ip_hash">Same visitor, same server</option>
+        <option value="hash">By a key</option>
+        <option value="random">Random</option>
+      </select>
+      <label class="hidden" id="upstream-hash-field" style="margin-top:10px">Key to pick the server by
+        <input name="hashKey" placeholder="$cookie_session or $remote_addr" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <details class="ngx-advanced">
+        <summary>More</summary>
+        <label class="narrow">Keepalive connections <span class="muted small">(optional — reuse connections to the servers)</span>
+          <input name="keepalive" type="number" min="1" max="10000" placeholder="32" />
         </label>
-        <label class="narrow hidden" id="upstream-hash-field">Hash key<input name="hashKey" placeholder="$remote_addr" autocomplete="off" spellcheck="false" /></label>
-        <label class="narrow">Keepalive <span class="muted small">(optional)</span><input name="keepalive" type="number" min="1" max="10000" placeholder="32" /></label>
-      </div>
-      <div class="section-head" style="margin-top:6px"><h3 style="margin:0">Servers</h3>
-        <div class="section-tools"><button type="button" class="btn tiny" id="btn-upstream-add-server">+ Add server / port</button></div>
-      </div>
-      <p class="muted small" style="margin:4px 0 8px">A bare port like <code>3004</code> means a port on this server (127.0.0.1). Traffic is shared by weight; a <b>backup</b> only gets traffic when the others fail, and <b>down</b> takes a server out without deleting it.</p>
-      <div style="overflow-x:auto">
-        <table class="small" id="upstream-servers">
-          <thead><tr><th>Address (host:port)</th><th>Weight</th><th>Max fails</th><th>Fail timeout</th><th>Max conns</th><th>Backup</th><th>Down</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      </details>
+
       <div id="upstream-msg" class="msg hidden"></div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" data-close>Cancel</button>
@@ -2199,27 +2318,42 @@
           <input type="checkbox" name="domain_enabled" id="app-domain-on" /> Add a domain
         </label>
         <p class="muted small" style="margin:0 0 10px">
-          Once the container is running, the panel points a hostname at it through Cloudflare — no manual DNS,
-          nginx or certificate work.
+          Once the container is running, the panel points a hostname at it — through Cloudflare, or directly with
+          nginx when the domain is managed somewhere else.
         </p>
         <div id="app-domain-missing" class="msg info hidden">
-          No Cloudflare account is connected yet, so there is nowhere to put the domain.
+          No Cloudflare account is connected, so only <b>Direct — nginx</b> is offered.
           <button type="button" class="btn tiny" id="btn-app-add-cf">Connect a Cloudflare account</button>
         </div>
         <div id="app-domain-fields" class="hidden">
-          <label>Cloudflare account<select name="domain_cred_id" id="app-domain-cred"></select></label>
-          <div class="row">
-            <label>Subdomain <span class="muted small">(empty for the main domain itself)</span>
-              <input name="domain_sub" id="app-domain-sub" placeholder="shop" autocomplete="off" />
+          <div class="chips">
+            <label class="check" data-cf-mode><input type="radio" name="domain_mode" value="dns" checked /> DNS — Cloudflare + nginx + free SSL</label>
+            <label class="check" data-cf-mode><input type="radio" name="domain_mode" value="zerotrust" /> Zero Trust — Cloudflare Tunnel</label>
+            <label class="check"><input type="radio" name="domain_mode" value="nginx" /> Direct — nginx (my own DNS)</label>
+          </div>
+
+          <div id="app-domain-cf" style="margin-top:10px">
+            <label>Cloudflare account<select name="domain_cred_id" id="app-domain-cred"></select></label>
+            <div class="row">
+              <label>Subdomain <span class="muted small">(empty for the main domain itself)</span>
+                <input name="domain_sub" id="app-domain-sub" placeholder="shop" autocomplete="off" />
+              </label>
+              <label>Main domain<select name="domain_zone" id="app-domain-zone"></select></label>
+            </div>
+          </div>
+
+          <div id="app-domain-nginx" class="hidden" style="margin-top:10px">
+            <p class="muted small" style="margin:0 0 8px">
+              No Cloudflare needed. The panel writes an nginx site in front of the app (installing nginx if missing).
+              At your DNS provider, add an <b>A record</b> for the domain pointing at the server's public IP.
+            </p>
+            <label>Domain<input name="domain_host" id="app-domain-host" placeholder="shop.example.com" autocomplete="off" /></label>
+            <label class="check" style="margin-top:10px">
+              <input type="checkbox" name="domain_ssl" id="app-domain-ssl" checked /> SSL required — free Let's Encrypt certificate, HTTP redirected to HTTPS
             </label>
-            <label>Main domain<select name="domain_zone" id="app-domain-zone"></select></label>
+            <p class="muted small" style="margin:4px 0 0">The A record must already point at the server for the certificate; otherwise the domain shows an error and <b>Retry</b> finishes it later.</p>
           </div>
           <p class="muted small" style="margin:6px 0 10px" id="app-domain-preview"></p>
-
-          <div class="chips">
-            <label class="check"><input type="radio" name="domain_mode" value="dns" checked /> DNS — nginx + free SSL certificate</label>
-            <label class="check"><input type="radio" name="domain_mode" value="zerotrust" /> Zero Trust — Cloudflare Tunnel</label>
-          </div>
 
           <div id="app-domain-dns" style="margin-top:10px">
             <p class="muted small" style="margin:0 0 8px">
@@ -2227,13 +2361,14 @@
               and a Let's Encrypt certificate with HTTP redirected to HTTPS. nginx and certbot are installed if
               missing. Ports 80 and 443 must be open on the server.
             </p>
-            <label>Email for the certificate <span class="muted small">(optional — expiry notices from Let's Encrypt)</span>
-              <input name="domain_email" id="app-domain-email" type="email" />
-            </label>
             <label class="check" style="margin-top:10px">
               <input type="checkbox" name="domain_proxied" id="app-domain-proxied" /> Then proxy it through Cloudflare (orange cloud)
             </label>
           </div>
+
+          <label id="app-domain-email-field" style="margin-top:10px">Email for the certificate <span class="muted small">(optional — expiry notices from Let's Encrypt)</span>
+            <input name="domain_email" id="app-domain-email" type="email" />
+          </label>
 
           <div id="app-domain-zt" class="hidden" style="margin-top:10px">
             <p class="muted small" style="margin:0 0 8px">
@@ -2391,46 +2526,95 @@
 
 <!-- ----------------------------------------------------- nginx domain -->
 <div class="modal-backdrop hidden" id="modal-domain">
-  <div class="modal" style="max-width:720px">
+  <div class="modal ngx-modal" style="max-width:720px">
     <h2 id="domain-title">Add domain</h2>
     <p class="muted small" id="domain-sub">
-      Writes an nginx site on the server. The configuration is tested before nginx is reloaded, and put back
-      as it was if the test fails.
+      Put a domain in front of something on this server. nginx is tested before it reloads, so a mistake never
+      takes other sites down.
     </p>
 
     <form id="form-domain">
-      <label>Domain names <span class="muted small">(space or comma separated — include www if you use it)</span>
-        <input name="domains" id="domain-names" placeholder="example.com www.example.com" required />
-      </label>
+      <div class="ngx-raw-hide">
+        <div class="ngx-step"><span class="ngx-step-n">1</span> What should the domain open?</div>
+        <div class="ngx-kinds" id="domain-kind-cards">
+          <button type="button" class="ngx-kind" data-kind="app">
+            <span class="ngx-kind-icon">🚀</span>
+            <span class="ngx-kind-title">AJ Pilot app</span>
+            <span class="ngx-kind-sub">An app you deployed with the panel</span>
+          </button>
+          <button type="button" class="ngx-kind" data-kind="proxy">
+            <span class="ngx-kind-icon">🔌</span>
+            <span class="ngx-kind-title">Port on this server</span>
+            <span class="ngx-kind-sub">Anything listening, like :3000</span>
+          </button>
+          <button type="button" class="ngx-kind" data-kind="static">
+            <span class="ngx-kind-icon">📁</span>
+            <span class="ngx-kind-title">Static folder</span>
+            <span class="ngx-kind-sub">HTML files on disk</span>
+          </button>
+        </div>
+        <select name="kind" id="domain-kind" class="hidden" tabindex="-1" aria-hidden="true">
+          <option value="proxy">Port on this server</option>
+          <option value="static">Static folder</option>
+          <option value="app">AJ Pilot app</option>
+        </select>
+      </div>
 
-      <div id="domain-form-fields">
-        <label>What it serves
-          <select name="kind" id="domain-kind">
-            <option value="proxy">An app running on this server — reverse proxy</option>
-            <option value="static">Files on disk — static site</option>
-          </select>
-        </label>
+      <div class="ngx-step"><span class="ngx-step-n ngx-raw-hide">2</span> Domain</div>
+      <label class="ngx-domain-input">
+        <input name="domains" id="domain-names" placeholder="shop.example.com" required autocomplete="off" spellcheck="false" />
+        <span class="muted small" id="domain-names-hint">Several names? Separate them with spaces — include www if you use it.</span>
+      </label>
+      <div class="ngx-dns-hint ngx-raw-hide" id="domain-dns-hint"></div>
+
+      <div id="domain-form-fields" class="ngx-raw-hide">
+        <div class="ngx-step"><span class="ngx-step-n">3</span> <span id="domain-target-title">Where it goes</span></div>
+
+        <div id="domain-app-fields" class="hidden">
+          <div class="row">
+            <label>Server<select id="domain-app-server"></select></label>
+            <label>App<select id="domain-app"></select></label>
+            <label class="narrow" id="domain-app-port-field">Container<select id="domain-app-port"></select></label>
+          </div>
+          <p class="muted small" style="margin:6px 0 0" id="domain-app-note"></p>
+        </div>
 
         <div class="row" id="domain-proxy-fields">
           <label class="narrow">Port<input name="port" id="domain-port" type="number" min="1" max="65535" placeholder="3000" /></label>
-          <label>or the full address <span class="muted small">(optional)</span>
+          <label>or a full address <span class="muted small">(optional)</span>
             <input name="upstream" id="domain-upstream" placeholder="http://127.0.0.1:3000" />
           </label>
         </div>
 
-        <label id="domain-root-field" class="hidden">Folder to serve
-          <input name="root" id="domain-root" placeholder="/var/www/example.com" />
-        </label>
-
-        <div class="row">
-          <label class="narrow">Max upload<input name="max_body_size" id="domain-max-body" value="25m" /></label>
-          <label class="check" id="domain-ws-field"><input type="checkbox" name="websockets" id="domain-ws" checked /> Pass WebSocket connections through</label>
-          <label class="check hidden" id="domain-spa-field"><input type="checkbox" name="spa" id="domain-spa" /> Single-page app — unknown paths return index.html</label>
+        <div id="domain-root-field" class="hidden">
+          <label>Folder to serve<input name="root" id="domain-root" placeholder="/var/www/example.com" /></label>
+          <label class="check hidden" id="domain-spa-field" style="margin-top:8px"><input type="checkbox" name="spa" id="domain-spa" /> Single-page app (React, Vue, Angular) — unknown paths return index.html</label>
         </div>
+
+        <details class="ngx-advanced" id="domain-advanced">
+          <summary>Advanced</summary>
+          <div class="row">
+            <label class="narrow">Max upload<input name="max_body_size" id="domain-max-body" value="25m" /></label>
+            <label class="check" id="domain-ws-field"><input type="checkbox" name="websockets" id="domain-ws" checked /> Pass WebSocket connections through</label>
+          </div>
+          <label class="check" style="margin-top:8px" id="domain-enabled-field">
+            <input type="checkbox" id="domain-enabled" checked /> Enabled — serve it as soon as it is saved
+          </label>
+        </details>
       </div>
 
-      <label class="check" id="domain-raw-toggle" style="margin-top:14px">
-        <input type="checkbox" id="domain-raw-check" /> Edit the nginx file directly
+      <div id="domain-ssl-fields" class="ngx-ssl-card">
+        <label class="check ngx-ssl-toggle">
+          <input type="checkbox" id="domain-ssl-on" />
+          <span><b>🔒 SSL required</b><span class="muted small"> — free Let's Encrypt certificate, HTTP redirected to HTTPS, renews on its own</span></span>
+        </label>
+        <label id="domain-ssl-email-field" class="hidden">Email for expiry notices <span class="muted small">(optional)</span>
+          <input type="email" id="domain-ssl-email" />
+        </label>
+      </div>
+
+      <label class="check muted small" id="domain-raw-toggle" style="margin-top:14px">
+        <input type="checkbox" id="domain-raw-check" /> Edit the nginx file directly instead
       </label>
       <div id="domain-raw-field" class="hidden">
         <textarea name="config" id="domain-config" rows="16" spellcheck="false"></textarea>
@@ -2438,10 +2622,6 @@
           Saved exactly as written, then tested with <code>nginx -t</code>.
         </p>
       </div>
-
-      <label class="check" style="margin-top:12px">
-        <input type="checkbox" id="domain-enabled" checked /> Enabled — linked into sites-enabled
-      </label>
 
       <div id="domain-msg" class="msg hidden"></div>
       <pre id="domain-log" class="log hidden"></pre>
@@ -2455,31 +2635,42 @@
 
 <!-- --------------------------------------------------------- nginx SSL -->
 <div class="modal-backdrop hidden" id="modal-ssl">
-  <div class="modal">
-    <h2>🔒 Get an SSL certificate</h2>
-    <p class="muted small">
-      certbot asks Let's Encrypt for a certificate and installs it into this site's nginx configuration.
-      The domain must already point at this server and port 80 must be reachable from the internet — that is
-      how the challenge is answered.
-    </p>
+  <div class="modal ngx-modal" style="max-width:620px">
+    <h2 id="ssl-title">🔒 Get an SSL certificate</h2>
+    <p class="muted small">A free certificate from Let's Encrypt — the padlock in the browser. It is installed into the domain's nginx site and renews by itself.</p>
+
+    <div class="ssl-checklist">
+      <div class="ssl-check-title">Before you start</div>
+      <div class="ssl-check"><span>1</span><div>The domain points here: an <b>A record</b> to <code id="ssl-server-ip">this server's IP</code> at your DNS provider.</div></div>
+      <div class="ssl-check"><span>2</span><div><b>Port 80</b> is open to the internet — Let's Encrypt checks the domain through it.</div></div>
+      <div class="ssl-check"><span>3</span><div>The domain already has an <b>nginx site</b> on this server (add it with <b>+ Add domain</b> first).</div></div>
+    </div>
 
     <form id="form-ssl">
       <label>Domains on the certificate
-        <input name="domains" id="ssl-domains" required />
+        <input name="domains" id="ssl-domains" placeholder="example.com www.example.com" required autocomplete="off" spellcheck="false" />
+        <span class="muted small" style="display:block;margin-top:4px;font-weight:400">Separate several with spaces — they share one certificate.</span>
       </label>
+      <div class="ups-picks" id="ssl-picks"></div>
       <label>Email for expiry notices <span class="muted small">(optional but recommended)</span>
         <input name="email" id="ssl-email" type="email" placeholder="you@example.com" />
       </label>
-      <label class="check"><input type="checkbox" id="ssl-redirect" checked /> Redirect HTTP to HTTPS</label>
-      <label class="check"><input type="checkbox" id="ssl-staging" /> Use Let's Encrypt staging — a test certificate browsers will not trust</label>
+      <div class="svc-switches">
+        <label class="switch"><input type="checkbox" id="ssl-redirect" checked /><span></span><b>Redirect HTTP to HTTPS</b></label>
+      </div>
+
+      <details class="ngx-advanced">
+        <summary>Advanced</summary>
+        <label class="check"><input type="checkbox" id="ssl-staging" /> Use Let's Encrypt <b>staging</b> — a test certificate browsers will not trust, for trying a setup without using up the real rate limit</label>
+      </details>
 
       <div id="ssl-msg" class="msg hidden"></div>
       <pre id="ssl-log" class="log hidden"></pre>
       <div class="modal-actions">
+        <span class="muted small" style="margin-right:auto">Takes about half a minute.</span>
         <button type="button" class="btn ghost" data-close>Cancel</button>
         <button type="submit" class="btn primary" id="btn-ssl-go">Get the certificate</button>
       </div>
-      <p class="muted small" style="margin-top:10px">Issuing takes about half a minute.</p>
     </form>
   </div>
 </div>
@@ -2800,60 +2991,76 @@
 
 <!-- -------------------------------------------------- add service modal -->
 <div class="modal-backdrop hidden" id="modal-service">
-  <div class="modal" style="max-width:720px">
+  <div class="modal ngx-modal" style="max-width:720px">
     <h2>Add service</h2>
-    <p class="muted small">Writes a systemd unit to <code>/etc/systemd/system</code> on <b id="service-server-name">this server</b>, then enables and starts it.</p>
+    <p class="muted small">Keep a program running on <b id="service-server-name">this server</b> — restarted if it crashes and started again after a reboot.</p>
     <form id="form-service">
+      <div class="ngx-step"><span class="ngx-step-n">1</span> What to run</div>
       <div class="row">
-        <label>Service name<input name="unit" placeholder="my-app" required /></label>
-        <label>Description<input name="description" placeholder="My application" /></label>
+        <label>Name<input name="unit" placeholder="my-app" required autocomplete="off" spellcheck="false" /></label>
+        <label>Description <span class="muted small">(optional)</span><input name="description" placeholder="My application" /></label>
+      </div>
+      <div class="svc-templates" id="svc-templates">
+        <span class="muted small">Start from:</span>
+        <button type="button" class="chip-btn" data-svc-tpl="node">🟩 Node script</button>
+        <button type="button" class="chip-btn" data-svc-tpl="npm">📦 npm start</button>
+        <button type="button" class="chip-btn" data-svc-tpl="python">🐍 Python</button>
+        <button type="button" class="chip-btn" data-svc-tpl="shell">📜 Shell script</button>
+      </div>
+      <label>Start command
+        <input name="execStart" id="svc-exec" placeholder="/usr/bin/node /srv/my-app/index.js" required autocomplete="off" spellcheck="false" />
+      </label>
+      <div class="msg warn hidden" id="svc-exec-warn" style="margin-top:6px"></div>
+      <p class="muted small" style="margin:6px 0 0">Use full paths — systemd runs the command directly, without a shell. Find a program's path with <code>which node</code>.</p>
+
+      <div class="ngx-step"><span class="ngx-step-n">2</span> Where and as whom</div>
+      <div class="row">
+        <label>Working directory<input name="workingDirectory" placeholder="/srv/my-app" autocomplete="off" spellcheck="false" /></label>
+        <label>Run as user<input name="user" placeholder="root" autocomplete="off" /></label>
+        <label class="narrow">Group<input name="group" placeholder="" autocomplete="off" /></label>
       </div>
 
-      <label>Start command <span class="muted small">(absolute path)</span>
-        <input name="execStart" placeholder="/usr/bin/node /srv/my-app/index.js" required />
+      <div class="ngx-step"><span class="ngx-step-n">3</span> Environment <span class="muted small" style="font-weight:400">(optional)</span></div>
+      <label>Variables <span class="muted small">(one KEY=value per line)</span>
+        <textarea name="environment" rows="3" placeholder="NODE_ENV=production&#10;PORT=3000" spellcheck="false"></textarea>
       </label>
-      <p class="muted small" style="margin:6px 0 0">systemd does not use a shell, so <code>npm start</code> will not work — use the full path, e.g. <code>/usr/bin/npm run start</code>.</p>
-
-      <div class="row">
-        <label>Working directory<input name="workingDirectory" placeholder="/srv/my-app" /></label>
-        <label>Run as user<input name="user" placeholder="root" /></label>
-        <label class="narrow">Group<input name="group" placeholder="" /></label>
-      </div>
-
-      <label>Environment <span class="muted small">(one KEY=value per line)</span>
-        <textarea name="environment" rows="3" placeholder="NODE_ENV=production&#10;PORT=3000"></textarea>
-      </label>
-      <label>Environment file <span class="muted small">(optional)</span><input name="environmentFile" placeholder="/srv/my-app/.env" /></label>
+      <label>Environment file<input name="environmentFile" placeholder="/srv/my-app/.env" autocomplete="off" spellcheck="false" /></label>
       <div class="env-pick" id="service-env-pick" data-env-pick="service" data-noun="service"></div>
 
-      <div class="row">
-        <label>Type
-          <select name="type">
-            <option value="simple">simple — the command stays in the foreground</option>
-            <option value="exec">exec</option>
-            <option value="forking">forking — the command daemonises itself</option>
-            <option value="oneshot">oneshot — runs once and exits</option>
-            <option value="notify">notify</option>
-          </select>
-        </label>
-        <label>Restart
-          <select name="restart">
-            <option value="on-failure">on-failure</option>
-            <option value="always">always</option>
-            <option value="no">no</option>
-            <option value="on-abnormal">on-abnormal</option>
-          </select>
-        </label>
-        <label class="narrow">Wait<input name="restartSec" type="number" value="5" min="1" /></label>
+      <div class="ngx-step"><span class="ngx-step-n">4</span> Keep it running</div>
+      <div class="ups-methods" id="svc-restart-cards">
+        <button type="button" class="ngx-kind" data-svc-restart="on-failure"><span class="ngx-kind-title">Restart if it crashes</span><span class="ngx-kind-sub">Right for most programs</span></button>
+        <button type="button" class="ngx-kind" data-svc-restart="always"><span class="ngx-kind-title">Always restart</span><span class="ngx-kind-sub">Even after it exits cleanly</span></button>
+        <button type="button" class="ngx-kind" data-svc-restart="no"><span class="ngx-kind-title">Never restart</span><span class="ngx-kind-sub">Run it once, leave it stopped</span></button>
+      </div>
+      <select name="restart" id="svc-restart" class="hidden" tabindex="-1" aria-hidden="true">
+        <option value="on-failure">on-failure</option>
+        <option value="always">always</option>
+        <option value="no">no</option>
+        <option value="on-abnormal">on-abnormal</option>
+      </select>
+      <div class="svc-switches">
+        <label class="narrow" id="svc-wait-field">Wait before restarting <span class="muted small">(seconds)</span><input name="restartSec" type="number" value="5" min="1" /></label>
+        <label class="switch"><input type="checkbox" name="enable" checked /><span></span><b>Start on boot</b></label>
+        <label class="switch"><input type="checkbox" name="start" checked /><span></span><b>Start it now</b></label>
       </div>
 
-      <label>Start after<input name="after" value="network.target" /></label>
-
-      <div class="chips" style="margin-top:14px">
-        <label class="check"><input type="checkbox" name="enable" checked /> Start on boot</label>
-        <label class="check"><input type="checkbox" name="start" checked /> Start it now</label>
-        <label class="check"><input type="checkbox" name="overwrite" /> Replace it if it already exists</label>
-      </div>
+      <details class="ngx-advanced">
+        <summary>Advanced</summary>
+        <div class="row">
+          <label>Type
+            <select name="type">
+              <option value="simple">simple — the command stays in the foreground</option>
+              <option value="exec">exec</option>
+              <option value="forking">forking — the command daemonises itself</option>
+              <option value="oneshot">oneshot — runs once and exits</option>
+              <option value="notify">notify</option>
+            </select>
+          </label>
+          <label>Start after<input name="after" value="network.target" /></label>
+        </div>
+        <label class="check" style="margin-top:8px"><input type="checkbox" name="overwrite" /> Replace it if a service with this name already exists</label>
+      </details>
 
       <div id="service-form-msg" class="msg hidden"></div>
       <pre id="service-form-log" class="log hidden"></pre>
@@ -2870,6 +3077,7 @@
   <div class="modal" style="max-width:860px">
     <h2 id="service-detail-name">—</h2>
     <p class="muted small" id="service-detail-sub">—</p>
+    <div class="row-actions svc-detail-actions" id="service-detail-actions"></div>
     <div id="service-detail-body"><div class="sk-wrap" role="status" aria-busy="true"><span class="sr-only">Reading…</span><div class="tiles"><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div><div class="tile sk-tile"><i class="sk" style="width:45%;height:8px"></i><i class="sk" style="width:60%;height:18px"></i></div></div><div class="card sk-lines"><i class="sk" style="width:72%;height:10px"></i><i class="sk" style="width:48%;height:10px"></i><i class="sk" style="width:86%;height:10px"></i><i class="sk" style="width:60%;height:10px"></i></div></div></div>
     <div class="modal-actions">
       <button type="button" class="btn ghost" data-close>Close</button>
@@ -2914,21 +3122,6 @@
 
 
 <!-- -------------------------------------------- container details -->
-<div class="modal-backdrop hidden" id="modal-container">
-  <div class="modal" style="max-width:1100px">
-    <div class="section-head" style="margin-bottom:4px">
-      <h2 id="ct-title" style="margin:0;word-break:break-all">—</h2>
-      <span id="ct-state"></span>
-    </div>
-    <p class="muted small" id="ct-sub" style="margin-top:0"></p>
-    <div class="row-actions" id="ct-actions" style="justify-content:flex-start;margin-bottom:12px"></div>
-    <div id="ct-body"></div>
-    <div class="modal-actions">
-      <button type="button" class="btn ghost" data-close>Close</button>
-    </div>
-  </div>
-</div>
-
 <!-- ------------------------------------------------ file editor -->
 <div class="modal-backdrop hidden" id="modal-file-edit">
   <div class="modal" style="max-width:1100px">

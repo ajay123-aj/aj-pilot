@@ -453,6 +453,60 @@ echo ok`;
   return { at: new Date().toISOString(), host, containers };
 }
 
+/**
+ * Every running container's usage and Docker's own disk use, in one pass —
+ * for the Docker tab's cards. Unlike collectContainerStats it does not ask by
+ * name: the tab wants all of them, and a bare `docker stats` reports exactly the
+ * running ones.
+ */
+export async function collectAllContainerStats(conn, server) {
+  const script = `export LC_ALL=C
+echo '@@@host'
+nproc 2>/dev/null || echo 1
+grep '^MemTotal:' /proc/meminfo
+echo '@@@docker'
+if ! command -v docker >/dev/null 2>&1; then echo absent
+elif ! docker info >/dev/null 2>&1; then echo stopped
+else echo running; fi
+echo '@@@stats'
+docker stats --no-stream --format '${DOCKER_STATS_FORMAT}' 2>/dev/null
+echo '@@@df'
+docker system df --format '{{.Type}}\\t{{.TotalCount}}\\t{{.Active}}\\t{{.Size}}\\t{{.Reclaimable}}' 2>/dev/null
+echo '@@@done'
+echo ok`;
+
+  const result = await rootExec(conn, server, script, { timeout: 45000 });
+  const s = splitSections(result.stdout);
+  if (!s.done) {
+    throw new Error(`Could not read Docker statistics: ${(result.stderr || result.stdout || '').trim().slice(0, 200) || 'the probe returned nothing'}`);
+  }
+  const docker = lines(s.docker)[0] || 'absent';
+  if (docker !== 'running') throw new Error(docker === 'absent' ? 'Docker is not installed on this server' : 'The Docker daemon is not running');
+
+  const hostRows = lines(s.host);
+  // "1.2GB (35%)" — the size before the bracket is what could be freed.
+  const disk = lines(s.df).map((line) => {
+    const [type, total, active, size, reclaimable] = line.split('\t');
+    return {
+      type,
+      total: num(total),
+      active: num(active),
+      sizeBytes: bytesOf(size),
+      reclaimableBytes: bytesOf(String(reclaimable || '').split(' ')[0]),
+    };
+  }).filter((d) => d.type);
+
+  return {
+    at: new Date().toISOString(),
+    host: {
+      cores: Math.max(1, num(hostRows[0]) || 1),
+      memoryBytes: num((/MemTotal:\s+(\d+)/.exec(hostRows.join('\n')) || [])[1]) * 1024,
+    },
+    containers: Object.fromEntries(statsByName(s.stats)),
+    disk,
+  };
+}
+
 /** One app's containers added up, for a card or a headline tile. */
 export function appUsage(containers, host) {
   const sum = (key) => containers.reduce((t, c) => t + (c[key] || 0), 0);

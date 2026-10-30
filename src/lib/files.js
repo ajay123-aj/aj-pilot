@@ -233,17 +233,34 @@ echo "size=$(stat -c %s -- "$T")"`, `Preparing ${p}`, 30 * 60 * 1000);
   const size = Number((/size=(\d+)/.exec(r.stdout) || [])[1] || 0);
   onInfo?.({ name: `${path.posix.basename(p) || 'root'}${kind === 'dir' ? '.tar.gz' : ''}`, size, kind });
 
-  const sftp = await sftpOf(conn);
+  await sendTempFile(conn, server, tmp, out);
+}
+
+/**
+ * Stream a temporary file the login user can read into `out`, then delete it
+ * as root — also when the transfer fails, so nothing is left behind in /tmp.
+ */
+export async function sendTempFile(conn, server, tmp, out) {
   try {
-    await new Promise((resolve, reject) => {
-      const stream = sftp.createReadStream(tmp);
-      stream.on('error', reject);
-      out.on('error', reject);
-      stream.on('end', resolve);
-      stream.pipe(out);
-    });
+    const sftp = await sftpOf(conn);
+    try {
+      await new Promise((resolve, reject) => {
+        const stream = sftp.createReadStream(tmp);
+        stream.on('error', reject);
+        out.on('error', reject);
+        // A browser that cancels closes the response without an error; the pipe would wait forever.
+        out.on('close', () => {
+          if (out.writableFinished) return;
+          stream.destroy();
+          reject(new Error('The download was cancelled'));
+        });
+        stream.on('end', resolve);
+        stream.pipe(out);
+      });
+    } finally {
+      sftp.end();
+    }
   } finally {
-    sftp.end();
     await rootExec(conn, server, `rm -f -- ${q(tmp)}`, { timeout: 30000 }).catch(() => {});
   }
 }

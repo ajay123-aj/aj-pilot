@@ -216,6 +216,50 @@ describe('servers over SSH', { skip: !SSH && 'no SSH test server (Docker not ava
     });
   });
 
+  describe('docker containers', () => {
+    // The test server has no Docker, which is what these check against: the
+    // refusals, and errors that arrive as JSON or as a stream event, not a crash.
+    const base = () => `/api/servers/${server.id}`;
+
+    it('downloads need edit: compose, backup and a volume', async () => {
+      for (const p of ['/containers/web1/compose', '/containers/web1/backup', '/docker/volumes/data1/download']) {
+        assert.equal((await viewer.get(`${base()}${p}`)).status, 403, `${p} as a viewer`);
+      }
+    });
+
+    it('refuses names that are not container or volume names', async () => {
+      assert.equal((await editor.get(`${base()}/containers/${encodeURIComponent('a;id')}/compose`)).status, 400);
+      assert.equal((await editor.get(`${base()}/docker/volumes/${encodeURIComponent('x y')}/download`)).status, 400);
+      assert.equal((await viewer.get(`${base()}/containers/${encodeURIComponent('-x')}/stream`)).status, 400);
+    });
+
+    it('a download from a server without Docker fails as JSON, before any file is sent', async () => {
+      const r = await editor.get(`${base()}/containers/web1/compose`);
+      assert.equal(r.status, 400);
+      assert.ok(r.body?.error, JSON.stringify(r.body));
+      assert.ok(!r.headers.get('content-disposition'));
+    });
+
+    it('the live stream says what is wrong as an event', async () => {
+      const ctl = new AbortController();
+      const res = await viewer.raw('GET', `${base()}/containers/web1/stream?every=2000`, { headers: { accept: 'text/event-stream' } });
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type') || '', /text\/event-stream/);
+      const reader = res.body.getReader();
+      let text = '';
+      const until = Date.now() + 20000;
+      while (!/event: problem/.test(text) && Date.now() < until) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += Buffer.from(value).toString('utf8');
+      }
+      ctl.abort();
+      await reader.cancel();
+      assert.match(text, /event: problem/);
+      assert.match(text, /Docker is not installed|docker/i);
+    });
+  });
+
   describe('isolation', () => {
     it('another organisation cannot see or use this server', async () => {
       const other = await organisation(boss, { plan: (await plans(boss)).pro });

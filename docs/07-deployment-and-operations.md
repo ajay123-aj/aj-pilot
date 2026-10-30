@@ -102,7 +102,7 @@ The full list with comments is in [`.env.example`](../.env.example). The setting
 | Secrets | `APP_ENCRYPTION_KEY` | **Always set explicitly**; back it up |
 | SSH | `SSH_CONNECT_TIMEOUT`, `SSH_EXEC_TIMEOUT` | Defaults (15 s / 45 s) |
 | Monitoring | `HEALTH_CHECK_*` | Defaults; lower concurrency for very large fleets |
-| Live view | `STATS_MAX_STREAMS`, `STATS_MAX_STREAMS_PER_ORG`, `APP_STATS_STREAMS_PER_ORG`, `STATS_STREAM_MINUTES` | Defaults (8 / 4 / 4 / 15) |
+| Live view | `STATS_MAX_STREAMS`, `STATS_MAX_STREAMS_PER_ORG`, `APP_STATS_STREAMS_PER_ORG`, `STATS_STREAM_MINUTES` | Defaults (8 / 4 / 4 / 15). The server Live tab and every open container page each take one `STATS_MAX_STREAMS` slot |
 | Statistics history | `METRICS_ENABLED`, `METRICS_EVERY_MINUTES`, `METRICS_KEEP_DAYS`, `METRICS_CONCURRENCY` | Defaults (`true` / 5 / 35 / 4); `metric_samples` grows by one row per server and app per sample |
 | Sign-in | `AUTH_SESSION_DAYS`, `AUTH_SECURE_COOKIE` | 14; empty (follows `SITE_URL`) |
 | OTP | `OTP_MODE`, `OTP_FIXED_CODE`, `OTP_MINUTES` | **`random`** |

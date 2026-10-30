@@ -1207,3 +1207,47 @@ html:not([data-theme="light"]) .landing-theme-btn .lt-moon { opacity: 0; transfo
   .landing .btn, .landing .feature, .landing .price-card { transition: none; }
   .landing .btn:hover, .landing .feature:hover, .landing .price-card:hover { transform: none; }
 }
+
+/* ------------------------------------------------ "Server setup" section */
+.su-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: 28px; align-items: start; margin-top: 34px; }
+.su-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.su-step {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; padding: 20px 22px;
+  border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm);
+}
+.su-num {
+  width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center; font-weight: 800; font-size: 1.05rem; color: #fff;
+  background: var(--accent-ramp); box-shadow: 0 10px 24px -10px var(--glow);
+}
+.landing .su-step h3 { font-size: 1.1rem; margin: 2px 0 6px; }
+.su-step p { color: var(--muted); font-size: .94rem; line-height: 1.65; margin: 0; }
+.su-step p + p { margin-top: 6px; }
+.su-step a { color: var(--accent-text); }
+.su-step code, .su-card code { font-size: .85em; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); }
+.su-step kbd { font-size: .8em; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line-hi); background: var(--surface-2); }
+.su-note { font-size: .85rem !important; }
+
+.su-card {
+  position: sticky; top: 96px; display: flex; flex-direction: column; gap: 14px; padding: 24px;
+  border-radius: var(--r-lg); background: var(--navy-block); border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 24px 60px -24px var(--glow); color: #f3f5f9;
+}
+.su-file { display: flex; align-items: center; gap: 12px; }
+.su-file-icon { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; background: rgba(255, 255, 255, .1); color: #93c5fd; flex: none; }
+.su-file-icon svg { width: 24px; height: 24px; }
+.su-file b { display: block; font-family: var(--mono, ui-monospace, monospace); font-size: 1rem; }
+.su-file small { color: rgba(243, 245, 249, .7); font-size: .8rem; }
+.landing .su-download { justify-content: center; text-align: center; width: 100%; }
+.su-small { margin: 0; font-size: .84rem; line-height: 1.6; color: rgba(243, 245, 249, .75); }
+.su-small b { color: #fff; }
+.su-does { list-style: none; margin: 0; padding: 12px 0; display: grid; gap: 7px; font-size: .9rem; border-top: 1px solid rgba(255, 255, 255, .12); border-bottom: 1px solid rgba(255, 255, 255, .12); }
+.su-more { color: #93c5fd; font-weight: 700; font-size: .92rem; text-decoration: none; }
+.su-more:hover { text-decoration: underline; }
+
+@media (max-width: 960px) {
+  .su-grid { grid-template-columns: 1fr; }
+  .su-card { position: static; }
+}
+@media (max-width: 560px) {
+  .su-step { grid-template-columns: 1fr; padding: 18px; }
+}

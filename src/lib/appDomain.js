@@ -14,12 +14,18 @@
  *              certificate. The tunnel is an existing one, or a new one whose
  *              cloudflared connector is installed on the server as a service.
  *
+ *   nginx      No Cloudflare at all: the customer points the A record at the
+ *              server themselves. An nginx site proxying to the app, then —
+ *              only when SSL was asked for, and once the name resolves here —
+ *              a Let's Encrypt certificate with the HTTPS redirect.
+ *
  * Every step is written to the app's domain log as it happens, so the card can
  * show how far it got, and every step can run again: a retry picks up records,
  * sites and certificates that are already there instead of failing on them.
  */
 
 import dns from 'node:dns/promises';
+import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import { all, one, run, logActivity } from '../db/index.js';
@@ -51,16 +57,21 @@ export async function domainConfigFrom(body, orgId, { domainId = null, userEmail
   if (domain.startsWith('*.')) return { error: 'An app needs a single hostname, not a wildcard' };
   if (!domain.includes('.')) return { error: 'Give the full hostname, like app.example.com' };
 
-  const mode = body.domain_mode === 'zerotrust' ? 'zerotrust' : 'dns';
-  const cred = await one("SELECT id, extra FROM credentials WHERE id = ? AND org_id = ? AND provider = 'cloudflare'",
-    [Number(body.domain_cred_id), orgId]);
-  if (!cred) return { error: 'Pick the Cloudflare account the domain is on' };
+  const mode = ['zerotrust', 'nginx'].includes(body.domain_mode) ? body.domain_mode : 'dns';
 
-  // The domain must sit under a zone that account can see — checked against
-  // what was read when the account was connected, and again when it runs.
-  const zones = asJson(cred.extra)?.account?.zones || [];
-  if (zones.length && !zoneFor(zones, domain)) {
-    return { error: `${domain} is not under any domain on that Cloudflare account (${zones.map((z) => z.name).join(', ')}). Add the domain to Cloudflare first.` };
+  // Direct nginx needs no Cloudflare: the customer points the A record at the server themselves.
+  let cred = null;
+  if (mode !== 'nginx') {
+    cred = await one("SELECT id, extra FROM credentials WHERE id = ? AND org_id = ? AND provider = 'cloudflare'",
+      [Number(body.domain_cred_id), orgId]);
+    if (!cred) return { error: 'Pick the Cloudflare account the domain is on' };
+
+    // The domain must sit under a zone that account can see — checked against
+    // what was read when the account was connected, and again when it runs.
+    const zones = asJson(cred.extra)?.account?.zones || [];
+    if (zones.length && !zoneFor(zones, domain)) {
+      return { error: `${domain} is not under any domain on that Cloudflare account (${zones.map((z) => z.name).join(', ')}). Add the domain to Cloudflare first.` };
+    }
   }
 
   const taken = await one(`SELECT a.name FROM app_domains d JOIN apps a ON a.id = d.app_id
@@ -76,6 +87,11 @@ export async function domainConfigFrom(body, orgId, { domainId = null, userEmail
 
   const email = String(body.domain_email || userEmail || '').trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'That certificate email does not look like an email address' };
+
+  if (mode === 'nginx') {
+    const ssl = !(body.domain_ssl === false || body.domain_ssl === 'false' || body.domain_ssl === 'off');
+    return { value: { domain, port, config: { mode, ssl, email: email || null } } };
+  }
 
   return {
     value: {
@@ -97,8 +113,18 @@ export async function domainConfigFrom(body, orgId, { domainId = null, userEmail
 export function publicDomainConfig(config) {
   const c = asJson(config);
   if (!c) return null;
-  return { mode: c.mode, credentialId: c.credentialId, proxied: Boolean(c.proxied), email: c.email || null, tunnelId: c.tunnelId || null, tunnelName: c.tunnelName || null };
+  return {
+    mode: c.mode, credentialId: c.credentialId || null, proxied: Boolean(c.proxied), email: c.email || null,
+    tunnelId: c.tunnelId || null, tunnelName: c.tunnelName || null,
+    // Every Cloudflare mode ends on HTTPS; direct nginx only when SSL was asked for.
+    ssl: c.mode === 'nginx' ? Boolean(c.ssl) : true,
+  };
 }
+
+/** The address a domain answers on once it is live. */
+export const domainUrl = (domain, config) => `${publicDomainConfig(config)?.ssl === false ? 'http' : 'https'}://${domain}`;
+
+const MODE_LABEL = { zerotrust: 'Cloudflare Tunnel', dns: 'DNS + nginx + SSL', nginx: 'direct nginx' };
 
 /* ------------------------------------------------------------- running */
 
@@ -141,21 +167,27 @@ export async function setupDomain(domainId) {
   try {
     const server = await one('SELECT * FROM servers WHERE id = ?', [row.server_id]);
     if (!server) throw new Error('The server this app runs on no longer exists');
-    const cred = await one("SELECT * FROM credentials WHERE id = ? AND provider = 'cloudflare'", [config.credentialId]);
-    if (!cred) throw new Error('The Cloudflare account chosen for this domain no longer exists');
-    const token = decrypt(cred.secret_enc);
 
-    await log(`Reading the zones on Cloudflare account "${cred.name}"…`);
-    const account = await authenticateCloudflare(token);
-    const zone = zoneFor(account.zones, row.domain);
-    if (!zone) {
-      throw new Error(`${row.domain} is not under any domain on this Cloudflare account`
-        + ` (${account.zones.map((z) => z.name).join(', ') || 'it has none'}). Add the domain to Cloudflare first.`);
+    let url;
+    if (config.mode === 'nginx') {
+      url = await viaNginx({ row, server, config, log });
+    } else {
+      const cred = await one("SELECT * FROM credentials WHERE id = ? AND provider = 'cloudflare'", [config.credentialId]);
+      if (!cred) throw new Error('The Cloudflare account chosen for this domain no longer exists');
+      const token = decrypt(cred.secret_enc);
+
+      await log(`Reading the zones on Cloudflare account "${cred.name}"…`);
+      const account = await authenticateCloudflare(token);
+      const zone = zoneFor(account.zones, row.domain);
+      if (!zone) {
+        throw new Error(`${row.domain} is not under any domain on this Cloudflare account`
+          + ` (${account.zones.map((z) => z.name).join(', ') || 'it has none'}). Add the domain to Cloudflare first.`);
+      }
+      await log(`${row.domain} is in the zone ${zone.name}.`);
+
+      const ctx = { row, server, token, zone, zones: account.zones, config, log };
+      url = config.mode === 'zerotrust' ? await viaTunnel(ctx) : await viaDns(ctx);
     }
-    await log(`${row.domain} is in the zone ${zone.name}.`);
-
-    const ctx = { row, server, token, zone, zones: account.zones, config, log };
-    const url = config.mode === 'zerotrust' ? await viaTunnel(ctx) : await viaDns(ctx);
 
     await log(`Checking ${url} through public DNS…`);
     const check = await probe(url);
@@ -164,7 +196,7 @@ export async function setupDomain(domainId) {
 
     await run("UPDATE app_domains SET status = 'active', error = NULL WHERE id = ?", [domainId]);
     await log(`Done — ${row.name} answers on ${url}`);
-    await logActivity('app', appId, 'domain_ready', `${row.name} is live on ${url} (${config.mode === 'zerotrust' ? 'Cloudflare Tunnel' : 'DNS + nginx + SSL'}, port ${row.port})`);
+    await logActivity('app', appId, 'domain_ready', `${row.name} is live on ${url} (${MODE_LABEL[config.mode] || MODE_LABEL.dns}, port ${row.port})`);
   } catch (err) {
     await log(`Failed: ${err.message}`).catch(() => {});
     if (err.cause && typeof err.cause === 'string') await log(err.cause.slice(-3000)).catch(() => {});
@@ -204,30 +236,7 @@ async function viaDns({ row, server, token, zone, config, log }) {
     await waitForDns(row.domain, ip, log);
 
     // 3. nginx in front of the app.
-    const hasNginx = (await exec(conn, 'command -v nginx >/dev/null 2>&1 && echo yes || echo no')).stdout.trim() === 'yes';
-    if (!hasNginx) {
-      await log('nginx is not installed on this server — installing it…');
-      const r = await installNginx(conn, server);
-      await log(`Installed nginx ${r.version || ''}.`);
-    }
-
-    const site = validateSiteName(row.domain);
-    if (site.error) throw new Error(site.error);
-    const upstream = `http://127.0.0.1:${row.port}`;
-    const current = await readSite(conn, server, site.value).catch(() => null);
-    if (current && !current.content.includes(`proxy_pass ${upstream}`)) {
-      throw new Error(`This server already has an nginx site called "${site.value}" that does not point at ${row.name}. Remove or edit it on the server's Nginx tab, then retry.`);
-    }
-    if (current) {
-      await log(`The nginx site ${site.value} already proxies to ${upstream}; keeping it.`);
-    } else {
-      await writeSite(conn, server, {
-        name: site.value,
-        content: buildSiteConfig({ name: site.value, domains: [row.domain], kind: 'proxy', upstream, websockets: true, maxBodySize: '25m' }),
-        mustBeNew: true,
-      });
-      await log(`Wrote the nginx site ${site.value}: ${row.domain} → ${upstream}. Configuration tested and reloaded.`);
-    }
+    await ensureSite(conn, server, row, log);
 
     // 4. The certificate, installed into that site with a redirect to HTTPS.
     await log('Making sure certbot is installed…');
@@ -252,6 +261,73 @@ async function viaDns({ row, server, token, zone, config, log }) {
 
     return `https://${row.domain}`;
   });
+}
+
+/**
+ * nginx installed, and a site for the domain proxying to the app. A site of
+ * the same name already proxying there is kept, so a retry passes; one that
+ * points elsewhere is somebody else's and is never overwritten.
+ */
+async function ensureSite(conn, server, row, log) {
+  const hasNginx = (await exec(conn, 'command -v nginx >/dev/null 2>&1 && echo yes || echo no')).stdout.trim() === 'yes';
+  if (!hasNginx) {
+    await log('nginx is not installed on this server — installing it…');
+    const r = await installNginx(conn, server);
+    await log(`Installed nginx ${r.version || ''}.`);
+  }
+
+  const site = validateSiteName(row.domain);
+  if (site.error) throw new Error(site.error);
+  const upstream = `http://127.0.0.1:${row.port}`;
+  const current = await readSite(conn, server, site.value).catch(() => null);
+  if (current && !current.content.includes(`proxy_pass ${upstream}`)) {
+    throw new Error(`This server already has an nginx site called "${site.value}" that does not point at ${row.name}. Remove or edit it on the server's Nginx tab, then retry.`);
+  }
+  if (current) {
+    await log(`The nginx site ${site.value} already proxies to ${upstream}; keeping it.`);
+  } else {
+    await writeSite(conn, server, {
+      name: site.value,
+      content: buildSiteConfig({ name: site.value, domains: [row.domain], kind: 'proxy', upstream, websockets: true, maxBodySize: '25m' }),
+      mustBeNew: true,
+    });
+    await log(`Wrote the nginx site ${site.value}: ${row.domain} → ${upstream}. Configuration tested and reloaded.`);
+  }
+}
+
+/* Direct nginx — the customer's own DNS, no Cloudflare */
+
+async function viaNginx({ row, server, config, log }) {
+  return withConnection(connectionFromRow(server), async (conn) => {
+    await ensureSite(conn, server, row, log);
+
+    if (!config.ssl) {
+      await log(`SSL was not asked for — ${row.domain} is served on plain HTTP. Point its A record at this server if you have not yet.`);
+      return `http://${row.domain}`;
+    }
+
+    // Let's Encrypt reaches the server by the name, so the name must lead here first.
+    const ip = await publicIp(conn, server);
+    await log(`The server's public address is ${ip}. ${row.domain} needs an A record pointing at it.`);
+    await waitForDns(row.domain, ip, log);
+    if (!await resolvesTo(row.domain, ip)) {
+      throw new Error(`${row.domain} does not point at this server yet. At your DNS provider, add an A record for ${row.domain} → ${ip}, `
+        + 'wait for it to show up, then press Retry. The nginx site is already in place.');
+    }
+
+    await log('Making sure certbot is installed…');
+    await installCertbot(conn, server);
+    await log(`Asking Let's Encrypt for a certificate for ${row.domain}…`);
+    await issueCertificate(conn, server, { domains: [row.domain], email: config.email, redirect: true });
+    await log('Certificate issued and installed; HTTP now redirects to HTTPS. certbot renews it on its own.');
+    return `https://${row.domain}`;
+  });
+}
+
+async function resolvesTo(domain, ip) {
+  const resolver = new dns.Resolver({ timeout: 4000, tries: 2 });
+  resolver.setServers(['1.1.1.1', '8.8.8.8']);
+  return (await resolver.resolve4(domain).catch(() => [])).includes(ip);
 }
 
 /** The address a DNS record should point at: the host itself when public, otherwise what the server says it is. */
@@ -356,11 +432,15 @@ export async function removeAppDomain(row, server) {
   if (!row?.domain) return { done, warnings };
   const config = asJson(row.domain_config) || {};
 
-  const cred = await one("SELECT * FROM credentials WHERE id = ? AND provider = 'cloudflare'", [config.credentialId]);
+  // Direct nginx made no DNS record — the customer owns it — so Cloudflare is not asked.
+  const cred = config.mode === 'nginx' ? null
+    : await one("SELECT * FROM credentials WHERE id = ? AND provider = 'cloudflare'", [config.credentialId]);
   let token = null;
   let zone = null;
   let zones = [];
-  if (cred) {
+  if (config.mode === 'nginx') {
+    // nothing on Cloudflare
+  } else if (cred) {
     try {
       token = decrypt(cred.secret_enc);
       zones = (await authenticateCloudflare(token)).zones;
@@ -409,7 +489,7 @@ echo ok`, { timeout: 60000 }));
     return { done, warnings };
   }
 
-  // DNS mode: the nginx site and certificate on the server, then the record.
+  // DNS and direct nginx: the nginx site and certificate on the server, then (DNS only) the record.
   if (server) {
     try {
       await withConnection(connectionFromRow(server), async (conn) => {
@@ -525,8 +605,9 @@ async function probe(url) {
     return { failed: false, text: `Public DNS (1.1.1.1, 8.8.8.8) does not know ${host} yet after a minute — it usually appears within a few minutes.` };
   }
 
+  const secure = new URL(url).protocol === 'https:';
   const status = await new Promise((resolve) => {
-    const req = https.request({
+    const req = (secure ? https : http).request({
       host, servername: host, path: '/', method: 'GET', timeout: 15000,
       lookup: (_h, opts, cb) => (opts?.all ? cb(null, [{ address, family }]) : cb(null, address, family)),
     }, (res) => { res.resume(); resolve(res.statusCode); });
@@ -537,7 +618,7 @@ async function probe(url) {
 
   const tip = ` If a computer on your own network still cannot open it, that network's DNS remembered "${host} does not exist" from before the record was created: run "ipconfig /flushdns" (Windows) or wait up to 30 minutes.`;
   if (typeof status !== 'number') {
-    return { failed: false, text: `${host} resolves to ${address} publicly, but HTTPS did not answer from here (${status}).${tip}` };
+    return { failed: false, text: `${host} resolves to ${address} publicly, but ${secure ? 'HTTPS' : 'HTTP'} did not answer from here (${status}).${tip}` };
   }
   // Cloudflare's own "cannot reach the origin" answers: the tunnel or the server is the problem, not DNS.
   if ([502, 504, 520, 521, 522, 523, 524, 525, 526, 530].includes(status)) {

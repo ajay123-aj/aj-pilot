@@ -31,7 +31,7 @@ import { collectContainerStats, appUsage } from '../lib/liveStats.js';
 import { portsInUse, portClashMessage } from '../lib/portCheck.js';
 import { metricSeries, latestLevels } from '../lib/metrics.js';
 import {
-  domainConfigFrom, publicDomainConfig, setupAppDomains, setupDomain, removeAppDomain, domainView,
+  domainConfigFrom, publicDomainConfig, setupAppDomains, setupDomain, removeAppDomain, domainView, domainUrl,
 } from '../lib/appDomain.js';
 
 export const appsRouter = Router();
@@ -85,7 +85,7 @@ async function publicApp(row) {
   if (!row) return null;
   const { env_enc, deploy_log, domain_log, domain_config, domain, domain_status, domain_error, webhook_token, ...rest } = row;
   const domains = (await all('SELECT id, domain, port, config, status, error, log IS NOT NULL AS has_log, created_at FROM app_domains WHERE app_id = ? ORDER BY id', [row.id]))
-    .map((d) => ({ id: d.id, domain: d.domain, port: d.port || row.port, status: d.status, error: d.error, hasLog: Boolean(d.has_log), config: publicDomainConfig(d.config), createdAt: d.created_at }));
+    .map((d) => ({ id: d.id, domain: d.domain, port: d.port || row.port, status: d.status, error: d.error, hasLog: Boolean(d.has_log), config: publicDomainConfig(d.config), url: domainUrl(d.domain, d.config), createdAt: d.created_at }));
   const live = domains.find((d) => d.status === 'active');
   const server = await one('SELECT id, name, host FROM servers WHERE id = ?', [row.server_id]);
   const account = await one('SELECT id, name FROM credentials WHERE id = ?', [row.credential_id]);
@@ -126,7 +126,7 @@ async function publicApp(row) {
     server: server || null,
     account: account || null,
     registry,
-    url: live ? `https://${live.domain}` : server ? `http://${server.host}:${row.port}` : null,
+    url: live ? live.url : server ? `http://${server.host}:${row.port}` : null,
     domains,
     // Kept for older screens: the first domain, and whether any is being set up.
     domain: domains[0]?.domain || null,

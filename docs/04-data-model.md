@@ -99,7 +99,7 @@ erDiagram
 |-------|---------|-------------|
 | `apps` | Deployed services | `org_id`, `server_id`, `credential_id` (git), `registry_cred_id` (Docker Hub), `repo`, `branch`, `root_dir`, `app_type`, `node_version`, `install_cmd`/`build_cmd`/`start_cmd`, `port`, `container_port`, `instances`, `container_ports` (JSON), `volumes` (JSON), `env_enc`, `environment_id`, `image`, `tag`, `pushed`, `network`, `restart`, `use_repo_dockerfile`, `status`, `deploy_started_at`, `deploy_log`, `auto_deploy`, `auto_deploy_trigger` (`push` / `merge`), `webhook_token`, `deployed_sha`, `auto_seen_sha` |
 | `deployments` | Each deploy run | `app_id`, `reason`, `user_id`, `branch`, `kind` (`commit` / `merge`), `sha`, `message`, `author`, `pr_number`, `pr_title`, `status`, `error`, `log`, `started_at`, `finished_at` |
-| `app_domains` | Domains attached to apps | `org_id`, `app_id`, `domain` (unique per org), `port`, `config` (mode: dns / tunnel), `status`, `error`, `log` |
+| `app_domains` | Domains attached to apps | `org_id`, `app_id`, `domain` (unique per org), `port`, `config` (mode: dns / zerotrust / nginx; `ssl` for nginx), `status`, `error`, `log` |
 
 ### 2.6 Monitoring
 

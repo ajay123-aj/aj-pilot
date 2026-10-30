@@ -284,11 +284,12 @@ function show(view) {
   // Leaving the server page drops the live view's connection with it.
   if (view !== 'server-detail') { stopLiveStats(); closeTerminal(); }
   if (view !== 'app-detail') stopAppLive();
+  if (view !== 'container-detail') stopCtLive();
   $$('.view').forEach((v) => v.classList.add('hidden'));
   $(`#view-${view}`).classList.remove('hidden');
   // A detail page still belongs under its list in the menu.
   const navView = {
-    'mysql-detail': 'databases', 'db-detail': 'databases', 'app-detail': 'apps', 'server-detail': 'servers',
+    'mysql-detail': 'databases', 'db-detail': 'databases', 'app-detail': 'apps', 'server-detail': 'servers', 'container-detail': 'servers',
     'git-detail': 'accounts', 'cf-detail': 'accounts', 'dh-detail': 'accounts',
   }[view] || view;
   $$('.nav-item').forEach((b) => b.classList.toggle('active',
@@ -316,6 +317,7 @@ function routeFor() {
   switch (view) {
     case undefined: case 'loading': return null;
     case 'server-detail': return currentServerId ? `/servers/${id(currentServerId)}/${currentTab}` : '/servers';
+    case 'container-detail': return currentServerId && currentCt ? `/servers/${id(currentServerId)}/containers/${id(currentCt)}/${currentCtTab}` : '/servers';
     case 'app-detail': return detailsAppId ? `/apps/${id(detailsAppId)}` : '/apps';
     case 'mysql-detail': return currentMysqlId ? `/databases/mysql/${id(currentMysqlId)}` : '/databases';
     case 'db-detail': return currentEngineId ? `/databases/${id(currentEngineId)}` : '/databases';
@@ -345,7 +347,7 @@ const DIGITS = /^\d+$/;
 /** Open the page an address names. Returns false when it names nothing we know. */
 async function openRoute(hash = location.hash) {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  const [a, b, c] = parts;
+  const [a, b, c, d, e] = parts;
   if (!a) return false;
   const superOnPlatform = session.user?.role === 'super_admin' && !session.user?.orgId;
 
@@ -362,6 +364,10 @@ async function openRoute(hash = location.hash) {
     // Everything else lives inside an organisation.
     if (superOnPlatform) return false;
     if (a === 'billing') { await openBilling(); return true; }
+    if (a === 'servers' && DIGITS.test(b || '') && c === 'containers' && d) {
+      await openContainerPage(Number(b), d, e);
+      return true;
+    }
     if (a === 'servers' && DIGITS.test(b || '')) {
       if (c) currentTab = c;
       await openServer(Number(b));
@@ -1953,18 +1959,21 @@ const serverTabs = () => SERVER_TABS.filter((t) => !t.needs || canDo(t.needs));
 let currentTab = 'overview';
 let tabsLoaded = new Set();
 
+/** Where you were on the last server — dropped when another server is opened. */
+function forgetServerPlace() {
+  currentTab = 'overview';
+  filesPath = '/';
+  filesData = null;
+  filesBack = [];
+  filesForward = [];
+  filesFilter = '';
+}
+
 async function openServer(id) {
   stopLiveStats();
   closeTerminal();
   // Opening a different server starts at the top; refreshing keeps your place.
-  if (String(id) !== String(currentServerId)) {
-    currentTab = 'overview';
-    filesPath = '/';
-    filesData = null;
-    filesBack = [];
-    filesForward = [];
-    filesFilter = '';
-  }
+  if (String(id) !== String(currentServerId)) forgetServerPlace();
   currentServerId = id;
   tabsLoaded = new Set();
 
@@ -2230,6 +2239,27 @@ function tile(label, value, sub, meterPct) {
     ${sub ? `<div class="sub">${sub}</div>` : ''}
     ${meterPct !== undefined && meterPct !== null ? `<div class="meter"><span class="${meterClass(meterPct)}" style="width:${Math.min(100, meterPct)}%"></span></div>` : ''}
   </div>`;
+}
+
+// "Copy" next to a command — the home page's server setup and the setup guide in the docs.
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-lp-copy]');
+  if (!b) return;
+  try {
+    await navigator.clipboard.writeText(b.parentElement.querySelector('code').textContent);
+    b.textContent = 'Copied';
+  } catch {
+    b.textContent = 'Select & copy';
+  }
+  setTimeout(() => { b.textContent = 'Copy'; }, 1500);
+});
+
+/** A search field in the theme — icon, field colours, focus ring — for toolbars outside a form. */
+function searchBox(id, placeholder, value = '') {
+  return `<label class="search-box">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <input type="search" id="${id}" placeholder="${esc(placeholder)}" value="${esc(value)}" autocomplete="off" spellcheck="false" aria-label="${esc(placeholder)}" />
+  </label>`;
 }
 
 function section(title, inner) {
@@ -3268,16 +3298,19 @@ let serviceTotals = null;
 const serviceFilter = { text: '', state: 'running' };
 
 const SERVICE_STATES = [
-  ['running', 'Running'],
-  ['all', 'All services'],
-  ['failed', 'Failed'],
-  ['stopped', 'Stopped'],
-  ['enabled', 'Starts on boot'],
-  ['created', 'Created here'],
+  ['running', 'Running', 'ok'],
+  ['failed', 'Failed', 'err'],
+  ['stopped', 'Stopped', ''],
+  ['enabled', 'Starts on boot', ''],
+  ['created', 'Created here', 'info'],
+  ['all', 'All', ''],
 ];
 
 /** Stopping these by accident is how you lock yourself out of a server. */
 const RISKY_UNIT = /^(ssh|sshd|systemd-logind|systemd-networkd|networking|network-manager|dbus|cloud-init)/i;
+
+/** "nginx.service" reads as "nginx"; other unit types keep their ending. */
+const serviceName = (unit) => String(unit).replace(/\.service$/, '');
 
 async function loadServerServices() {
   const box = $('#services-panel');
@@ -3301,43 +3334,88 @@ async function loadServerServices() {
   }
 }
 
+const serviceCount = (state) => servicesCache.filter((s) => matchesServiceState(s, state)).length;
+
 function renderServicesPanel() {
-  const t = serviceTotals || {};
+  const failed = servicesCache.filter((s) => s.active === 'failed');
   $('#services-panel').innerHTML = `
-    <div class="section-head">
-      <h2>Services <span class="muted small" style="text-transform:none;letter-spacing:0">
-        ${val(t.total)} units · ${val(t.running)} running · ${t.failed ? `<span style="color:var(--err)">${t.failed} failed</span>` : '0 failed'} · ${val(t.enabled)} start on boot
-      </span></h2>
-      <div class="section-tools">
-        <input type="search" id="svc-search" placeholder="Filter by name or description…" value="${esc(serviceFilter.text)}" />
-        <select id="svc-state">
-          ${SERVICE_STATES.map(([v, label]) => `<option value="${v}" ${serviceFilter.state === v ? 'selected' : ''}>${esc(label)}</option>`).join('')}
-        </select>
-        <button class="btn tiny" data-svc-reload="1">Refresh</button>
-        ${ifCan('create', '<button class="btn tiny primary" data-svc-add="1">+ Add service</button>')}
+    <div class="svc-top">
+      <div>
+        <div class="svc-title">Services</div>
+        <div class="muted small">Programs systemd keeps running on ${esc(currentServer?.name || 'this server')} — read live.</div>
       </div>
+      <div class="section-tools">
+        <button class="btn tiny ghost" data-svc-reload="1" title="Read the list again">↻ Refresh</button>
+        ${ifCan('create', '<button class="btn primary" data-svc-add="1">+ Add service</button>')}
+      </div>
+    </div>
+
+    <div class="svc-filters" role="tablist">
+      ${SERVICE_STATES.map(([v, label, tone]) => `
+        <button type="button" class="svc-filter ${tone} ${serviceFilter.state === v ? 'active' : ''}" data-svc-filter="${v}" role="tab" aria-selected="${serviceFilter.state === v}">
+          <span class="svc-filter-n">${serviceCount(v)}</span><span class="svc-filter-label">${esc(label)}</span>
+        </button>`).join('')}
+    </div>
+
+    ${failed.length ? `<div class="svc-failed">
+      <div><b>⚠ ${failed.length} service${failed.length > 1 ? 's have' : ' has'} failed</b>
+        <span class="muted small">— read the logs to see why, then restart it.</span></div>
+      <div class="svc-failed-list">${failed.slice(0, 6).map((s) => `
+        <span class="svc-failed-item"><code>${esc(serviceName(s.unit))}</code>
+          ${ifCan('create', `<button class="btn tiny" data-svc-action="restart" data-unit="${esc(s.unit)}">Restart</button>`)}
+          <button class="btn tiny ghost" data-svc-action="logs" data-unit="${esc(s.unit)}">Logs</button></span>`).join('')}
+        ${failed.length > 6 ? `<button class="btn tiny ghost" data-svc-filter="failed">+${failed.length - 6} more</button>` : ''}
+      </div>
+    </div>` : ''}
+
+    <div class="svc-search">
+      ${searchBox('svc-search', 'Search services by name or description…', serviceFilter.text)}
     </div>
     <div id="svc-table"></div>`;
   renderServiceRows();
 }
 
-/** Only the table is redrawn while filtering, so the search box keeps focus. */
+/** Only the list is redrawn while typing, so the search box keeps focus. */
 function renderServiceRows() {
-  const rows = servicesCache.filter(matchesServiceFilter);
-  $('#svc-table').innerHTML = `
-    <div class="scroll-table">${table(
-      [{ label: 'Unit' }, { label: 'State' }, { label: 'On boot' }, { label: 'Description' }, { label: '' }],
-      rows.map((s) => [
-        `<button class="link-db" data-svc-action="logs" data-unit="${esc(s.unit)}">${esc(s.unit)}</button>
-         ${s.createdHere ? ' <span class="badge ok">created here</span>' : s.managed ? ' <span class="badge">local unit</span>' : ''}`,
-        serviceStateBadge(s),
-        s.enabled ? `<span class="badge ${s.enabled === 'enabled' ? 'ok' : ''}">${esc(s.enabled)}</span>` : '—',
-        `<span class="small">${val(s.description)}</span>`,
-        `<div class="row-actions">${serviceActions(s)}</div>`,
-      ]),
-      servicesCache.length ? 'No service matches this filter' : 'systemd reported no services'
-    )}</div>
-    <p class="muted small" style="margin-top:8px">Showing ${rows.length} of ${servicesCache.length} units. Click a unit name for its status and journal.</p>`;
+  const rank = (s) => (s.active === 'failed' ? 0 : s.createdHere ? 1 : s.sub === 'running' ? 2 : 3);
+  const rows = servicesCache.filter(matchesServiceFilter)
+    .sort((a, b) => rank(a) - rank(b) || a.unit.localeCompare(b.unit));
+  const label = (SERVICE_STATES.find(([v]) => v === serviceFilter.state) || [])[1] || 'All';
+  $('#svc-table').innerHTML = rows.length
+    ? `<div class="svc-list">${rows.map(serviceRow).join('')}</div>
+       <p class="muted small" style="margin-top:8px">${rows.length} of ${servicesCache.length} services · ${esc(label.toLowerCase())}${serviceFilter.text ? ` · matching “${esc(serviceFilter.text)}”` : ''}. Click a name for details and logs.</p>`
+    : `<div class="empty">${servicesCache.length
+      ? `No ${esc(label.toLowerCase())} service${serviceFilter.text ? ` matches “${esc(serviceFilter.text)}”` : ''}. <button class="btn tiny" data-svc-filter="all">Show all</button>`
+      : 'systemd reported no services.'}</div>`;
+}
+
+function serviceDot(s) {
+  if (s.active === 'failed') return 'err';
+  if (s.sub === 'running') return 'ok';
+  if (s.active === 'activating') return 'warn';
+  return 'off';
+}
+
+/** One service: is it up, what it is, does it start on boot, and what can be done. */
+function serviceRow(s) {
+  const u = esc(s.unit);
+  const canBoot = s.enabled === 'enabled' || s.enabled === 'disabled';
+  return `<div class="svc-row ${serviceDot(s)}">
+    <span class="svc-dot ${serviceDot(s)}" title="${esc(s.sub || s.active || '')}"></span>
+    <div class="svc-main">
+      <button class="svc-name" data-svc-action="logs" data-unit="${u}">${esc(serviceName(s.unit))}</button>
+      ${RISKY_UNIT.test(s.unit) ? '<span class="svc-tag" title="Keeps this server reachable — stopping it can lock you out">🛡 system</span>' : ''}
+      ${s.createdHere ? '<span class="badge ok">created here</span>' : ''}
+      <div class="muted small svc-desc">${esc(s.description || '')}</div>
+    </div>
+    <div class="svc-state">${serviceStateBadge(s)}</div>
+    <div class="svc-boot-cell">${canBoot
+    ? ifCan('create', `<button type="button" class="svc-boot ${s.enabled === 'enabled' ? 'on' : ''}" data-svc-action="${s.enabled === 'enabled' ? 'disable' : 'enable'}" data-unit="${u}"
+          title="${s.enabled === 'enabled' ? 'Starts on boot — click to stop that' : 'Does not start on boot — click to turn on'}"><span></span>On boot</button>`)
+      || `<span class="muted small">${s.enabled === 'enabled' ? 'on boot' : 'not on boot'}</span>`
+    : `<span class="muted small">${esc(s.enabled || '—')}</span>`}</div>
+    <div class="row-actions">${serviceActions(s)}</div>
+  </div>`;
 }
 
 function serviceStateBadge(s) {
@@ -3347,25 +3425,26 @@ function serviceStateBadge(s) {
   return `<span class="badge">${esc(s.sub || s.active || 'inactive')}</span>`;
 }
 
-function serviceActions(s) {
+/** Start / stop / restart (and delete for the panel's own); the boot switch is drawn on its own. */
+function serviceActions(s, { boot = false, logs = true } = {}) {
   const btn = (action, label, cls = '') =>
     `<button class="btn tiny ${cls}" data-svc-action="${action}" data-unit="${esc(s.unit)}">${label}</button>`;
   const out = [];
   if (s.sub === 'running') {
-    out.push(btn('restart', 'Restart'), btn('stop', 'Stop'));
+    out.push(btn('restart', '⟳ Restart'), btn('stop', '■ Stop'));
   } else if (s.load !== 'not-found' && s.load !== 'masked') {
-    out.push(btn('start', 'Start'));
+    out.push(btn('start', '▶ Start', s.active === 'failed' ? 'primary' : ''));
   }
-  if (s.enabled === 'enabled') out.push(btn('disable', 'Disable'));
-  else if (s.enabled === 'disabled') out.push(btn('enable', 'Enable'));
-  if (s.createdHere) out.push(btn('delete', 'Delete', 'danger'));
-  return out.join('');
+  if (boot) {
+    if (s.enabled === 'enabled') out.push(btn('disable', 'Don’t start on boot'));
+    else if (s.enabled === 'disabled') out.push(btn('enable', 'Start on boot'));
+  }
+  const actions = ifCan('create', out.join(''));
+  return `${actions}${logs ? `<button class="btn tiny ghost" data-svc-action="logs" data-unit="${esc(s.unit)}">Logs</button>` : ''}${s.createdHere ? ifCan('delete', btn('delete', 'Delete', 'danger')) : ''}`;
 }
 
-function matchesServiceFilter(s) {
-  const text = serviceFilter.text.trim().toLowerCase();
-  if (text && !`${s.unit} ${s.description || ''}`.toLowerCase().includes(text)) return false;
-  switch (serviceFilter.state) {
+function matchesServiceState(s, state) {
+  switch (state) {
     case 'running': return s.sub === 'running';
     case 'failed': return s.active === 'failed';
     case 'stopped': return s.sub !== 'running' && s.active !== 'failed';
@@ -3373,6 +3452,12 @@ function matchesServiceFilter(s) {
     case 'created': return Boolean(s.createdHere);
     default: return true;
   }
+}
+
+function matchesServiceFilter(s) {
+  const text = serviceFilter.text.trim().toLowerCase();
+  if (text && !`${s.unit} ${s.description || ''}`.toLowerCase().includes(text)) return false;
+  return matchesServiceState(s, serviceFilter.state);
 }
 
 /* one delegated listener for the whole server-detail view */
@@ -3383,13 +3468,17 @@ $('#view-server-detail').addEventListener('input', (e) => {
   renderServiceRows();
 });
 
-$('#view-server-detail').addEventListener('change', (e) => {
-  if (e.target.id !== 'svc-state') return;
-  serviceFilter.state = e.target.value;
-  renderServiceRows();
-});
-
 $('#view-server-detail').addEventListener('click', async (e) => {
+  const filter = e.target.closest('[data-svc-filter]');
+  if (filter) {
+    serviceFilter.state = filter.dataset.svcFilter;
+    $$('#services-panel .svc-filter').forEach((b) => {
+      const on = b.dataset.svcFilter === serviceFilter.state;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+    return renderServiceRows();
+  }
   if (e.target.closest('[data-svc-reload]')) return loadServerServices();
   if (e.target.closest('[data-svc-add]')) return openServiceModal();
   if (e.target.closest('[data-runner-reload]')) return loadServerRunners();
@@ -3424,6 +3513,12 @@ async function serviceAction(btn) {
       });
       toast(`${unit}: ${action} → ${r.active || 'done'}${r.enabled ? ` (${r.enabled})` : ''}`);
     }
+    // Pressed inside the detail dialog: show the new state and journal there.
+    const detail = $('#modal-service-detail');
+    if (!detail.classList.contains('hidden')) {
+      if (action === 'delete') detail.classList.add('hidden');
+      else openServiceDetail(unit);
+    }
     await loadServerServices();
   } catch (err) {
     // The message already carries the tail of the journal; the full one is a click away.
@@ -3435,15 +3530,26 @@ async function serviceAction(btn) {
 
 /* --------------------------------------------- server: service detail */
 
+/** The unit the detail dialog shows, for its reload button. */
+let detailUnit = null;
+
 async function openServiceDetail(unit) {
+  detailUnit = unit;
   const modal = $('#modal-service-detail');
-  $('#service-detail-name').textContent = unit;
+  $('#service-detail-name').textContent = serviceName(unit);
   $('#service-detail-sub').textContent = currentServer ? `on ${currentServer.name} (${currentServer.host})` : '';
+  $('#service-detail-actions').innerHTML = '';
   $('#service-detail-body').innerHTML = skeleton('detail', { label: 'Reading the unit and its journal…' });
   modal.classList.remove('hidden');
   try {
     const { service: s } = await api(`/servers/${currentServerId}/services/${encodeURIComponent(unit)}`);
-    $('#service-detail-sub').textContent = s.description || unit;
+    $('#service-detail-sub').textContent = `${s.description || unit}${currentServer ? ` · on ${currentServer.name}` : ''}`;
+    // The list's own row knows whether the panel made it (and so may delete it).
+    const listed = servicesCache.find((x) => x.unit === unit) || {};
+    $('#service-detail-actions').innerHTML = serviceActions(
+      { ...listed, unit, active: s.active, sub: s.sub, enabled: s.enabled, load: s.load },
+      { boot: true, logs: false },
+    ) + '<button class="btn tiny ghost" data-svc-detail-reload="1">↻ Reload logs</button>';
     $('#service-detail-body').innerHTML = `
       <div class="tiles" style="margin-bottom:14px">
         ${tile('State', serviceStateBadge({ active: s.active, sub: s.sub }), val(s.load))}
@@ -3468,6 +3574,12 @@ async function openServiceDetail(unit) {
   }
 }
 
+$('#service-detail-actions').addEventListener('click', (e) => {
+  if (e.target.closest('[data-svc-detail-reload]')) return openServiceDetail(detailUnit);
+  const b = e.target.closest('button[data-svc-action]');
+  if (b) serviceAction(b);
+});
+
 /* --------------------------------------------- server: add a service */
 
 const serviceModal = $('#modal-service');
@@ -3480,9 +3592,64 @@ function openServiceModal() {
   $('#service-form-log').classList.add('hidden');
   $('#service-server-name').textContent = currentServer ? currentServer.name : 'this server';
   serviceForm.user.placeholder = currentServer?.username || 'root';
+  setServiceRestart('on-failure');
+  checkServiceExec();
   serviceModal.classList.remove('hidden');
   prepareServiceEnvPicker();
+  setTimeout(() => serviceForm.unit.focus(), 0);
 }
+
+/** Starting points for the start command; the name fills the path in. */
+const SERVICE_TEMPLATES = {
+  node: (n) => ({ exec: `/usr/bin/node /srv/${n}/index.js`, dir: `/srv/${n}` }),
+  npm: (n) => ({ exec: '/usr/bin/npm run start', dir: `/srv/${n}` }),
+  python: (n) => ({ exec: `/usr/bin/python3 /srv/${n}/main.py`, dir: `/srv/${n}` }),
+  shell: (n) => ({ exec: `/bin/bash /srv/${n}/run.sh`, dir: `/srv/${n}` }),
+};
+
+$('#svc-templates').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-svc-tpl]');
+  if (!b) return;
+  const name = serviceForm.unit.value.trim().replace(/\.service$/, '') || 'my-app';
+  const t = SERVICE_TEMPLATES[b.dataset.svcTpl](name);
+  serviceForm.execStart.value = t.exec;
+  if (!serviceForm.workingDirectory.value.trim()) serviceForm.workingDirectory.value = t.dir;
+  $$('#svc-templates [data-svc-tpl]').forEach((x) => x.classList.toggle('active', x === b));
+  checkServiceExec();
+  serviceForm.execStart.focus();
+});
+
+/** systemd runs the command without a shell, so it must start with a full path — say so while typing. */
+function checkServiceExec() {
+  const cmd = serviceForm.execStart.value.trim();
+  const warn = $('#svc-exec-warn');
+  const first = cmd.split(/\s+/)[0] || '';
+  const bad = cmd && !first.startsWith('/');
+  const known = { npm: '/usr/bin/npm', node: '/usr/bin/node', python: '/usr/bin/python3', python3: '/usr/bin/python3', bash: '/bin/bash', sh: '/bin/sh', yarn: '/usr/bin/yarn', pnpm: '/usr/bin/pnpm' };
+  warn.innerHTML = bad
+    ? `<b>${esc(first)}</b> is not a full path, so systemd will not find it.${known[first] ? ` Try <code>${esc(`${known[first]}${cmd.slice(first.length)}`)}</code> <button type="button" class="btn tiny" data-svc-fix="${esc(`${known[first]}${cmd.slice(first.length)}`)}">Use this</button>` : ' Run <code>which ' + esc(first) + '</code> on the server to find it.'}`
+    : '';
+  warn.classList.toggle('hidden', !bad);
+}
+
+serviceForm.execStart.addEventListener('input', checkServiceExec);
+$('#svc-exec-warn').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-svc-fix]');
+  if (!b) return;
+  serviceForm.execStart.value = b.dataset.svcFix;
+  checkServiceExec();
+});
+
+function setServiceRestart(value) {
+  $('#svc-restart').value = value;
+  $$('#svc-restart-cards [data-svc-restart]').forEach((b) => b.classList.toggle('active', b.dataset.svcRestart === value));
+  $('#svc-wait-field').classList.toggle('hidden', value === 'no');
+}
+
+$('#svc-restart-cards').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-svc-restart]');
+  if (b) setServiceRestart(b.dataset.svcRestart);
+});
 
 $('#btn-add-service').addEventListener('click', openServiceModal);
 
@@ -3954,15 +4121,22 @@ function openServerModal(server = null) {
 }
 
 $('#btn-add-server').addEventListener('click', () => openServerModal());
+
+// Esc closes it too — unless a confirmation on top of it has the keyboard.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || serverModal.classList.contains('hidden') || document.querySelector('.ask-backdrop')) return;
+  serverModal.classList.add('hidden');
+});
 $('#btn-server-guide-back').addEventListener('click', () => srvGoTo(SERVER_GUIDE.length - 2));
 
 /* ---------------------------------------------- add server: the guided path */
 
 /*
  * "Add server" first asks whether there is a server already. If there is, the
- * connection form opens straight away. If not, a four-step guide turns an
- * ordinary PC or laptop into one: install Ubuntu Server, turn on SSH, keep it
- * running around the clock, then connect — the same form, as the last step.
+ * connection form opens straight away. If not, a three-step guide turns an
+ * ordinary PC or laptop into one: install Ubuntu Server, run the one setup file
+ * (SSH, never sleep, lid, screen, firewall… — see setupScript.js), then connect —
+ * the same form, as the last step, which can read the file's closing summary.
  */
 
 /** A command with a Copy button. */
@@ -3973,6 +4147,121 @@ const guideCmd = (text, note = '') => `
   </div>${note ? `<p class="muted small cmd-note">${note}</p>` : ''}`;
 
 const guideTip = (kind, html) => `<div class="guide-tip ${kind}">${html}</div>`;
+
+/** The choices of the setup file: [query key, label, what it does, on by default]. */
+const SETUP_CHOICES = [
+  ['sleep', 'Never sleep', 'No sleep, suspend or hibernate — even if something asks', true],
+  ['lid', 'Lid closed keeps running', 'Laptop keeps serving with the lid shut', true],
+  ['screen', 'Screen turns off', 'Screen goes dark when idle; the computer stays on', true],
+  ['wifi', 'Wi-Fi never dozes', 'Turns Wi-Fi power saving off for good', true],
+  ['wol', 'Wake-on-LAN', 'Another device on the network can switch it on', true],
+  ['time', 'Time zone & clock sync', 'Your time zone and automatic time', true],
+  ['firewall', 'Firewall', 'Allows SSH, then turns ufw on', true],
+  ['web_ports', 'Open web ports 80 / 443', 'For websites and SSL certificates', true],
+  ['fail2ban', 'Block password guessing', 'Bans addresses that keep failing to sign in', true],
+  ['updates', 'Security updates', 'Installed automatically every day', true],
+  ['sudo', 'Passwordless sudo', 'The panel manages it without a sudo password', true],
+  ['swap', 'Swap', 'Adds 2 GB swap under 4 GB of memory', true],
+  ['tools', 'Basic tools', 'curl, git, htop, nano, unzip', true],
+  ['docker', 'Docker', 'Install now — the panel can also do it later', false],
+];
+
+const browserTimezone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } };
+
+const SETUP_FILE_STEP = {
+  key: 'setup',
+  title: 'Run the setup file',
+  body: () => `
+    <h3>Run one file, and the machine is ready</h3>
+    <p class="muted">Tick what you want, download the file, run it once on the new machine. It turns on SSH, keeps the machine
+      awake 24/7 and does the rest — then tells you exactly what to type in the next step. Safe to run again.</p>
+
+    <form class="setup-form" id="setup-form" onsubmit="return false">
+      <div class="setup-choices">
+        <label class="setup-choice locked"><input type="checkbox" checked disabled />
+          <span><b>SSH</b><small>How AJ Pilot signs in — always on</small></span></label>
+        ${SETUP_CHOICES.map(([key, label, sub, on]) => `
+        <label class="setup-choice"><input type="checkbox" name="${key}" ${on ? 'checked' : ''} />
+          <span><b>${esc(label)}</b><small>${esc(sub)}</small></span></label>`).join('')}
+      </div>
+      <div class="row">
+        <label class="narrow">SSH port<input name="ssh_port" type="number" min="1" max="65535" value="22" /></label>
+        <label class="narrow">Screen off after <span class="muted small">(min)</span><input name="screen_minutes" type="number" min="1" max="60" value="1" /></label>
+        <label>Time zone<input name="timezone" value="${esc(browserTimezone())}" placeholder="Asia/Kolkata" autocomplete="off" spellcheck="false" /></label>
+      </div>
+      <details class="ngx-advanced">
+        <summary>Optional: machine name, user, SSH key</summary>
+        <div class="row">
+          <label>New machine name<input name="hostname" placeholder="home-server" autocomplete="off" spellcheck="false" /></label>
+          <label>Ubuntu username <span class="muted small">(empty: whoever runs it)</span><input name="user" placeholder="ajay" autocomplete="off" spellcheck="false" /></label>
+        </div>
+        <label>SSH public key <span class="muted small">(the .pub file — lets a key sign in too)</span>
+          <textarea name="ssh_key" rows="2" placeholder="ssh-ed25519 AAAA… you@laptop" spellcheck="false"></textarea></label>
+      </details>
+      <div class="setup-download">
+        <button type="button" class="btn primary" id="btn-setup-download">⬇ Download aj-pilot-setup.sh</button>
+        <span class="muted small" id="setup-download-msg">Contains only these choices — no passwords or keys from the panel.</span>
+      </div>
+    </form>
+
+    <ol class="guide-steps">
+      <li>
+        <b>Copy the file to the machine</b>
+        <div class="setup-ways">
+          <div class="guide-box">
+            <b>With a USB stick</b>
+            <p class="muted small">Copy the file onto a stick, plug it into the machine, then:</p>
+            ${guideCmd('lsblk -o NAME,SIZE,LABEL,MOUNTPOINT', 'Find the stick — e.g. <code>sdb1</code>.')}
+            ${guideCmd('sudo mount /dev/sdb1 /mnt\ncp /mnt/aj-pilot-setup.sh ~/\nsudo umount /mnt')}
+          </div>
+          <div class="guide-box">
+            <b>Over the network</b>
+            <p class="muted small">If you ticked “Install OpenSSH server” while installing — from your computer (Windows PowerShell, Mac or Linux):</p>
+            ${guideCmd('scp aj-pilot-setup.sh your-username@192.168.1.50:', 'Use the machine\'s username and address (<code>hostname -I</code> on the machine shows it).')}
+          </div>
+        </div>
+      </li>
+      <li>
+        <b>Run it</b>
+        ${guideCmd('sudo bash aj-pilot-setup.sh', 'Add <code>--dry-run</code> first to see what it would change without changing anything.')}
+        <p>It takes a few minutes. When it ends with <b>Connect it in AJ Pilot</b>, copy that box — the next step can read it.</p>
+      </li>
+    </ol>
+    ${guideTip('info', 'In a virtual machine or cloud server it skips the laptop, screen and power settings by itself. One thing no file can do: <b>switch back on after a power cut</b> — in the BIOS set <i>Restore on AC power loss</i> to <b>Power On</b>.')}
+
+    <details class="ngx-advanced setup-manual">
+      <summary>Prefer to type the commands yourself?</summary>
+      ${MANUAL_GUIDE.map((s) => s.body()).join('<hr />')}
+    </details>`,
+};
+
+/** Download the setup file for what is ticked; a bad value comes back as a message, not a broken file. */
+async function downloadSetupFile() {
+  const form = $('#setup-form');
+  const msg = $('#setup-download-msg');
+  const q = new URLSearchParams();
+  SETUP_CHOICES.forEach(([key]) => q.set(key, form[key].checked ? '1' : '0'));
+  for (const key of ['ssh_port', 'screen_minutes', 'timezone', 'hostname', 'user', 'ssh_key']) {
+    const v = form[key].value.trim();
+    if (v) q.set(key, v);
+  }
+  const btn = $('#btn-setup-download');
+  busy(btn, true, 'Preparing…');
+  try {
+    const res = await fetch(`/api/servers/setup-script?${q}`, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Download failed (${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement('a'), { href: url, download: 'aj-pilot-setup.sh' });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    msg.innerHTML = '<span style="color:var(--ok)">✓ Downloaded.</span> Copy it to the machine and run it as shown below.';
+  } catch (err) {
+    msg.innerHTML = `<span style="color:var(--err)">${esc(err.message)}</span>`;
+  }
+  busy(btn, false);
+}
 
 const SERVER_GUIDE = [
   {
@@ -4035,6 +4324,15 @@ const SERVER_GUIDE = [
       </ol>
       ${guideTip('ok', 'When it restarts and shows a <code>login:</code> prompt, Ubuntu Server is installed. Sign in with the username and password you chose.')}`,
   },
+  SETUP_FILE_STEP,
+  { key: 'connect', title: 'Connect', body: null },
+];
+
+/**
+ * The same as the setup file, one command at a time — under "Prefer to type the
+ * commands yourself?" for anyone who would rather see each change.
+ */
+const MANUAL_GUIDE = [
   {
     key: 'ssh',
     title: 'Turn on SSH',
@@ -4122,7 +4420,6 @@ sudo update-grub`, 'After a restart the screen goes dark after 60 seconds of no 
 
       ${guideTip('ok', 'Place it somewhere with air around it — on a hard surface, not a bed or a closed cupboard. Heat is what kills old laptops running all day.')}`,
   },
-  { key: 'connect', title: 'Connect', body: null },
 ];
 
 let srvGuideStep = 0;
@@ -4137,7 +4434,29 @@ function srvView(view) {
   $('#server-modal-box').classList.toggle('modal-wide', view === 'guide' || view === 'choose');
   $('#server-modal-hint').hidden = view === 'guide';
   $('#btn-server-guide-back')?.classList.toggle('hidden', !(srvGuided && view === 'form'));
+  // Coming from the setup file: its "Connect it in AJ Pilot" box can fill the form.
+  $('#srv-paste').hidden = !(srvGuided && view === 'form');
 }
+
+/** Read Host / Port / username out of what the setup file printed. */
+function fillFromSetupSummary(text) {
+  const grab = (re) => (re.exec(text) || [])[1];
+  const host = grab(/Host \/ IP\s+([0-9a-fA-F.:]+|[A-Za-z0-9.-]+\.[A-Za-z]{2,})/);
+  const port = grab(/^\s*Port\s+(\d{1,5})\s*$/m);
+  const user = grab(/SSH username\s+([a-z_][a-z0-9_-]*)/);
+  const filled = [];
+  if (host) { serverForm.host.value = host; filled.push('address'); }
+  if (port) { serverForm.port.value = port; filled.push('port'); }
+  if (user) { serverForm.username.value = user; filled.push('username'); }
+  if (user && !serverForm.name.value.trim()) serverForm.name.value = (grab(/renamed to ([A-Za-z0-9-]+)/) || 'home-server');
+  if (/passwordless sudo is on/.test(text)) serverForm.sudo_password.value = '';
+  $('#srv-paste-msg').innerHTML = filled.length
+    ? `<span style="color:var(--ok)">✓ Filled in the ${filled.join(', ')}.</span> Now type the password of <b>${esc(user || 'that user')}</b> and press <b>Test connection</b>.`
+    : 'Nothing recognised yet — paste the whole <b>Connect it in AJ Pilot</b> box.';
+  if (filled.length) serverForm.password.focus();
+}
+
+$('#srv-paste-text').addEventListener('input', (e) => fillFromSetupSummary(e.target.value));
 
 function srvRenderStepper() {
   $('#srv-stepper').innerHTML = SERVER_GUIDE.map((s, i) => `
@@ -4199,6 +4518,7 @@ $('#srv-guide-back').addEventListener('click', () => {
 
 // Copy a command exactly as shown.
 $('#srv-guide').addEventListener('click', async (e) => {
+  if (e.target.closest('#btn-setup-download')) return downloadSetupFile();
   const btn = e.target.closest('[data-copy-cmd]');
   if (!btn) return;
   try {
@@ -9570,12 +9890,23 @@ const DOMAIN_STATUS = {
   error: ['failed', 'err'],
 };
 
+/** How a domain is wired, in a few words. */
+function domainHow(d) {
+  const c = d.config || {};
+  if (c.mode === 'zerotrust') return `Cloudflare Tunnel${c.tunnelName ? ` (${c.tunnelName})` : ''}`;
+  if (c.mode === 'nginx') return `Direct nginx · ${c.ssl ? 'SSL' : 'HTTP only'}`;
+  return `DNS + nginx + SSL${c.proxied ? ' · proxied' : ''}`;
+}
+
+/** Where a live domain answers — plain http for a direct nginx domain without SSL. */
+const domainHref = (d) => d.url || `${d.config?.ssl === false ? 'http' : 'https'}://${d.domain}`;
+
 /** One domain of an app: the link once it is live, how far its setup got, and how it is wired. */
 function domainLine(d) {
   const [text, tone] = DOMAIN_STATUS[d.status] || [d.status || 'not set up', ''];
-  const how = d.config?.mode === 'zerotrust' ? `Cloudflare Tunnel${d.config?.tunnelName ? ` (${d.config.tunnelName})` : ''}` : `DNS + nginx + SSL${d.config?.proxied ? ' · proxied' : ''}`;
+  const how = domainHow(d);
   const name = d.status === 'active'
-    ? `<a class="link-inline" href="https://${esc(d.domain)}" target="_blank" rel="noopener">https://${esc(d.domain)}</a>`
+    ? `<a class="link-inline" href="${esc(domainHref(d))}" target="_blank" rel="noopener">${esc(domainHref(d))}</a>`
     : `<code class="small">${esc(d.domain)}</code>`;
   return `${name} <span class="badge ${tone}">${d.status === 'configuring' ? '<span class="spinner"></span>' : ''}${esc(text)}</span>
     <div class="muted small">${esc(how)} → port ${esc(d.port)}</div>`;
@@ -9724,7 +10055,7 @@ async function refreshAppProgress(id) {
   const allSteps = [...steps, ...(a.domains || []).map((d) => ({
     key: `domain-${d.id}`,
     label: `Domain ${d.domain}`,
-    sub: d.config?.mode === 'zerotrust' ? 'Cloudflare Tunnel' : 'DNS, nginx and SSL',
+    sub: domainHow(d),
     state: { active: 'done', configuring: 'active', error: 'failed' }[d.status] || 'pending',
   }))];
 
@@ -9991,7 +10322,7 @@ function renderAppDetails(a) {
       <div class="two-col" style="margin-top:14px">
         ${kvCard('Where it runs', [
     ['Server', `<b>${esc(a.server?.name || '—')}</b> <span class="muted small">${esc(a.server?.host || '')}</span>`],
-    ['Addresses', [...live.map((d) => `<a class="link-inline" href="https://${esc(d.domain)}" target="_blank" rel="noopener">https://${esc(d.domain)}</a>`),
+    ['Addresses', [...live.map((d) => `<a class="link-inline" href="${esc(domainHref(d))}" target="_blank" rel="noopener">${esc(domainHref(d))}</a>`),
       ...a.containers.map((c) => `<a class="link-inline" href="http://${esc(a.server?.host || '')}:${c.port}" target="_blank" rel="noopener">http://${esc(a.server?.host || '')}:${c.port}</a>`)].map((x) => `<div>${x}</div>`).join('') || '—'],
     ['Created', when(a.created_at)],
     ['Last deployed', when(a.last_deployed_at)],
@@ -10033,9 +10364,9 @@ function renderAppDetails(a) {
       ${(a.domains || []).length ? table(
     [{ label: 'Domain' }, { label: 'Status' }, { label: 'How' }, { label: 'Port', num: true }, { label: '' }],
     a.domains.map((d) => [
-      d.status === 'active' ? `<a class="link-inline" href="https://${esc(d.domain)}" target="_blank" rel="noopener"><b>${esc(d.domain)}</b></a>` : `<b>${esc(d.domain)}</b>`,
+      d.status === 'active' ? `<a class="link-inline" href="${esc(domainHref(d))}" target="_blank" rel="noopener"><b>${esc(d.domain)}</b></a>` : `<b>${esc(d.domain)}</b>`,
       `<span class="badge ${(DOMAIN_STATUS[d.status] || [])[1] || ''}">${d.status === 'configuring' ? '<span class="spinner"></span>' : ''}${esc((DOMAIN_STATUS[d.status] || [d.status])[0])}</span>${d.error ? `<div class="small" style="color:var(--err)">${esc(String(d.error).slice(0, 160))}</div>` : ''}`,
-      `<span class="small">${d.config?.mode === 'zerotrust' ? `Cloudflare Tunnel${d.config.tunnelName ? ` · ${esc(d.config.tunnelName)}` : ''}` : `DNS + nginx + SSL${d.config?.proxied ? ' · proxied' : ''}`}</span>`,
+      `<span class="small">${esc(domainHow(d))}</span>`,
       esc(d.port),
       `<div class="row-actions">
         <button class="btn tiny" data-app-action="domain-log" data-id="${a.id}" data-name="${n}" data-domain-id="${d.id}">Setup log</button>
@@ -10137,33 +10468,50 @@ async function removeDomain(id, domainId, domain, reload) {
 /** Add a domain to an app that is already running. */
 async function openDomainAdd(id, name, reload) {
   const [clouds, a] = await Promise.all([api('/credentials?provider=cloudflare').catch(() => []), api(`/apps/${id}`).catch(() => null)]);
-  if (!clouds.length) {
-    toast('Connect a Cloudflare account first (Account management → Cloudflare)', 'err');
-    return;
-  }
   const ports = a?.ports || [];
   const existing = (a?.domains || []).map((d) => d.domain);
+  const host = a?.server?.host || 'the server';
   openMyDialog({
     title: `Add a domain to ${name}`,
     intro: `${existing.length ? `Already on: ${existing.map((d) => `<code>${esc(d)}</code>`).join(', ')}. ` : ''}The domain is set up in the background; the card shows each step.`,
     fields: `
-      <label>Cloudflare account<select name="domain_cred_id">${clouds.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
-      <div class="row">
-        <label>Subdomain <span class="muted small">(empty for the main domain)</span><input name="domain_sub" placeholder="shop" autocomplete="off" /></label>
-        <label>Main domain<select name="domain_zone" required></select></label>
+      <label>How<select name="domain_mode">
+        ${clouds.length ? `<option value="dns">DNS — Cloudflare + nginx + free SSL certificate (needs ports 80 and 443 open)</option>
+        <option value="zerotrust">Zero Trust — Cloudflare Tunnel (no open ports)</option>` : ''}
+        <option value="nginx">Direct — nginx, my own DNS (no Cloudflare)</option>
+      </select></label>
+      <div data-cf-fields>
+        <label>Cloudflare account<select name="domain_cred_id">${clouds.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
+        <div class="row">
+          <label>Subdomain <span class="muted small">(empty for the main domain)</span><input name="domain_sub" placeholder="shop" autocomplete="off" /></label>
+          <label>Main domain<select name="domain_zone"></select></label>
+        </div>
+      </div>
+      <div data-nginx-fields>
+        <label>Domain<input name="domain_host" placeholder="shop.example.com" autocomplete="off" /></label>
+        <p class="muted small" style="margin:6px 0 0">At your DNS provider, add an <b>A record</b> for it pointing at <code>${esc(host)}</code> (the server's public IP).</p>
+        <label class="check" style="margin-top:10px"><input type="checkbox" name="domain_ssl" checked /> SSL required — free Let's Encrypt certificate, HTTP redirected to HTTPS</label>
       </div>
       <p class="muted small" style="margin:6px 0 0" data-domain-preview></p>
       ${ports.length > 1 ? `<label>Send it to<select name="domain_port">${ports.map((p, i) => `<option value="${p}">port ${p}${i === 0 ? ' (first container)' : ` (container ${i + 1})`}</option>`).join('')}</select></label>` : ''}
-      <label>How<select name="domain_mode">
-        <option value="dns">DNS — nginx + free SSL certificate (needs ports 80 and 443 open)</option>
-        <option value="zerotrust">Zero Trust — Cloudflare Tunnel (no open ports)</option>
-      </select></label>
       <label data-tunnel-field style="display:none">Tunnel<select name="domain_tunnel"><option value="new">This app's tunnel, or a new one on this server</option></select></label>
-      <label>Email for the certificate <span class="muted small">(DNS only, optional)</span><input name="domain_email" type="email" value="${esc(session.user?.email || '')}" /></label>
-      <label class="check" style="margin-top:10px"><input type="checkbox" name="domain_proxied" /> Then proxy it through Cloudflare (DNS only)</label>`,
+      <label data-email-field>Email for the certificate <span class="muted small">(optional)</span><input name="domain_email" type="email" value="${esc(session.user?.email || '')}" /></label>
+      <label class="check" style="margin-top:10px" data-proxied-field><input type="checkbox" name="domain_proxied" /> Then proxy it through Cloudflare (DNS only)</label>
+      ${clouds.length ? '' : '<p class="muted small" style="margin:8px 0 0">Domain on Cloudflare? Connect the account under Account management → Cloudflare to get the DNS and Zero Trust options too.</p>'}`,
     submitLabel: 'Set up domain',
     onOpen(form) {
       const preview = form.querySelector('[data-domain-preview]');
+      const show = (sel, on) => { form.querySelector(sel).style.display = on ? '' : 'none'; };
+      const syncMode = () => {
+        const mode = form.domain_mode.value;
+        show('[data-cf-fields]', mode !== 'nginx');
+        show('[data-nginx-fields]', mode === 'nginx');
+        show('[data-proxied-field]', mode === 'dns');
+        show('[data-email-field]', mode === 'dns' || (mode === 'nginx' && form.domain_ssl.checked));
+        form.domain_zone.required = mode !== 'nginx';
+        form.domain_host.required = mode === 'nginx';
+        showPreview();
+      };
       const fillZones = () => {
         const zones = zonesOfAccount(clouds.find((c) => String(c.id) === form.domain_cred_id.value));
         form.domain_zone.innerHTML = zones.length
@@ -10172,6 +10520,11 @@ async function openDomainAdd(id, name, reload) {
         showPreview();
       };
       const showPreview = () => {
+        if (form.domain_mode.value === 'nginx') {
+          const full = form.domain_host.value.trim().toLowerCase();
+          preview.innerHTML = full ? `The app will answer on <b>${form.domain_ssl.checked ? 'https' : 'http'}://${esc(full)}</b>` : '';
+          return;
+        }
         const full = joinDomain(form.domain_sub.value, form.domain_zone.value);
         preview.innerHTML = full ? `The app will answer on <b>https://${esc(full)}</b>` : 'This account has no domains on Cloudflare — add the domain there first.';
       };
@@ -10186,16 +10539,21 @@ async function openDomainAdd(id, name, reload) {
           .then((r) => (r.tunnels || []).filter((t) => t.remoteConfig)).catch(() => [])));
         form.domain_tunnel.innerHTML = `<option value="new">This app's tunnel, or a new one on this server</option>${lists.flat().map((t) => `<option value="${esc(t.id)}" data-name="${esc(t.name)}">Existing: ${esc(t.name)} — ${esc(t.status)}</option>`).join('')}`;
       };
-      form.domain_mode.addEventListener('change', loadTunnels);
+      form.domain_mode.addEventListener('change', () => { syncMode(); loadTunnels(); });
       form.domain_cred_id.addEventListener('change', () => { fillZones(); loadTunnels(); });
       form.domain_zone.addEventListener('change', showPreview);
       form.domain_sub.addEventListener('input', showPreview);
+      form.domain_host.addEventListener('input', showPreview);
+      form.domain_ssl.addEventListener('change', syncMode);
       fillZones();
+      syncMode();
     },
     async submit(fd) {
       const tunnelOpt = myDialogForm.domain_tunnel.selectedOptions[0];
+      const direct = fd.get('domain_mode') === 'nginx';
       const r = await api(`/apps/${id}/domains`, { method: 'POST', body: {
-        domain: joinDomain(fd.get('domain_sub'), fd.get('domain_zone')), domain_cred_id: fd.get('domain_cred_id'), domain_mode: fd.get('domain_mode'),
+        domain: direct ? String(fd.get('domain_host') || '').trim().toLowerCase() : joinDomain(fd.get('domain_sub'), fd.get('domain_zone')),
+        domain_cred_id: fd.get('domain_cred_id'), domain_mode: fd.get('domain_mode'), domain_ssl: fd.get('domain_ssl') === 'on',
         domain_email: fd.get('domain_email'), domain_proxied: fd.get('domain_proxied') === 'on',
         domain_tunnel: fd.get('domain_tunnel') || 'new', domain_tunnel_name: tunnelOpt?.dataset.name || '',
         domain_port: fd.get('domain_port') || '',
@@ -10563,9 +10921,13 @@ let domainAccounts = [];
 function fillDomainAccounts(clouds) {
   domainAccounts = clouds;
   $('#app-domain-on').checked = false;
-  $('#app-domain-on').disabled = !clouds.length;
-  $('#app-domain-missing').classList.toggle('hidden', clouds.length > 0);
+  // Without Cloudflare a domain can still go in directly through nginx.
+  $('#app-domain-missing').classList.add('hidden');
   $('#app-domain-fields').classList.add('hidden');
+  $$('#app-domain-fields [data-cf-mode]').forEach((l) => l.classList.toggle('hidden', !clouds.length));
+  $(`#form-app-deploy [name=domain_mode][value=${clouds.length ? 'dns' : 'nginx'}]`).checked = true;
+  $('#app-domain-host').value = '';
+  $('#app-domain-ssl').checked = true;
   $('#app-domain-cred').innerHTML = clouds.map((c) => `<option value="${c.id}">${esc(c.name)}${c.username ? ` — ${esc(c.username)}` : ''}</option>`).join('');
   $('#app-domain-email').value = session.user?.email || '';
   $('#app-domain-tunnel').innerHTML = '<option value="new">Create a new tunnel on this server</option>';
@@ -10594,6 +10956,12 @@ function updateDomainZones() {
 }
 
 function updateDomainPreview() {
+  if ($('#form-app-deploy').domain_mode.value === 'nginx') {
+    const host = $('#app-domain-host').value.trim().toLowerCase();
+    $('#app-domain-preview').innerHTML = host
+      ? `The app will answer on <b>${$('#app-domain-ssl').checked ? 'https' : 'http'}://${esc(host)}</b>` : '';
+    return;
+  }
   const full = joinDomain($('#app-domain-sub').value, $('#app-domain-zone').value);
   $('#app-domain-preview').innerHTML = full
     ? `The app will answer on <b>https://${esc(full)}</b>`
@@ -10602,6 +10970,7 @@ function updateDomainPreview() {
 
 $('#app-domain-sub').addEventListener('input', updateDomainPreview);
 $('#app-domain-zone').addEventListener('change', updateDomainPreview);
+$('#app-domain-host').addEventListener('input', updateDomainPreview);
 
 /** Tunnels on the chosen account that the panel can add a hostname to. */
 async function loadDomainTunnels() {
@@ -10622,15 +10991,24 @@ async function loadDomainTunnels() {
 
 function syncDomainFields() {
   const on = $('#app-domain-on').checked;
+  const mode = $('#form-app-deploy').domain_mode.value;
+  const zt = mode === 'zerotrust';
+  const direct = mode === 'nginx';
   $('#app-domain-fields').classList.toggle('hidden', !on);
-  $('#app-domain-zone').required = on;
-  const zt = $('#form-app-deploy').domain_mode.value === 'zerotrust';
-  $('#app-domain-dns').classList.toggle('hidden', zt);
+  $('#app-domain-missing').classList.toggle('hidden', !on || domainAccounts.length > 0);
+  $('#app-domain-zone').required = on && !direct;
+  $('#app-domain-host').required = on && direct;
+  $('#app-domain-cf').classList.toggle('hidden', direct);
+  $('#app-domain-nginx').classList.toggle('hidden', !direct);
+  $('#app-domain-dns').classList.toggle('hidden', mode !== 'dns');
   $('#app-domain-zt').classList.toggle('hidden', !zt);
+  $('#app-domain-email-field').classList.toggle('hidden', zt || (direct && !$('#app-domain-ssl').checked));
+  updateDomainPreview();
   if (on && zt && $('#app-domain-tunnel').options.length <= 1) loadDomainTunnels();
 }
 
 $('#app-domain-on').addEventListener('change', syncDomainFields);
+$('#app-domain-ssl').addEventListener('change', syncDomainFields);
 $$('#form-app-deploy [name=domain_mode]').forEach((r) => r.addEventListener('change', syncDomainFields));
 $('#app-domain-cred').addEventListener('change', () => {
   updateDomainZones();
@@ -10646,6 +11024,15 @@ $('#btn-app-add-cf').addEventListener('click', () => {
 function domainBody(form) {
   if (!$('#app-domain-on').checked) return {};
   const tunnel = $('#app-domain-tunnel');
+  if (form.domain_mode.value === 'nginx') {
+    return {
+      domain_enabled: true,
+      domain: $('#app-domain-host').value.trim().toLowerCase(),
+      domain_mode: 'nginx',
+      domain_ssl: $('#app-domain-ssl').checked,
+      domain_email: form.domain_email.value.trim(),
+    };
+  }
   return {
     domain_enabled: true,
     domain: joinDomain(form.domain_sub.value, form.domain_zone.value),
@@ -11694,61 +12081,80 @@ async function loadServerDocker() {
     }
 
     setTabCount('docker', d.containersRunning);
-    box.innerHTML = `${head(ifCan('create', '<button class="btn tiny primary" data-docker-add-install="1">+ Install a service</button>'))}
-      <div class="tiles" style="margin-bottom:14px">
-        ${tile('Engine', val(d.serverVersion), val(d.cliVersion))}
-        ${tile('Compose', d.composeInstalled ? esc(d.composeVersion) : '<span class="muted">not installed</span>',
-          d.composeInstalled ? 'docker compose' : 'install it from the Installations page')}
-        ${tile('Containers', `${d.containersRunning} / ${d.containersTotal}`, 'running / total')}
-        ${tile('Volumes', String((d.volumes || []).length),
-    (d.volumes || []).filter((v) => v.dangling).length
-      ? `${(d.volumes || []).filter((v) => v.dangling).length} used by nothing`
-      : 'all in use')}
-        ${tile('Registry', hubLogin(d.registry) ? esc(hubLogin(d.registry).username) : '<span class="muted">not signed in</span>',
-          hubLogin(d.registry) ? 'signed in to Docker Hub' : 'public images only')}
-      </div>
+    dockerCache = d;
+    const vols = d.volumes || [];
+    const unused = vols.filter((v) => v.dangling).length;
+    const stopped = d.containers.filter((c) => c.state !== 'running').length;
+    const hub = hubLogin(d.registry);
+    const facts = [
+      `Docker ${esc(d.serverVersion || '')}`,
+      d.composeInstalled ? `Compose ${esc(d.composeVersion)}` : '<span class="muted">no Compose</span>',
+      hub ? `signed in as <b>${esc(hub.username)}</b>` : 'not signed in to a registry',
+    ];
+    const fold = (key, title, badge, body) => `
+      <details class="ngx-fold" id="dk-fold-${key}" ${dockerOpenFolds.has(key) ? 'open' : ''}>
+        <summary><span>${title}</span>${badge}</summary>
+        <div class="ngx-fold-body">${body}</div>
+      </details>`;
 
-      <div class="section-head" style="margin-top:6px">
-        <h2 style="font-size:13px">Registry sign-in</h2>
-        <div class="section-tools">${ifCan('create', '<button class="btn tiny" data-docker-login="1">+ Sign in to a registry</button>')}</div>
-      </div>
-      ${renderRegistry(d.registry)}
-
-      <div class="section-head" style="margin-top:18px">
-        <h2 style="font-size:13px">Networks</h2>
-        <div class="section-tools">${ifCan('create', '<button class="btn tiny" data-docker-add-network="1">+ Add network</button>')}</div>
-      </div>
-      <div class="card">
-        <div class="chips">
-          ${d.networks.map((n) => `<span class="chip"><b>${esc(n.name)}</b> ${esc(n.driver)}
-            ${['bridge', 'host', 'none'].includes(n.name) ? '' : `<button class="link-db" style="margin-left:6px" data-docker-rm-network="${esc(n.name)}" title="Remove this network">✕</button>`}
-          </span>`).join('')}
+    box.innerHTML = `
+      <div class="ngx-hero ok">
+        <div class="ngx-hero-main">
+          <span class="ngx-dot"></span>
+          <div>
+            <div class="ngx-hero-title">🐳 Docker is running</div>
+            <div class="muted small">${facts.join(' · ')}</div>
+          </div>
         </div>
-        <p class="muted small" style="margin:10px 0 0">Containers on the same user-defined network reach each other by container name.</p>
-      </div>
-
-      <div class="section-head" style="margin-top:18px">
-        <h2 style="font-size:13px">Volumes</h2>
-        <div class="section-tools">${volumeSummary(d.volumes)}</div>
-      </div>
-      ${volumeTable(d.volumes, installs)}
-
-      <div class="section-head" style="margin-top:18px">
-        <h2 style="font-size:13px">Installed services</h2>
-        <div class="section-tools"><span class="muted small">${installs.length} installed by this panel</span></div>
-      </div>
-      ${installs.length
-        ? installTable(installs, false)
-        : '<div class="card"><p class="muted small" style="margin:0">Nothing installed here yet. <b>+ Install a service</b> runs MySQL, MongoDB or Redis on this server as a container.</p></div>'}
-
-      <div class="section-head" style="margin-top:18px">
-        <h2 style="font-size:13px">Containers</h2>
-        <div class="section-tools">
-          <input type="search" id="ct-filter" placeholder="Filter containers" />
-          <span class="muted small">${d.containersRunning} running of ${d.containers.length}</span>
+        <div class="ngx-hero-tools">
+          ${ifCan('create', '<button class="btn primary" data-docker-add-install="1">+ Install a service</button>')}
+          <button class="btn tiny ghost" data-docker-reload="1" title="Read Docker again">↻ Refresh</button>
         </div>
       </div>
-      ${containerTable(d.containers)}`;
+
+      <div class="tiles ngx-stats">
+        ${tile('Running', `<span style="color:var(--ok)">${d.containersRunning}</span>`, `of ${d.containersTotal} container(s)`)}
+        ${tile('Stopped', stopped ? `<span style="color:var(--err)">${stopped}</span>` : '0', stopped ? 'exited, paused or created' : 'everything is up')}
+        ${tile('Volumes', String(vols.length), unused ? `<span style="color:var(--warn)">${unused} used by nothing</span>` : 'all in use')}
+        ${tile('Networks', String(d.networks.length), `${d.networks.filter((x) => !['bridge', 'host', 'none'].includes(x.name)).length} created by you`)}
+      </div>
+
+      <div id="dk-usage"></div>
+
+      <div class="ngx-toolbar">
+        ${searchBox('ct-search', 'Search containers, images or ports…', dockerFilter.q)}
+        <div class="seg" id="ct-seg">
+          ${[['all', 'All'], ['running', 'Running'], ['stopped', 'Stopped'], ['apps', 'Apps'], ['installed', 'Installed']]
+    .map(([k, l]) => `<button type="button" data-ct-f="${k}" class="${dockerFilter.f === k ? 'active' : ''}">${l}</button>`).join('')}
+        </div>
+      </div>
+      <div id="ct-cards"></div>
+
+      ${fold('installs', '📦 Installed services', `<span class="badge">${installs.length}</span>`, installs.length
+    ? installTable(installs, false)
+    : '<p class="muted small" style="margin:8px 0 0">Nothing installed here yet. <b>+ Install a service</b> runs MySQL, MongoDB, Redis and more on this server as a container.</p>')}
+
+      ${fold('volumes', '💾 Volumes', `<span class="badge ${unused ? 'warn' : ''}">${vols.length}${unused ? ` · ${unused} unused` : ''}</span>`,
+    `<div class="dk-fold-tools">${volumeSummary(vols)}</div>${volumeTable(vols, installs)}`)}
+
+      ${fold('networks', '🔗 Networks', `<span class="badge">${d.networks.length}</span>`, `
+        <div class="dk-fold-tools"><span class="muted small">Containers on the same network you created reach each other by container name.</span>
+          ${ifCan('create', '<button class="btn tiny primary" data-docker-add-network="1">+ Add network</button>')}</div>
+        <div class="dk-nets">${d.networks.map((x) => {
+    const builtIn = ['bridge', 'host', 'none'].includes(x.name);
+    return `<div class="dk-net">
+            <div><b>${esc(x.name)}</b><div class="muted small">${esc(x.driver)}${builtIn ? ' · built in' : ''}</div></div>
+            ${builtIn ? '' : ifCan('delete', `<button class="btn tiny ghost" data-docker-rm-network="${esc(x.name)}" title="Remove this network">✕</button>`)}
+          </div>`;
+  }).join('')}</div>`)}
+
+      ${fold('registry', '🔑 Registry sign-in', hub ? `<span class="badge ok">${esc(hub.username)}</span>` : '<span class="badge">not signed in</span>', `
+        <div class="dk-fold-tools"><span class="muted small">Sign in to pull private images and lift Docker Hub's anonymous rate limit.</span>
+          ${ifCan('create', '<button class="btn tiny" data-docker-login="1">+ Sign in to a registry</button>')}</div>
+        ${renderRegistry(d.registry)}`)}`;
+    renderDockerUsage();
+    renderContainerCards();
+    loadDockerStats();
   } catch (err) {
     box.innerHTML = `${head()}<div class="msg err">${esc(err.message)}</div>`;
   }
@@ -11782,45 +12188,258 @@ function portLines(text) {
   return out.length ? out.map((l) => `<div class="nowrap">${l}</div>`).join('') : '—';
 }
 
-function containerTable(containers) {
-  if (!containers.length) return '<div class="card"><p class="muted small" style="margin:0">No containers on this server.</p></div>';
-  return `<div id="ct-table">${table(
-    [{ label: 'Container · image' }, { label: 'State' }, { label: 'Ports' }, { label: '' }],
-    containers.map((c) => {
-      const n = esc(c.name);
-      const running = c.state === 'running';
-      const paused = c.state === 'paused';
-      return [
-        // Name, then the image it runs, then who put it there — one column instead of two.
-        `<button class="link-db nowrap" data-ct-action="details" data-name="${n}"><b>${n}</b></button>
-          <div style="margin-top:3px"><code class="small">${esc(c.image)}</code></div>
-          ${ctOwner(c) ? `<div class="muted small nowrap" style="margin-top:2px">${ctOwner(c)}</div>` : ''}`,
-        `<span class="badge ${CT_STATE[c.state] ?? ''}">${esc(c.state)}</span><div class="muted small">${esc(c.status || '')}</div>`,
-        `<span class="small">${portLines(c.ports)}</span>`,
-        `<div class="row-actions">
-          <button class="btn tiny" data-ct-action="details" data-name="${n}">Details</button>
-          <button class="btn tiny" data-ct-action="logs" data-name="${n}">Logs</button>
-          ${ifCan('create', running
-    ? `<button class="btn tiny" data-ct-action="stop" data-name="${n}">Stop</button>`
-    : paused ? `<button class="btn tiny" data-ct-action="unpause" data-name="${n}">Resume</button>`
-      : `<button class="btn tiny" data-ct-action="start" data-name="${n}">Start</button>`)}
-          ${ifCan('create', `<button class="btn tiny" data-ct-action="restart" data-name="${n}">Restart</button>`)}
-        </div>`,
-      ];
-    })
-  )}</div>`;
+/** The last Docker summary, the container search and filter, and which sections are open. */
+let dockerCache = null;
+const dockerFilter = { q: '', f: 'all' };
+const dockerOpenFolds = new Set();
+
+document.addEventListener('toggle', (e) => {
+  const key = /^dk-fold-(\w+)$/.exec(e.target.id || '')?.[1];
+  if (key) dockerOpenFolds[e.target.open ? 'add' : 'delete'](key);
+}, true);
+
+/** Published ports as chips; one open on every address is a link to it on this server. */
+function portChips(text) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of String(text || '').split(',').map((p) => p.trim()).filter(Boolean)) {
+    const m = /^(?:(\[[^\]]*\]|[\d.]+):)?(\d+)->(\d+)\/(\w+)$/.exec(raw);
+    if (!m) { out.push(`<span class="ct-port muted" title="Exposed inside Docker only">${esc(raw)}</span>`); continue; }
+    const [, addr, host, inside, proto] = m;
+    const key = `${host}-${inside}-${proto}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const open = !addr || ['0.0.0.0', '[::]'].includes(addr);
+    const label = `${open ? '' : `${addr}:`}${host} → ${inside}${proto !== 'tcp' ? `/${proto}` : ''}`;
+    out.push(open && proto === 'tcp' && currentServer?.host
+      ? `<a class="ct-port" href="http://${esc(currentServer.host)}:${esc(host)}" target="_blank" rel="noopener" title="Open http://${esc(currentServer.host)}:${esc(host)}">${esc(label)} ↗</a>`
+      : `<span class="ct-port" title="Only on ${esc(addr || '')}">${esc(label)}</span>`);
+  }
+  return out.join('');
+}
+
+const ctMark = (c) => (c.managedKind === 'app' ? ['🚀', 'Your app'] : c.managedKind ? ['📦', `Installed ${c.managedKind}`] : ['🐳', 'Container']);
+
+/** One container: who owns it, is it up, what it runs, where it answers, and what to do with it. */
+function containerCard(c) {
+  const n = esc(c.name);
+  const running = c.state === 'running';
+  const paused = c.state === 'paused';
+  const [icon, owner] = ctMark(c);
+  const tone = CT_STATE[c.state] ?? '';
+  const ports = portChips(c.ports);
+  return `<div class="ct-card ${tone || 'idle'}">
+    <div class="ct-head">
+      <span class="ct-icon" title="${esc(owner)}">${icon}</span>
+      <div class="ct-title">
+        <button class="ct-name" data-ct-action="details" data-name="${n}" title="Open its page">${n}</button>
+        <div class="muted small">${esc(c.managedApp && c.managedKind === 'app' ? `app ${c.managedApp}` : owner)}</div>
+      </div>
+      <span class="badge ${tone}">${esc(c.state)}</span>
+    </div>
+    <div class="ct-status">${running ? '<span class="ct-live"></span>' : ''}${esc(c.status || '')}</div>
+    <code class="ct-image" title="${esc(c.image)}">${esc(c.image)}</code>
+    <div class="ct-ports">${ports || '<span class="muted small">No published ports</span>'}</div>
+    ${ctUsage(c)}
+    <div class="ct-foot">
+      <button class="btn tiny ghost" data-ct-action="logs" data-name="${n}">📄 Logs</button>
+      <button class="btn tiny ghost" data-ct-action="details" data-name="${n}">Details</button>
+      <span class="ct-foot-gap"></span>
+      ${ifCan('create', running
+    ? `<button class="btn tiny" data-ct-action="restart" data-name="${n}" title="Restart">⟳</button><button class="btn tiny" data-ct-action="stop" data-name="${n}">■ Stop</button>`
+    : paused ? `<button class="btn tiny primary" data-ct-action="unpause" data-name="${n}">▶ Resume</button>`
+      : `<button class="btn tiny primary" data-ct-action="start" data-name="${n}">▶ Start</button>`)}
+    </div>
+  </div>`;
+}
+
+/* live usage: docker stats + docker system df, polled while the tab is on screen */
+
+let dockerStats = null;
+let dockerStatsServer = null;
+let dockerStatsTimer = null;
+let dockerStatsPaused = false;
+const DOCKER_STATS_EVERY = 15000;
+
+const pctOf = (part, whole) => (whole ? Math.min(100, Math.max(0, (part / whole) * 100)) : 0);
+const pctText = (v) => (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+const meterTone = (v) => (v >= 85 ? 'err' : v >= 60 ? 'warn' : 'ok');
+
+/** One running container's usage, for its card. */
+function ctUsage(c) {
+  if (c.state !== 'running') return '';
+  if (!dockerStats || dockerStatsServer !== currentServerId) {
+    return '<div class="ct-usage loading"><span class="sk" style="width:70%;height:8px"></span><span class="sk" style="width:50%;height:8px"></span></div>';
+  }
+  const s = dockerStats.containers[c.name];
+  if (!s) return '<div class="ct-usage"><span class="muted small">No usage reported yet</span></div>';
+  const cpu = pctOf(s.cpuPct || 0, dockerStats.host.cores * 100);
+  const limit = s.memoryLimitBytes || dockerStats.host.memoryBytes;
+  const mem = s.memoryPct ?? pctOf(s.memoryBytes || 0, limit);
+  const ofServer = limit && dockerStats.host.memoryBytes && Math.abs(limit - dockerStats.host.memoryBytes) < dockerStats.host.memoryBytes * 0.05;
+  return `<div class="ct-usage">
+    <div class="ct-meter" title="${esc(`${pctText(s.cpuPct || 0)}% of one core · ${dockerStats.host.cores} cores on this server`)}">
+      <span class="ct-meter-label">CPU</span>
+      <span class="ct-bar ${meterTone(cpu)}"><span style="width:${cpu}%"></span></span>
+      <b>${pctText(cpu)}%</b>
+    </div>
+    <div class="ct-meter" title="${esc(`${bytes(s.memoryBytes || 0)} of ${ofServer ? 'the server\'s' : 'its limit of'} ${bytes(limit || 0)}`)}">
+      <span class="ct-meter-label">RAM</span>
+      <span class="ct-bar ${meterTone(mem)}"><span style="width:${mem}%"></span></span>
+      <b>${esc(bytes(s.memoryBytes || 0))}</b>
+    </div>
+    <div class="ct-io">
+      <span title="Network received / sent since it started">⇅ <b>${esc(bytes(s.netRxBytes || 0))}</b> ↓ <b>${esc(bytes(s.netTxBytes || 0))}</b> ↑</span>
+      <span title="Disk read / written since it started">💽 <b>${esc(bytes(s.blockReadBytes || 0))}</b> / <b>${esc(bytes(s.blockWriteBytes || 0))}</b></span>
+      <span title="Processes inside">⚙ <b>${esc(s.pids ?? 0)}</b></span>
+    </div>
+  </div>`;
+}
+
+/** The strip above the cards: all containers added up, the busiest one, and Docker's disk use. */
+function renderDockerUsage(error = null) {
+  const box = $('#dk-usage');
+  if (!box) return;
+  const tools = `<div class="dk-usage-tools">
+      <span class="muted small" id="dk-usage-when">${error ? '' : dockerStats ? `Updated ${esc(new Date(dockerStats.at).toLocaleTimeString())}` : 'Reading usage…'}</span>
+      <button class="btn tiny ghost" data-dk-stats="${dockerStatsPaused ? 'resume' : 'pause'}">${dockerStatsPaused ? '▶ Resume' : '⏸ Pause'}</button>
+      <button class="btn tiny ghost" data-dk-stats="now" title="Read it now">↻</button>
+    </div>`;
+  if (error) {
+    box.innerHTML = `<div class="dk-usage"><div class="dk-usage-head"><b>📊 Docker usage</b>${tools}</div><div class="msg err" style="margin:0">${esc(error)}</div></div>`;
+    return;
+  }
+  if (!dockerStats || dockerStatsServer !== currentServerId) {
+    box.innerHTML = `<div class="dk-usage"><div class="dk-usage-head"><b>📊 Docker usage</b>${tools}</div>
+      <div class="dk-usage-grid">${'<div class="dk-usage-cell"><span class="sk" style="width:40%;height:8px"></span><span class="sk" style="width:70%;height:16px"></span></div>'.repeat(4)}</div></div>`;
+    return;
+  }
+  const { host, containers, disk } = dockerStats;
+  const list = Object.entries(containers);
+  const cpuSum = list.reduce((t, [, s]) => t + (s.cpuPct || 0), 0);
+  const memSum = list.reduce((t, [, s]) => t + (s.memoryBytes || 0), 0);
+  const cpu = pctOf(cpuSum, host.cores * 100);
+  const mem = pctOf(memSum, host.memoryBytes);
+  const busiest = list.slice().sort((a, b) => (b[1].cpuPct || 0) - (a[1].cpuPct || 0))[0];
+  const hungriest = list.slice().sort((a, b) => (b[1].memoryBytes || 0) - (a[1].memoryBytes || 0))[0];
+  const diskTotal = disk.reduce((t, d) => t + (d.sizeBytes || 0), 0);
+  const reclaim = disk.reduce((t, d) => t + (d.reclaimableBytes || 0), 0);
+  const DISK_LABEL = { Images: '🖼 Images', Containers: '🐳 Containers', 'Local Volumes': '💾 Volumes', 'Build Cache': '🧱 Build cache' };
+
+  box.innerHTML = `<div class="dk-usage">
+    <div class="dk-usage-head"><b>📊 Docker usage</b><span class="muted small">${list.length} running container(s)</span>${tools}</div>
+    <div class="dk-usage-grid">
+      <div class="dk-usage-cell">
+        <span class="muted small">CPU used by containers</span>
+        <b class="dk-big">${pctText(cpu)}%</b>
+        <span class="ct-bar ${meterTone(cpu)}"><span style="width:${cpu}%"></span></span>
+        <span class="muted small">of ${host.cores} core(s)</span>
+      </div>
+      <div class="dk-usage-cell">
+        <span class="muted small">Memory used by containers</span>
+        <b class="dk-big">${esc(bytes(memSum))}</b>
+        <span class="ct-bar ${meterTone(mem)}"><span style="width:${mem}%"></span></span>
+        <span class="muted small">${pctText(mem)}% of ${esc(bytes(host.memoryBytes))}</span>
+      </div>
+      <div class="dk-usage-cell">
+        <span class="muted small">Busiest right now</span>
+        ${busiest ? `<b class="dk-name">${esc(busiest[0])}</b><span class="small">CPU ${pctText(pctOf(busiest[1].cpuPct || 0, host.cores * 100))}% of the server</span>` : '<b class="dk-name">—</b>'}
+        ${hungriest ? `<span class="small muted">Most memory: <b>${esc(hungriest[0])}</b> · ${esc(bytes(hungriest[1].memoryBytes || 0))}</span>` : ''}
+      </div>
+      <div class="dk-usage-cell">
+        <span class="muted small">Docker disk use</span>
+        <b class="dk-big">${esc(bytes(diskTotal))}</b>
+        <span class="small" style="color:${reclaim > 1e9 ? 'var(--warn)' : 'var(--muted)'}">${esc(bytes(reclaim))} could be freed</span>
+      </div>
+    </div>
+    ${disk.length ? `<div class="dk-disk">${disk.map((d) => `
+      <div class="dk-disk-item" title="${esc(`${d.total} total, ${d.active} in use`)}">
+        <span>${esc(DISK_LABEL[d.type] || d.type)}</span>
+        <b>${esc(bytes(d.sizeBytes || 0))}</b>
+        <span class="muted small">${d.total} · ${d.active} in use${d.reclaimableBytes ? ` · ${esc(bytes(d.reclaimableBytes))} unused` : ''}</span>
+      </div>`).join('')}</div>` : ''}
+    ${reclaim > 1e9 ? `<p class="muted small" style="margin:8px 0 0">Unused images, stopped containers and build cache take <b>${esc(bytes(reclaim))}</b>. Free it on the server with <code>docker system prune</code> (add <code>-a</code> for unused images too).</p>` : ''}
+  </div>`;
+}
+
+/** Read usage now, then again every 15 s while the Docker tab is on screen and not paused. */
+async function loadDockerStats() {
+  clearTimeout(dockerStatsTimer);
+  const box = $('#dk-usage');
+  // The tab was left or redrawn for another server: stop here.
+  if (!box || !box.isConnected) return;
+  const serverId = currentServerId;
+  if (!document.hidden && box.offsetParent !== null && !dockerStatsPaused) {
+    try {
+      const r = await api(`/servers/${serverId}/docker/stats`);
+      if (serverId !== currentServerId) return;
+      dockerStats = r;
+      dockerStatsServer = serverId;
+      renderDockerUsage();
+      renderContainerCards();
+    } catch (err) {
+      if (serverId === currentServerId) renderDockerUsage(err.message);
+    }
+  }
+  if ($('#dk-usage')) dockerStatsTimer = setTimeout(loadDockerStats, DOCKER_STATS_EVERY);
+}
+
+$('#detail-body').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dk-stats]');
+  if (!b) return;
+  const what = b.dataset.dkStats;
+  if (what === 'pause') { dockerStatsPaused = true; clearTimeout(dockerStatsTimer); renderDockerUsage(); return; }
+  dockerStatsPaused = false;
+  renderDockerUsage();
+  loadDockerStats();
+});
+
+/** Draw the cards that match the search box and the filter — troubled ones first. */
+function renderContainerCards() {
+  const box = $('#ct-cards');
+  if (!box || !dockerCache) return;
+  const all = dockerCache.containers;
+  if (!all.length) {
+    box.innerHTML = `<div class="card ngx-empty"><div class="ngx-empty-icon">🐳</div><h3>No containers yet</h3>
+      <p class="muted">Deploy an app, or install a database or cache with <b>+ Install a service</b>.</p></div>`;
+    return;
+  }
+  const q = dockerFilter.q.trim().toLowerCase();
+  const keep = {
+    all: () => true,
+    running: (c) => c.state === 'running',
+    stopped: (c) => c.state !== 'running',
+    apps: (c) => c.managedKind === 'app',
+    installed: (c) => c.managedKind && c.managedKind !== 'app',
+  }[dockerFilter.f] || (() => true);
+  const rank = (c) => ({ restarting: 0, dead: 0, running: 1, paused: 2 }[c.state] ?? 3);
+  const shown = all.filter(keep)
+    .filter((c) => !q || [c.name, c.image, c.ports, c.status, c.managedApp || '', c.managedKind || ''].some((x) => String(x).toLowerCase().includes(q)))
+    .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  box.innerHTML = shown.length
+    ? `<div class="ct-grid">${shown.map(containerCard).join('')}</div>
+       <p class="muted small" style="margin:8px 0 18px">${shown.length} of ${all.length} containers. Click a name to open its page: live stats, live logs, volumes, downloads and backup.</p>`
+    : '<div class="empty" style="margin-bottom:18px">No container matches — clear the search or pick another filter.</div>';
 }
 
 $('#detail-body').addEventListener('input', (e) => {
-  if (e.target.id !== 'ct-filter') return;
-  const q = e.target.value.trim().toLowerCase();
-  $$('#ct-table tbody tr').forEach((tr) => { tr.hidden = q && !tr.textContent.toLowerCase().includes(q); });
+  if (e.target.id !== 'ct-search') return;
+  dockerFilter.q = e.target.value;
+  renderContainerCards();
+});
+
+$('#detail-body').addEventListener('click', (e) => {
+  const b = e.target.closest('#ct-seg button[data-ct-f]');
+  if (!b) return;
+  dockerFilter.f = b.dataset.ctF;
+  $$('#ct-seg button').forEach((x) => x.classList.toggle('active', x === b));
+  renderContainerCards();
 });
 
 async function containerRowAction(btn) {
   const { ctAction: action, name } = btn.dataset;
-  if (action === 'details') return openContainerDetails(name, 'overview');
-  if (action === 'logs') return openContainerDetails(name, 'logs');
+  if (action === 'details') return openContainerPage(currentServerId, name, 'overview');
+  if (action === 'logs') return openContainerPage(currentServerId, name, 'logs');
 
   if (action === 'remove') {
     return openMyDialog({
@@ -11833,10 +12452,9 @@ async function containerRowAction(btn) {
       async submit(fd) {
         if (fd.get('confirm') !== name) throw new Error('The name does not match');
         await api(`/servers/${currentServerId}/containers/${encodeURIComponent(name)}`, { method: 'DELETE', body: { volumes: fd.get('volumes') === 'on' } });
-        $('#modal-container').classList.add('hidden');
         return `Removed ${name}`;
       },
-      after: loadServerDocker,
+      after: () => (ctPageOpen() ? backToDocker() : loadServerDocker()),
     });
   }
 
@@ -11849,33 +12467,90 @@ async function containerRowAction(btn) {
     toast(err.message, 'err');
   }
   busy(btn, false);
-  loadServerDocker();
-  if (!$('#modal-container').classList.contains('hidden')) openContainerDetails(name, currentCtTab);
+  // The Docker tab is read again when you go back to it.
+  if (ctPageOpen()) loadContainerPage(); else loadServerDocker();
 }
 
-/* the details window */
+/* ------------------------------------------------- the container page */
+
+/*
+ * One container gets a page of its own (#/servers/12/containers/mysql/logs),
+ * so it has room for live numbers and a live log, keeps its place on refresh,
+ * and the back button returns to the server's Docker tab. Live stats and logs
+ * arrive over one stream that is dropped the moment the page is left.
+ */
 
 let currentCt = null;
 let currentCtTab = 'overview';
+let ctData = null;
+let ctLive = null;
 
-async function openContainerDetails(name, tab = 'overview') {
+const CT_TABS = ['overview', 'live', 'logs', 'volumes', 'network', 'env', 'processes'];
+const CT_LOG_KEEP = 5000; // lines kept in the browser, and drawn
+const CT_EVERY = 3; // seconds between stats samples
+
+const ctPageOpen = () => !$('#view-container-detail').classList.contains('hidden');
+const ctPath = (rest = '') => `/servers/${currentServerId}/containers/${encodeURIComponent(currentCt)}${rest}`;
+
+async function openContainerPage(serverId, name, tab = 'overview') {
+  const otherServer = String(serverId) !== String(currentServerId);
+  const switching = otherServer || name !== currentCt || !ctPageOpen();
+  if (otherServer) {
+    forgetServerPlace();
+    currentServerId = serverId;
+    currentServer = null;
+  }
   currentCt = name;
-  currentCtTab = tab;
-  const modal = $('#modal-container');
-  $('#ct-title').textContent = name;
-  $('#ct-sub').textContent = 'Reading…';
+  currentCtTab = CT_TABS.includes(tab) ? tab : 'overview';
+
+  if (!switching) return showCtTab(currentCtTab);
+
+  stopCtLive();
+  ctData = null;
+  $('#ct-title').innerHTML = `🐳 ${esc(name)}`;
+  $('#ct-sub').textContent = 'Inspecting the container…';
   $('#ct-state').innerHTML = '';
   $('#ct-actions').innerHTML = '';
-  $('#ct-body').innerHTML = skeleton('detail', { label: 'Inspecting the container…' });
-  modal.classList.remove('hidden');
+  $('#ct-tabs').innerHTML = skeletonTabs(CT_TABS.length);
+  $('#ct-body').innerHTML = skeleton('overview', { label: 'Inspecting the container…' });
+  $('#btn-ct-back').textContent = `← ${currentServer?.name || 'Server'} · Docker`;
+  show('container-detail');
+  setHeading('Servers');
+  window.scrollTo(0, 0);
+
+  if (!currentServer) {
+    try {
+      currentServer = await api(`/servers/${serverId}`);
+    } catch (err) {
+      $('#ct-sub').textContent = '';
+      $('#ct-tabs').innerHTML = '';
+      $('#ct-body').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+      return;
+    }
+    $('#btn-ct-back').textContent = `← ${currentServer.name} · Docker`;
+  }
+  startCtLive();
+  await loadContainerPage();
+}
+
+async function loadContainerPage() {
+  const name = currentCt;
   try {
-    const { container: c } = await api(`/servers/${currentServerId}/containers/${encodeURIComponent(name)}`);
-    if (currentCt !== name) return;
-    renderContainerDetails(c);
+    const { container } = await api(ctPath());
+    if (currentCt !== name || !ctPageOpen()) return;
+    ctData = container;
+    renderContainerPage(container);
   } catch (err) {
+    if (currentCt !== name) return;
     $('#ct-sub').textContent = '';
+    $('#ct-tabs').innerHTML = '';
     $('#ct-body').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
   }
+}
+
+function backToDocker() {
+  currentTab = 'docker';
+  openServer(currentServerId);
 }
 
 const since = (iso) => {
@@ -11883,35 +12558,49 @@ const since = (iso) => {
   return t ? agoWords(new Date(t).toISOString()) : null;
 };
 
-function renderContainerDetails(c) {
+function renderContainerPage(c) {
   const st = c.state;
   const n = esc(c.name);
+  $('#ct-title').innerHTML = `${ctMark(c)[0]} ${n}`;
   $('#ct-sub').innerHTML = `<code class="small">${esc(c.image)}</code> · id ${esc(c.id)}${ctOwner(c) ? ` · ${ctOwner(c)}` : ''}`;
   $('#ct-state').innerHTML = `<span class="badge ${CT_STATE[st.status] ?? ''}">${esc(st.status)}</span>`
+    + (st.running && st.startedAt ? ` <span class="muted small">up ${duration((Date.now() - Date.parse(st.startedAt)) / 1000)}</span>` : '')
     + (st.health ? ` <span class="badge ${st.health.status === 'healthy' ? 'ok' : st.health.status === 'unhealthy' ? 'err' : 'warn'}">${esc(st.health.status)}</span>` : '');
   $('#ct-actions').innerHTML = `
     ${ifCan('create', st.running && !st.paused
-    ? `<button class="btn tiny" data-ct-action="stop" data-name="${n}">Stop</button>`
-    : st.paused ? `<button class="btn tiny" data-ct-action="unpause" data-name="${n}">Resume</button>`
-      : `<button class="btn tiny" data-ct-action="start" data-name="${n}">Start</button>`)}
-    ${ifCan('create', `<button class="btn tiny" data-ct-action="restart" data-name="${n}">Restart</button>`)}
-    ${st.running && !st.paused ? ifCan('create', `<button class="btn tiny" data-ct-action="pause" data-name="${n}">Pause</button>`) : ''}
-    ${c.managedKind ? '' : ifCan('delete', `<button class="btn tiny danger" data-ct-action="remove" data-name="${n}">Remove</button>`)}
-    <button class="btn tiny" data-ct-refresh="1">Refresh</button>`;
+    ? `<button class="btn tiny" data-ct-action="stop" data-name="${n}">■ Stop</button>`
+    : st.paused ? `<button class="btn tiny primary" data-ct-action="unpause" data-name="${n}">▶ Resume</button>`
+      : `<button class="btn tiny primary" data-ct-action="start" data-name="${n}">▶ Start</button>`)}
+    ${ifCan('create', `<button class="btn tiny" data-ct-action="restart" data-name="${n}">⟳ Restart</button>`)}
+    ${st.running && !st.paused ? ifCan('create', `<button class="btn tiny" data-ct-action="pause" data-name="${n}">❚❚ Pause</button>`) : ''}
+    ${ifCan('edit', `<div class="ct-menu">
+      <button class="btn tiny" type="button" id="btn-ct-download" aria-haspopup="true" aria-expanded="false">⬇ Download ▾</button>
+      <div class="menu-pop hidden" id="ct-download-pop" role="menu">
+        <button type="button" class="dropdown-item" role="menuitem" data-ct-dl="compose"><span class="dropdown-icon">📄</span><span>Compose file (YAML)<span class="muted small ct-menu-sub">Recreate it with docker compose up -d</span></span></button>
+        <button type="button" class="dropdown-item" role="menuitem" data-ct-dl="backup"><span class="dropdown-icon">📦</span><span>Backup (.tar.gz)…<span class="muted small ct-menu-sub">Compose file and every volume it uses</span></span></button>
+      </div>
+    </div>`)}
+    <button class="btn tiny" data-ct-refresh="1">Refresh</button>
+    ${c.managedKind ? '' : ifCan('delete', `<button class="btn tiny danger" data-ct-action="remove" data-name="${n}">Remove</button>`)}`;
+
+  const volumes = c.mounts.filter((m) => m.type === 'volume').length;
+  const labels = {
+    overview: 'Overview', live: 'Live stats', logs: 'Logs', volumes: 'Volumes', network: 'Ports & networks', env: 'Environment', processes: 'Processes',
+  };
+  const counts = { volumes: c.mounts.length, env: c.env.length, network: c.ports.length || '' };
+  $('#ct-tabs').innerHTML = CT_TABS.map((k) => `<button class="tab ${k === currentCtTab ? 'active' : ''}" data-ct-tab="${k}">
+      <span>${(k === 'live' || k === 'logs') && st.running ? '<i class="ct-live-dot" aria-hidden="true"></i>' : ''}${esc(labels[k])}</span>
+      <span class="tab-count">${counts[k] ?? ''}</span></button>`).join('');
 
   const s = c.stats;
-  const tabs = [['overview', 'Overview'], ['network', `Ports & networks`], ['storage', `Mounts (${c.mounts.length})`],
-    ['env', `Environment (${c.env.length})`], ['processes', 'Processes'], ['logs', 'Logs']];
-
   const panels = {
     overview: `
       <div class="tiles">
         ${tile('State', esc(st.status), st.running && st.startedAt ? `up ${duration((Date.now() - Date.parse(st.startedAt)) / 1000)}` : st.finishedAt ? `exited ${esc(since(st.finishedAt) || '')} · code ${esc(st.exitCode)}` : '')}
         ${tile('CPU', s ? esc(s.cpu) : '—', s ? `${esc(s.pids)} processes` : 'not running')}
         ${tile('Memory', s ? esc(String(s.memory).split('/')[0].trim()) : '—', s ? `${esc(s.memoryPct)} of ${esc(String(s.memory).split('/')[1]?.trim() || '')}` : '', s ? parseFloat(s.memoryPct) : null)}
-        ${tile('Network I/O', s ? esc(s.net) : '—', 'received / sent')}
-        ${tile('Disk I/O', s ? esc(s.block) : '—', 'read / written')}
         ${tile('Restarts', esc(c.restartCount), `policy: ${esc(c.restartPolicy)}`)}
+        ${tile('Volumes', esc(volumes), volumes ? 'named or anonymous' : 'data lives inside the container')}
         ${tile('Size', esc(c.size || '—'), 'written in the container (virtual = with image)')}
       </div>
       ${st.oomKilled ? '<div class="msg err" style="margin-top:12px">The last run was killed for using too much memory (OOM).</div>' : ''}
@@ -11938,55 +12627,493 @@ function renderContainerDetails(c) {
       </div>
       ${Object.keys(c.labels).length ? section('Labels', table([{ label: 'Label' }, { label: 'Value' }],
     Object.entries(c.labels).map(([k, v]) => [`<code class="small">${esc(k)}</code>`, `<span class="small" style="word-break:break-all">${esc(v)}</span>`]))) : ''}`,
+    live: ctLiveFrame(),
+    logs: ctLogFrame(),
+    volumes: ctVolumesPanel(c),
     network: `
       ${section('Published ports', table([{ label: 'Inside the container' }, { label: 'On the server' }],
     c.ports.map((p) => [`<code>${esc(p.inside)}</code>`, p.host ? `<code>${esc(p.host)}</code>` : '<span class="muted small">not published</span>']), 'No ports exposed'))}
       ${section('Networks', table([{ label: 'Network' }, { label: 'IP address' }, { label: 'Gateway' }, { label: 'Aliases' }],
     c.networks.map((x) => [`<b>${esc(x.name)}</b>`, `<code>${val(x.ip)}</code>`, `<code>${val(x.gateway)}</code>`, `<span class="small">${esc((x.aliases || []).join(', ') || '—')}</span>`]), 'Not attached to any network'))}`,
-    storage: section('Mounts', table([{ label: 'Type' }, { label: 'Source' }, { label: 'Mounted at' }, { label: 'Mode' }],
-      c.mounts.map((m) => [esc(m.type), `<code class="small" style="word-break:break-all">${esc(m.source)}</code>`, `<code class="small">${esc(m.destination)}</code>`, m.readOnly ? '<span class="badge">read only</span>' : 'read-write']),
-      'Nothing mounted — anything written inside is lost when the container is removed')),
-    env: `<p class="muted small">Only the names are shown — values stay on the server.</p>
+    env: `<p class="muted small">Only the names are shown — values stay on the server. The compose file in <b>Download</b> carries them.</p>
       <div class="card"><div class="chips">${c.env.map((k) => `<span class="chip">${esc(k)}</span>`).join('') || '<span class="muted small">none</span>'}</div></div>`,
     processes: c.processes
       ? `<div class="scroll-table">${table(c.processes.header.map((h) => ({ label: h })),
         c.processes.rows.map((r) => [...r.slice(0, c.processes.header.length - 1), r.slice(c.processes.header.length - 1).join(' ')].map((v, i, all) => (i === all.length - 1 ? `<code class="small" style="word-break:break-all">${esc(v)}</code>` : esc(v)))))}</div>`
       : '<div class="card"><p class="muted small" style="margin:0">Not running — no processes.</p></div>',
-    logs: `<div class="section-head" style="margin-bottom:6px">
-        <span class="muted small">Last ${c.logs.length} lines, newest at the bottom</span>
-        <input type="search" id="ct-log-filter" placeholder="Filter lines" />
-      </div>
-      <pre class="log tall" id="ct-log">${esc(c.logs.join('\n')) || 'No output yet.'}</pre>`,
   };
 
-  $('#ct-body').innerHTML = `
-    <div class="chips" id="ct-tabs" style="margin-bottom:12px">${tabs.map(([k, label]) => `<button class="btn tiny ${k === currentCtTab ? 'primary' : ''}" data-ct-tab="${k}">${esc(label)}</button>`).join('')}</div>
-    ${tabs.map(([k]) => `<div data-ct-panel="${k}" ${k === currentCtTab ? '' : 'hidden'}>${panels[k]}</div>`).join('')}`;
-  const log = $('#ct-log');
-  if (log) log.scrollTop = log.scrollHeight;
-  $('#ct-body').dataset.logs = JSON.stringify(c.logs);
+  $('#ct-body').innerHTML = CT_TABS.map((k) => `<div class="tab-panel" data-ct-panel="${k}" ${k === currentCtTab ? '' : 'hidden'}>${panels[k]}</div>`).join('');
+
+  // The live parts are drawn again from what the stream has already brought.
+  if (ctLive) {
+    sayCt(...ctLive.state);
+    const last = ctLive.history[ctLive.history.length - 1];
+    if (last) drawCtLive(last);
+    renderCtLog();
+  }
+  showCtTab(currentCtTab);
 }
 
-$('#modal-container').addEventListener('click', (e) => {
-  const tabBtn = e.target.closest('[data-ct-tab]');
-  if (tabBtn) {
-    currentCtTab = tabBtn.dataset.ctTab;
-    $$('#ct-tabs [data-ct-tab]').forEach((b) => b.classList.toggle('primary', b === tabBtn));
-    $$('#ct-body [data-ct-panel]').forEach((p) => { p.hidden = p.dataset.ctPanel !== currentCtTab; });
-    if (currentCtTab === 'logs') { const l = $('#ct-log'); l.scrollTop = l.scrollHeight; }
-    return;
+function showCtTab(key) {
+  currentCtTab = CT_TABS.includes(key) ? key : 'overview';
+  syncRoute();
+  $$('#ct-tabs [data-ct-tab]').forEach((b) => b.classList.toggle('active', b.dataset.ctTab === currentCtTab));
+  $$('#ct-body [data-ct-panel]').forEach((p) => { p.hidden = p.dataset.ctPanel !== currentCtTab; });
+  if (currentCtTab === 'logs' && ctLive?.follow) scrollCtLog();
+}
+
+/** Every mount, named volumes first and with what can be done with them. */
+function ctVolumesPanel(c) {
+  if (!c.mounts.length) {
+    return `<div class="card ngx-empty"><div class="ngx-empty-icon">💾</div><h3>Nothing is mounted</h3>
+      <p class="muted">Anything this container writes lives inside it, and is lost when the container is removed.</p></div>`;
   }
-  if (e.target.closest('[data-ct-refresh]')) return openContainerDetails(currentCt, currentCtTab);
-  const act = e.target.closest('button[data-ct-action]');
-  if (act) containerRowAction(act);
+  const vols = c.mounts.filter((m) => m.type === 'volume');
+  const other = c.mounts.filter((m) => m.type !== 'volume');
+  const mode = (m) => (m.readOnly ? '<span class="badge">read only</span>' : '<span class="badge ok">read-write</span>');
+
+  const cards = vols.map((m) => `<div class="ct-vol">
+      <div class="ct-vol-head">
+        <span class="ct-vol-icon" aria-hidden="true">💾</span>
+        <div class="ct-vol-title">
+          <b title="${esc(m.source)}">${m.anonymous ? `Anonymous volume <code class="small">${esc(m.source.slice(0, 12))}</code>` : esc(m.source)}</b>
+          <div class="muted small">mounted at <code>${esc(m.destination)}</code> ${mode(m)}</div>
+        </div>
+        <span class="ct-vol-size" title="Size on the server">${m.sizeBytes === null ? '—' : bytes(m.sizeBytes)}</span>
+      </div>
+      <div class="ct-vol-meta">
+        ${m.mountpoint ? `<div class="muted small">On the server: <code>${esc(m.mountpoint)}</code></div>` : ''}
+        <div class="muted small">${m.sharedWith?.length ? `Also used by ${m.sharedWith.map((u) => `<b>${esc(u)}</b>`).join(', ')}` : 'Only this container uses it'}</div>
+      </div>
+      ${ifCan('edit', `<div class="ct-vol-foot"><button class="btn tiny" data-ct-vol-dl="${esc(m.source)}">⬇ Download .tar.gz</button></div>`)}
+    </div>`).join('');
+
+  return `
+    ${vols.length ? `<div class="section-head"><h2>Volumes</h2><span class="muted small">${vols.length} · ${bytes(vols.reduce((t, m) => t + (m.sizeBytes || 0), 0))} in all</span></div>
+      <div class="ct-vols">${cards}</div>` : ''}
+    ${other.length ? section('Other mounts', table([{ label: 'Kind' }, { label: 'From' }, { label: 'Mounted at' }, { label: 'Mode' }],
+    other.map((m) => [
+      m.type === 'bind' ? 'Folder on the server' : m.type === 'tmpfs' ? 'Memory (tmpfs)' : esc(m.type),
+      `<code class="small" style="word-break:break-all">${esc(m.source || '—')}</code>`,
+      `<code class="small">${esc(m.destination)}</code>`,
+      mode(m),
+    ]))) : ''}
+    <p class="muted small" style="margin-top:12px">💡 <b>Download → Backup</b> copies every volume here at once, with the compose file.
+      Folders from the server are not in it — download those from the file manager.</p>`;
+}
+
+/* live stats and logs, over one stream */
+
+function startCtLive() {
+  stopCtLive();
+  const live = {
+    server: currentServerId, name: currentCt, history: [], logs: [], lastTs: '',
+    paused: false, pending: 0, follow: true, state: ['connecting', 'Opening a session on the server…'],
+  };
+  live.stream = new EventSource(`/api${ctPath('/stream')}?every=${CT_EVERY * 1000}&tail=200`);
+  ctLive = live;
+  const say = (kind, text) => {
+    live.state = [kind, text];
+    if (ctLive === live) sayCt(kind, text);
+  };
+  say(...live.state);
+
+  live.stream.addEventListener('sample', (e) => {
+    if (ctLive !== live) return;
+    try {
+      const s = JSON.parse(e.data);
+      s.rates = appLiveRates(s, live.history[live.history.length - 1]);
+      live.history.push(s);
+      if (live.history.length > HISTORY) live.history.shift();
+      say('live', `every ${CT_EVERY}s · ${new Date(s.at).toLocaleTimeString()}`);
+      drawCtLive(s);
+    } catch { /* one bad frame is not worth tearing the view down */ }
+  });
+  live.stream.addEventListener('log', (e) => {
+    if (ctLive !== live) return;
+    try {
+      // A reconnect sends the last lines again; only the ones after what we have are new.
+      const fresh = JSON.parse(e.data).lines.filter((l) => {
+        const ts = ctSortTs(l.split(' ')[0]);
+        return !ts || ts > live.lastTs;
+      });
+      if (!fresh.length) return;
+      const ts = ctSortTs(fresh[fresh.length - 1].split(' ')[0]);
+      if (ts) live.lastTs = ts;
+      live.logs.push(...fresh);
+      if (live.logs.length > CT_LOG_KEEP) live.logs.splice(0, live.logs.length - CT_LOG_KEEP);
+      appendCtLog(fresh);
+    } catch { /* as above */ }
+  });
+  live.stream.addEventListener('problem', (e) => {
+    const { error, source } = JSON.parse(e.data);
+    say('problem', source === 'logs' ? `Logs: ${error}` : error);
+  });
+  live.stream.addEventListener('end', () => say('reconnecting', 'The live view timed out — reconnecting…'));
+  live.stream.onerror = () => say('reconnecting', 'Connection lost — reconnecting…');
+}
+
+function stopCtLive() {
+  if (!ctLive) return;
+  ctLive.stream.close();
+  ctLive = null;
+}
+
+/** Docker's timestamps drop trailing zeros; padded to nanoseconds they compare as text. */
+const ctSortTs = (ts) => (/^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(ts || '')
+  ? ts.replace(/(?:\.(\d+))?Z$/, (_, frac = '') => `.${frac.padEnd(9, '0')}Z`) : '');
+
+/** The same connection state on both live tabs. */
+function sayCt(kind, text) {
+  setLiveState(kind, text, '#ctl-state');
+  setLiveState(kind, text, '#ctlog-state');
+}
+
+function ctLiveFrame() {
+  return `
+    <div class="live-head">
+      <div>
+        <h2 class="live-title">Live stats</h2>
+        <div class="muted small" id="ctl-footer">&nbsp;</div>
+      </div>
+      <div class="section-tools" id="ctl-state"></div>
+    </div>
+    <div id="ctl-alerts"></div>
+    <div class="live-kpis">
+      ${liveKpi('cpu', 'CPU', 'ctl')}
+      ${liveKpi('mem', 'Memory', 'ctl')}
+      ${liveKpi('net', 'Network', 'ctl')}
+      ${liveKpi('disk', 'Disk I/O', 'ctl')}
+    </div>
+    <div class="tiles" id="ctl-facts" style="margin-top:14px"></div>`;
+}
+
+function drawCtLive(s) {
+  const c = s.containers[0];
+  if (!c || !$('#ctl-facts')) return;
+  const history = ctLive?.history || [s];
+  const r = s.rates?.byName?.[c.name];
+  const running = c.state === 'running';
+  const cores = s.host.cores;
+  const measuring = '<span class="muted">measuring…</span>';
+  const span = uptimeWords(history.length * CT_EVERY);
+
+  const cpu = history.map((h) => h.containers[0]?.cpuPct || 0);
+  const cpuOfHost = Math.round(((c.cpuPct || 0) / cores) * 10) / 10;
+  setKpi('cpu', {
+    value: running ? `${c.cpuPct ?? 0}%` : '—',
+    tone: meterClass(cpuOfHost),
+    tag: `${cores} cores`,
+    sub: running ? `${cpuOfHost}% of the whole server` : 'not running',
+    sub2: `peak ${Math.max(...cpu)}% · last ${span}`,
+    spark: sparkline(cpu, { max: Math.max(10, ...cpu), color: toneColor(cpuOfHost), label: `CPU over the last ${span}` }),
+  }, 'ctl');
+
+  const mem = history.map((h) => h.containers[0]?.memoryBytes || 0);
+  // A container with no limit reports the host's memory as its limit.
+  const limited = c.memoryLimitBytes && c.memoryLimitBytes < s.host.memoryBytes;
+  const memPct = limited ? c.memoryPct || 0 : s.usage.memoryOfHostPct;
+  setKpi('mem', {
+    value: running ? bytes(c.memoryBytes || 0) : '—',
+    tone: meterClass(memPct),
+    tag: limited ? `limit ${bytes(c.memoryLimitBytes)}` : `of ${bytes(s.host.memoryBytes)}`,
+    sub: running ? `${memPct}% of ${limited ? 'its limit' : "the server's memory"}` : 'not running',
+    sub2: `peak ${bytes(Math.max(...mem))}${limited ? '' : ' · no limit set'}`,
+    spark: sparkline(mem, { max: Math.max(...mem) * 1.2 || 1, color: toneColor(memPct), label: `Memory over the last ${span}` }),
+  }, 'ctl');
+
+  const rx = history.map((h) => h.rates?.byName?.[c.name]?.rx || 0);
+  const tx = history.map((h) => h.rates?.byName?.[c.name]?.tx || 0);
+  setKpi('net', {
+    value: r ? `↓ ${rate(r.rx)}` : '—',
+    tag: 'in / out',
+    sub: r ? `↑ ${rate(r.tx)} <span class="muted">out</span>` : running ? measuring : 'not running',
+    sub2: `${bytes(c.netRxBytes || 0)} in · ${bytes(c.netTxBytes || 0)} out since start`,
+    spark: sparkline(rx, { max: Math.max(...rx, ...tx) || 1, values2: tx, label: 'Network in (solid) and out (dashed)' }),
+  }, 'ctl');
+
+  const rd = history.map((h) => h.rates?.byName?.[c.name]?.read || 0);
+  const wr = history.map((h) => h.rates?.byName?.[c.name]?.write || 0);
+  setKpi('disk', {
+    value: r ? `↑ ${rate(r.write)}` : '—',
+    tag: 'write / read',
+    sub: r ? `↓ ${rate(r.read)} <span class="muted">read</span>` : running ? measuring : 'not running',
+    sub2: `${bytes(c.blockWriteBytes || 0)} written · ${bytes(c.blockReadBytes || 0)} read since start`,
+    spark: sparkline(wr, { max: Math.max(...wr, ...rd) || 1, values2: rd, label: 'Disk writes (solid) and reads (dashed)' }),
+  }, 'ctl');
+
+  $('#ctl-facts').innerHTML = `
+    ${tile('State', `<span class="badge ${CONTAINER_TONE[c.state] ?? 'err'}">${esc(c.state)}</span>`, c.oomKilled ? '<span class="badge err">killed: out of memory</span>' : '')}
+    ${tile('Up for', c.startedAt ? uptimeWords(Math.max(0, (Date.now() - new Date(c.startedAt)) / 1000)) : '—', c.startedAt ? `since ${esc(new Date(c.startedAt).toLocaleString())}` : '')}
+    ${tile('Processes', running ? esc(c.pids ?? 0) : '—', 'inside the container')}
+    ${tile('Restarts', esc(c.restarts), c.restarts ? 'since it was created' : 'none')}
+    ${tile('Health', c.health ? esc(c.health) : '—', c.health ? 'from its health check' : 'no health check')}`;
+  $('#ctl-footer').textContent = `Sampled ${new Date(s.at).toLocaleTimeString()} · charts cover the last ${span}`;
+
+  const problems = [];
+  if (c.state === 'missing') problems.push(['err', `${c.name} no longer exists on this server.`]);
+  else if (c.state === 'restarting') problems.push(['err', `${c.name} is restarting in a loop — read its logs.`]);
+  else if (!running) problems.push(['warn', `${c.name} is ${c.state} — the numbers come back when it starts.`]);
+  if (c.oomKilled) problems.push(['err', `${c.name} was killed for running out of memory.`]);
+  if (c.health === 'unhealthy') problems.push(['err', `${c.name} is failing its health check.`]);
+  if (limited && (c.memoryPct || 0) >= 90) problems.push(['err', `Memory is at ${c.memoryPct}% of its limit.`]);
+  $('#ctl-alerts').innerHTML = problems.map(([tone, text]) => `<div class="msg ${tone}" style="margin-bottom:10px">${esc(text)}</div>`).join('');
+}
+
+function ctLogFrame() {
+  const live = ctLive || {};
+  return `
+    <div class="ct-log-bar">
+      <div class="section-tools" id="ctlog-state"></div>
+      <div class="ct-log-tools">
+        <input type="search" id="ct-log-filter" placeholder="Filter lines" value="${esc(live.filter || '')}" />
+        <label class="check"><input type="checkbox" id="ct-log-follow" ${live.follow === false ? '' : 'checked'} /> Follow</label>
+        <label class="check"><input type="checkbox" id="ct-log-ts" ${live.showTs ? 'checked' : ''} /> Timestamps</label>
+        <button type="button" class="btn tiny" id="btn-ct-log-pause">${live.paused ? '▶ Resume' : '❚❚ Pause'}</button>
+        <button type="button" class="btn tiny" id="btn-ct-log-clear">Clear</button>
+        <button type="button" class="btn tiny" id="btn-ct-log-download">⬇ Download .log</button>
+      </div>
+    </div>
+    <div class="ct-log" id="ct-log" role="log" aria-live="off"></div>
+    <div class="muted small ct-log-foot" id="ct-log-foot">&nbsp;</div>`;
+}
+
+/** One line of output: Docker's timestamp split off, so it can be shown short or not at all. */
+function ctLogLine(raw, showTs) {
+  const el = document.createElement('div');
+  el.className = 'ct-log-line';
+  const sp = raw.indexOf(' ');
+  const ts = sp > 0 && /^\d{4}-\d\d-\d\dT/.test(raw) ? raw.slice(0, sp) : '';
+  const msg = ts ? raw.slice(sp + 1) : raw;
+  if (/\b(error|fatal|panic|exception|traceback|failed)\b/i.test(msg)) el.classList.add('err');
+  else if (/\b(warn|warning)\b/i.test(msg)) el.classList.add('warn');
+  if (ts && showTs) {
+    const t = document.createElement('span');
+    t.className = 'ct-log-ts';
+    const d = new Date(ts);
+    t.textContent = Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString();
+    t.title = ts;
+    el.append(t);
+  }
+  el.append(msg);
+  return el;
+}
+
+const ctLogMatches = (q) => (l) => !q || l.toLowerCase().includes(q);
+
+function renderCtLog() {
+  const box = $('#ct-log');
+  if (!box || !ctLive) return;
+  const q = (ctLive.filter || '').toLowerCase();
+  const shown = ctLive.logs.filter(ctLogMatches(q));
+  const frag = document.createDocumentFragment();
+  for (const l of shown) frag.append(ctLogLine(l, ctLive.showTs));
+  box.replaceChildren(frag);
+  if (!ctLive.logs.length) box.innerHTML = `<div class="muted small">${ctLive.state[0] === 'live' ? 'No output yet — new lines appear here as the container writes them.' : 'Waiting for the first lines…'}</div>`;
+  ctLive.pending = 0;
+  ctLogFoot(shown.length);
+  if (ctLive.follow) scrollCtLog();
+}
+
+function appendCtLog(lines) {
+  const box = $('#ct-log');
+  if (!box) return;
+  if (ctLive.paused) {
+    ctLive.pending += lines.length;
+    return ctLogFoot();
+  }
+  if (box.firstElementChild && !box.firstElementChild.classList.contains('ct-log-line')) box.replaceChildren();
+  const q = (ctLive.filter || '').toLowerCase();
+  const frag = document.createDocumentFragment();
+  for (const l of lines.filter(ctLogMatches(q))) frag.append(ctLogLine(l, ctLive.showTs));
+  box.append(frag);
+  while (box.childElementCount > CT_LOG_KEEP) box.firstElementChild.remove();
+  ctLogFoot(box.childElementCount);
+  if (ctLive.follow) scrollCtLog();
+}
+
+function ctLogFoot(shown = $('#ct-log')?.childElementCount || 0) {
+  const foot = $('#ct-log-foot');
+  if (!foot || !ctLive) return;
+  const total = ctLive.logs.length;
+  foot.textContent = ctLive.paused
+    ? `Paused${ctLive.pending ? ` — ${ctLive.pending} new line${ctLive.pending === 1 ? '' : 's'} waiting` : ''}. Resume to see them.`
+    : `${ctLive.filter ? `${shown} of ${total} lines match` : `${total} line${total === 1 ? '' : 's'}`}${total >= CT_LOG_KEEP ? ` (the newest ${CT_LOG_KEEP} are kept)` : ''} · newest at the bottom`;
+}
+
+function scrollCtLog() {
+  const box = $('#ct-log');
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
+/* downloads */
+
+/**
+ * Fetch a file the server prepares first and save it. Fetched rather than
+ * linked so a failure says why instead of saving an error as a file, and so
+ * the wait — packing a volume can take a while — can be shown.
+ */
+async function downloadToDisk(path, fallbackName, onProgress) {
+  const res = await fetch(`/api${path}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Download failed (${res.status})`);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || fallbackName;
+  const total = Number(res.headers.get('Content-Length')) || 0;
+  const reader = res.body.getReader();
+  const parts = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.length;
+    onProgress?.(got, total);
+  }
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob(parts)), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return { name, size: got };
+}
+
+const progressWords = (got, total) => (total ? `${bytes(got)} of ${bytes(total)} (${Math.round((got / total) * 100)}%)` : bytes(got));
+
+/** One named volume as a .tar.gz — from the container page or the Docker tab. */
+async function downloadVolume(btn, volume) {
+  const label = btn.textContent;
+  busy(btn, true, 'Packing…');
+  try {
+    const r = await downloadToDisk(`/servers/${currentServerId}/docker/volumes/${encodeURIComponent(volume)}/download`, `${volume}.tar.gz`,
+      (got, total) => { btn.textContent = progressWords(got, total); });
+    toast(`Saved ${r.name} (${bytes(r.size)})`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  busy(btn, false);
+  btn.textContent = label;
+}
+
+async function downloadCompose() {
+  toast('Reading the container…');
+  try {
+    const r = await downloadToDisk(ctPath('/compose'), `${currentCt}.docker-compose.yml`);
+    toast(`Saved ${r.name}`);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+function openBackupDialog() {
+  const c = ctData;
+  if (!c) return;
+  const vols = c.mounts.filter((m) => m.type === 'volume');
+  const binds = c.mounts.filter((m) => m.type === 'bind');
+  // Databases are what a half-written copy breaks, so the panel's own installs start with pausing on.
+  const pauseByDefault = Boolean(c.managedKind && c.managedKind !== 'app');
+  openMyDialog({
+    title: `Back up ${c.name}`,
+    intro: `<p class="muted small" style="margin-top:0">One <code>.tar.gz</code> for this container only:</p>
+      <ul class="small ct-backup-list">
+        <li>📄 <b>docker-compose.yml</b> — recreates it with <code>docker compose up -d</code></li>
+        <li>🔎 <b>inspect.json</b> — Docker's full description of it</li>
+        ${vols.length
+    ? vols.map((m) => `<li>💾 <b>${esc(m.anonymous ? `anonymous volume ${m.source.slice(0, 12)}` : m.source)}</b> — ${m.sizeBytes === null ? 'size unknown' : bytes(m.sizeBytes)}, at <code>${esc(m.destination)}</code></li>`).join('')
+    : '<li class="muted">No volumes — only the description is saved</li>'}
+      </ul>
+      ${binds.length ? `<div class="msg warn">Not included — folders from the server: ${binds.map((b) => `<code>${esc(b.source)}</code>`).join(', ')}. Download them from the file manager.</div>` : ''}
+      <div class="msg warn" style="margin-top:8px">The file holds environment variables (passwords included) and your data. Keep it somewhere safe.</div>`,
+    fields: c.state.running && vols.length
+      ? `<label class="check"><input type="checkbox" name="pause" ${pauseByDefault ? 'checked' : ''} /> Pause the container while its volumes are copied</label>
+         <p class="muted small" style="margin:4px 0 0 24px">Recommended for databases — nothing writes mid-copy. It stops answering for as long as the copy takes, then resumes.</p>`
+      : '',
+    submitLabel: 'Download backup',
+    async submit(fd) {
+      const msg = $('#mysql-action-msg');
+      formMsg(msg, 'Packing the backup on the server — this takes a while for large volumes…', 'info');
+      const r = await downloadToDisk(ctPath(`/backup${fd.get('pause') === 'on' ? '?pause=1' : ''}`), `${c.name}-backup.tar.gz`,
+        (got, total) => formMsg(msg, `Downloading… ${progressWords(got, total)}`, 'info'));
+      return `Saved ${r.name} (${bytes(r.size)})`;
+    },
+  });
+}
+
+function toggleCtMenu(open) {
+  const pop = $('#ct-download-pop');
+  const btn = $('#btn-ct-download');
+  if (!pop || !btn) return;
+  const show = open ?? pop.classList.contains('hidden');
+  pop.classList.toggle('hidden', !show);
+  btn.setAttribute('aria-expanded', String(show));
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.ct-menu')) toggleCtMenu(false);
 });
 
-$('#modal-container').addEventListener('input', (e) => {
-  if (e.target.id !== 'ct-log-filter') return;
-  const q = e.target.value.trim().toLowerCase();
-  const all = JSON.parse($('#ct-body').dataset.logs || '[]');
-  $('#ct-log').textContent = (q ? all.filter((l) => l.toLowerCase().includes(q)) : all).join('\n');
+$('#btn-ct-back').addEventListener('click', backToDocker);
+
+$('#view-container-detail').addEventListener('click', (e) => {
+  const tabBtn = e.target.closest('[data-ct-tab]');
+  if (tabBtn) return showCtTab(tabBtn.dataset.ctTab);
+  if (e.target.closest('#btn-ct-download')) return toggleCtMenu();
+  const dl = e.target.closest('[data-ct-dl]');
+  if (dl) {
+    toggleCtMenu(false);
+    return dl.dataset.ctDl === 'compose' ? downloadCompose() : openBackupDialog();
+  }
+  const vol = e.target.closest('button[data-ct-vol-dl]');
+  if (vol) return downloadVolume(vol, vol.dataset.ctVolDl);
+  if (e.target.closest('[data-ct-refresh]')) return loadContainerPage();
+  const act = e.target.closest('button[data-ct-action]');
+  if (act) return containerRowAction(act);
+
+  if (!ctLive) return;
+  if (e.target.closest('#btn-ct-log-pause')) {
+    ctLive.paused = !ctLive.paused;
+    e.target.closest('button').textContent = ctLive.paused ? '▶ Resume' : '❚❚ Pause';
+    return ctLive.paused ? ctLogFoot() : renderCtLog();
+  }
+  if (e.target.closest('#btn-ct-log-clear')) {
+    ctLive.logs = [];
+    return renderCtLog();
+  }
+  if (e.target.closest('#btn-ct-log-download')) {
+    if (!ctLive.logs.length) return toast('There is nothing in the log yet', 'err');
+    saveFile(`${currentCt}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`, `${ctLive.logs.join('\n')}\n`, 'text/plain');
+  }
 });
+
+$('#view-container-detail').addEventListener('input', (e) => {
+  if (e.target.id !== 'ct-log-filter' || !ctLive) return;
+  ctLive.filter = e.target.value.trim();
+  renderCtLog();
+});
+
+$('#view-container-detail').addEventListener('change', (e) => {
+  if (!ctLive) return;
+  if (e.target.id === 'ct-log-follow') {
+    ctLive.follow = e.target.checked;
+    if (ctLive.follow) scrollCtLog();
+  }
+  if (e.target.id === 'ct-log-ts') {
+    ctLive.showTs = e.target.checked;
+    renderCtLog();
+  }
+});
+
+// Scrolling up to read stops following; scrolling back to the bottom picks it up again.
+$('#view-container-detail').addEventListener('scroll', (e) => {
+  if (e.target.id !== 'ct-log' || !ctLive) return;
+  const box = e.target;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  if (atBottom === ctLive.follow) return;
+  ctLive.follow = atBottom;
+  const cb = $('#ct-log-follow');
+  if (cb) cb.checked = atBottom;
+}, true);
+
 
 /* ------------------------------------------------ docker registry sign-in */
 
@@ -12116,9 +13243,10 @@ function volumeTable(volumes = [], installs = []) {
           : '<span class="badge warn">nothing</span>',
         v.size ? esc(v.size) : '<span class="muted small">—</span>',
         `<span class="small">${esc(v.driver)}</span>`,
-        v.dangling && !owner
-          ? ifCan('delete', `<button class="btn tiny danger" data-docker-rm-volume="${esc(v.name)}">Remove</button>`)
-          : '',
+        `<div class="row-actions">
+          ${ifCan('edit', `<button class="btn tiny" data-docker-dl-volume="${esc(v.name)}" title="Download its contents as .tar.gz">⬇ Download</button>`)}
+          ${v.dangling && !owner ? ifCan('delete', `<button class="btn tiny danger" data-docker-rm-volume="${esc(v.name)}">Remove</button>`) : ''}
+        </div>`,
       ];
     }),
     'No named volumes'
@@ -12160,6 +13288,9 @@ $('#view-server-detail').addEventListener('click', async (e) => {
     }
     return loadServerDocker();
   }
+
+  const dlVolume = e.target.closest('button[data-docker-dl-volume]');
+  if (dlVolume) return downloadVolume(dlVolume, dlVolume.dataset.dockerDlVolume);
 
   const rmVolume = e.target.closest('button[data-docker-rm-volume]');
   if (rmVolume) {
@@ -13624,6 +14755,86 @@ $('#view-server-detail').addEventListener('change', (e) => {
 let nginxCache = null;
 const siteOf = (name) => (nginxCache?.sites || []).find((s) => s.name === name) || null;
 
+/** The panel's apps on this server, so a site proxying to one is named by it. */
+let nginxApps = [];
+/** The search box and filter above the domain cards; kept across refreshes. */
+const nginxFilter = { q: '', f: 'all' };
+
+const siteNeedsAttention = (s) => !s.enabled || !s.ssl || (s.certificate?.daysLeft ?? 99) < 14;
+
+/** The app a proxy site forwards to, when it is one of the panel's on this server. */
+function siteApp(s) {
+  const port = Number(/:(\d+)(\/|$)/.exec(s.proxyPass || '')?.[1]);
+  return port ? nginxApps.find((a) => (a.ports || []).includes(port)) || null : null;
+}
+
+/** One domain as a card: is it secure, where does it go, what can be done with it. */
+function nginxSiteCard(s) {
+  const first = s.domains[0] || s.name;
+  const linkable = /\./.test(first) && !first.startsWith('*') && first !== '_';
+  const url = `${s.ssl ? 'https' : 'http'}://${first}`;
+  const app = s.kind === 'proxy' ? siteApp(s) : null;
+  const target = app
+    ? `🚀 <b>${esc(app.name)}</b> <span class="muted small">app · ${esc(s.proxyPass)}</span>`
+    : s.kind === 'proxy'
+      ? `🔌 <code class="small">${esc(s.proxyPass)}</code>`
+      : s.kind === 'static'
+        ? `📁 <code class="small">${esc(s.root)}</code> <span class="muted small">static files</span>`
+        : '<span class="muted small">custom configuration</span>';
+  const days = s.certificate?.daysLeft;
+  const state = !s.enabled ? 'off' : !s.ssl ? 'warn' : days !== null && days !== undefined && days < 14 ? 'warn' : 'ok';
+
+  return `<div class="ngx-site ${state}">
+    <div class="ngx-site-head">
+      <span class="ngx-lock" title="${s.ssl ? 'Secure (HTTPS)' : 'Not secure (HTTP only)'}">${s.ssl ? '🔒' : '⚠️'}</span>
+      <div class="ngx-site-name">
+        ${linkable ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(first)} <span class="ngx-ext">↗</span></a>` : `<b>${esc(first)}</b>`}
+        ${s.domains.length > 1 ? `<div class="ngx-aliases">${s.domains.slice(1).map((d) => `<span class="chip">${esc(d)}</span>`).join('')}</div>` : ''}
+      </div>
+      <div class="ngx-site-badges">${certChip(s)}${s.enabled ? '' : '<span class="badge">disabled</span>'}</div>
+    </div>
+    <div class="ngx-site-target">→ ${target}</div>
+    ${s.enabled && !s.ssl && linkable ? `<div class="ngx-site-warn">Visitors see “Not secure”. ${ifCan('create', `<button class="btn tiny primary" data-nginx="ssl" data-name="${esc(s.name)}">🔒 Add SSL</button>`)}</div>` : ''}
+    <div class="ngx-site-foot">
+      <span class="muted small" title="${esc(s.file)}"><code>${esc(s.file)}</code>${s.managed ? ' · added here' : ''}</span>
+      <div class="row-actions">
+        ${ifCan('edit', `<button class="btn tiny" data-nginx="edit-site" data-name="${esc(s.name)}">Edit</button>`)}
+        ${s.ssl ? ifCan('create', `<button class="btn tiny" data-nginx="ssl" data-name="${esc(s.name)}">Renew SSL</button>`) : ''}
+        ${s.inConfD ? '' : ifCan('edit', `<button class="btn tiny" data-nginx="toggle-site" data-name="${esc(s.name)}" data-enable="${s.enabled ? '0' : '1'}">${s.enabled ? 'Disable' : 'Enable'}</button>`)}
+        ${ifCan('delete', `<button class="btn tiny danger" data-nginx="remove-site" data-name="${esc(s.name)}">Remove</button>`)}
+      </div>
+    </div>
+  </div>`;
+}
+
+/** Draw the domain cards that match the search box and the filter. */
+function renderNginxSites() {
+  const box = $('#ngx-sites');
+  if (!box || !nginxCache) return;
+  const q = nginxFilter.q.trim().toLowerCase();
+  const shown = nginxCache.sites
+    .filter((s) => ({ all: true, secure: s.ssl, insecure: !s.ssl, disabled: !s.enabled }[nginxFilter.f]))
+    .filter((s) => !q || [...s.domains, s.name, s.proxyPass || '', s.root || '', siteApp(s)?.name || ''].some((x) => x.toLowerCase().includes(q)))
+    // What needs a look first, then by name.
+    .sort((a, b) => Number(siteNeedsAttention(b)) - Number(siteNeedsAttention(a)) || (a.domains[0] || a.name).localeCompare(b.domains[0] || b.name));
+  box.innerHTML = shown.length
+    ? shown.map(nginxSiteCard).join('')
+    : '<div class="empty">No domain matches — clear the search or pick another filter.</div>';
+}
+
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'ngx-search') return;
+  nginxFilter.q = e.target.value;
+  renderNginxSites();
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#ngx-filter button[data-f]');
+  if (!b) return;
+  nginxFilter.f = b.dataset.f;
+  $$('#ngx-filter button').forEach((x) => x.classList.toggle('active', x === b));
+  renderNginxSites();
+});
+
 /** How long a certificate has left, said plainly. */
 function certChip(site) {
   if (!site.ssl) return '<span class="badge">no SSL</span>';
@@ -13640,6 +14851,7 @@ async function loadServerNginx() {
   if (!box) return;
   tabsLoaded.add('nginx');
   box.innerHTML = skeleton('detail', { label: 'Reading nginx…', cols: ['name', 'name', 'pill', 'actions'] });
+  nginxApps = [];
 
   const head = (tools = '') => `
     <div class="section-head">
@@ -13666,95 +14878,191 @@ async function loadServerNginx() {
 
     setTabCount('nginx', n.sites.filter((s) => s.enabled).length, n.configTest.ok ? '' : 'err');
 
-    const statusTile = n.running
-      ? tile('Status', '<span class="badge ok">running</span>', `${esc(n.enabled)} at boot`)
-      : tile('Status', `<span class="badge err">${esc(n.active)}</span>`, 'not serving anything');
+    const sites = n.sites;
+    const secure = sites.filter((s) => s.ssl).length;
+    const attention = sites.filter(siteNeedsAttention).length;
+    const certs = n.certbot?.certificates || [];
+    const facts = [
+      n.version ? `nginx ${esc(n.version)}` : 'nginx',
+      n.ports.length ? `listening on ${esc(n.ports.join(', '))}` : 'listening on nothing',
+      n.configTest.ok ? 'config test passes' : '<span style="color:var(--err)">config test fails</span>',
+      n.certbot?.installed ? (n.certbot.autoRenew ? 'certificates renew automatically' : '<span style="color:var(--warn)">certificates do not renew on their own</span>') : 'certbot not installed',
+    ];
 
     box.innerHTML = `
-      ${head(ifCan('create', '<button class="btn tiny primary" data-nginx="add-site">+ Add domain</button>'
-        + '<button class="btn tiny" data-nginx="test">Test config</button>'
-        + '<button class="btn tiny" data-nginx="reload">Reload</button>'))}
-
-      <div class="tiles" style="margin-bottom:14px">
-        ${tile('Version', esc(n.version || '—'), esc(n.confPath))}
-        ${statusTile}
-        ${tile('Workers', String(n.workers), n.ports.length ? `listening on ${esc(n.ports.join(', '))}` : 'nothing listening')}
-        ${tile('Domains', String(n.sites.filter((s) => s.enabled).length),
-    `${n.sites.filter((s) => s.ssl).length} on SSL · ${n.sites.length} file(s)`)}
+      <div class="ngx-hero ${n.running && n.configTest.ok ? 'ok' : 'bad'}">
+        <div class="ngx-hero-main">
+          <span class="ngx-dot"></span>
+          <div>
+            <div class="ngx-hero-title">${n.running ? (n.configTest.ok ? 'nginx is running' : 'nginx is running, but its configuration has an error') : `nginx is ${esc(n.active || 'stopped')}`}</div>
+            <div class="muted small">${facts.join(' · ')}</div>
+          </div>
+        </div>
+        <div class="ngx-hero-tools">
+          ${ifCan('create', '<button class="btn primary" data-nginx="add-site">+ Add domain</button>')}
+          ${ifCan('create', '<button class="btn tiny" data-nginx="test">Test config</button><button class="btn tiny" data-nginx="reload">Reload</button>')}
+          <button class="btn tiny ghost" data-nginx-reload="1" title="Read nginx again">↻</button>
+        </div>
       </div>
 
       ${n.configTest.ok
     ? ''
-    : `<div class="msg err" style="margin-bottom:14px"><b>nginx -t does not pass on this server.</b>
+    : `<div class="msg err" style="margin:0 0 14px"><b>nginx -t does not pass on this server.</b> Fix this first — nginx will not reload until it does.
          <pre class="log" style="margin-top:8px">${esc(n.configTest.output || 'no output')}</pre></div>`}
 
-      ${section('Domains', table(
-    [{ label: 'Domain' }, { label: 'Serves' }, { label: 'SSL' }, { label: 'State' }, { label: '' }],
-    n.sites.map((s) => [
-      `<b>${esc(s.domains[0] || s.name)}</b>
-           ${s.domains.length > 1 ? `<div class="muted small">${esc(s.domains.slice(1).join(', '))}</div>` : ''}
-           <div class="muted small"><code>${esc(s.file)}</code></div>`,
-      s.kind === 'proxy'
-        ? `<code class="small">${esc(s.proxyPass)}</code>`
-        : s.kind === 'static'
-          ? `<code class="small">${esc(s.root)}</code><div class="muted small">static files</div>`
-          : '<span class="muted small">—</span>',
-      `${certChip(s)}${s.certificate ? `<div class="muted small">${esc(s.certificate.name)}</div>` : ''}`,
-      `${s.enabled ? '<span class="badge ok">enabled</span>' : '<span class="badge">disabled</span>'}
-           ${s.managed ? '<div class="muted small">added here</div>' : ''}`,
-      `<div class="row-actions">
-           ${ifCan('edit', `<button class="btn tiny" data-nginx="edit-site" data-name="${esc(s.name)}">Edit</button>`)}
-           ${ifCan('create', `<button class="btn tiny" data-nginx="ssl" data-name="${esc(s.name)}">${s.ssl ? 'Redo SSL' : 'Add SSL'}</button>`)}
-           ${s.inConfD ? '' : ifCan('edit', `<button class="btn tiny" data-nginx="toggle-site" data-name="${esc(s.name)}" data-enable="${s.enabled ? '0' : '1'}">${s.enabled ? 'Disable' : 'Enable'}</button>`)}
-           ${ifCan('delete', `<button class="btn tiny danger" data-nginx="remove-site" data-name="${esc(s.name)}">Remove</button>`)}
-         </div>`,
-    ]),
-    'nginx is serving nothing yet. Add a domain to put it in front of an app on this server.'
-  ))}
+      <div class="tiles ngx-stats">
+        ${tile('Domains', String(sites.length), `${sites.filter((s) => s.enabled).length} enabled`)}
+        ${tile('Secured with SSL', `<span style="color:var(--ok)">${secure}</span>`, sites.length ? `${Math.round((secure / sites.length) * 100)}% of domains` : 'none yet')}
+        ${tile('Need attention', attention ? `<span style="color:var(--warn)">${attention}</span>` : '0', attention ? 'no SSL, expiring soon or disabled' : 'all good')}
+        ${tile('Certificates', String(certs.length), (() => {
+    const left = certs.map((c) => c.daysLeft).filter((d) => typeof d === 'number');
+    if (!left.length) return certs.length ? 'issued on this server' : 'none issued';
+    const next = Math.min(...left);
+    return next < 0 ? '<span style="color:var(--err)">one has expired</span>' : `next expires in ${next} days`;
+  })())}
+      </div>
 
-      ${upstreamPanel(n)}
+      ${sites.length ? `
+        <div class="ngx-toolbar">
+          ${searchBox('ngx-search', 'Search domains, apps or ports…', nginxFilter.q)}
+          <div class="seg" id="ngx-filter">
+            ${[['all', 'All'], ['secure', 'Secure'], ['insecure', 'Not secure'], ['disabled', 'Disabled']]
+    .map(([k, l]) => `<button type="button" data-f="${k}" class="${nginxFilter.f === k ? 'active' : ''}">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div class="ngx-sites" id="ngx-sites"></div>`
+    : `<div class="card ngx-empty">
+          <div class="ngx-empty-icon">🌐</div>
+          <h3>No domains yet</h3>
+          <p class="muted">Add a domain to open something on this server from the internet — free SSL included.</p>
+          <div class="ngx-empty-ways">
+            <div><b>🚀 AJ Pilot app</b><span class="muted small">an app you deployed here</span></div>
+            <div><b>🔌 A port</b><span class="muted small">anything listening, like :3000</span></div>
+            <div><b>📁 A folder</b><span class="muted small">static HTML files</span></div>
+          </div>
+          ${ifCan('create', '<button class="btn primary" data-nginx="add-site">+ Add your first domain</button>')}
+        </div>`}
 
-      ${section('SSL certificates', certbotPanel(n.certbot))}`;
+      <details class="ngx-fold" id="ngx-fold-lb" ${nginxOpenFolds.has('lb') ? 'open' : ''}>
+        <summary><span>⚖️ Load balancing</span>${upstreamHealthBadge(n.upstreams || [])}</summary>
+        <div class="ngx-fold-body" id="ngx-upstreams">${upstreamPanel(n)}</div>
+      </details>
+      <details class="ngx-fold" id="ngx-fold-ports" ${nginxOpenFolds.has('ports') ? 'open' : ''}>
+        <summary><span>🔌 Ports &amp; proxies</span><span class="badge">${(n.listeningPorts || []).length} port(s)</span></summary>
+        <div class="ngx-fold-body">${portsPanel(n)}</div>
+      </details>
+      <details class="ngx-fold" id="ngx-fold-certs" ${nginxOpenFolds.has('certs') || certs.some((c) => certTone(c) !== 'ok') ? 'open' : ''}>
+        <summary><span>🔐 SSL certificates</span>${certFoldBadge(n.certbot)}</summary>
+        <div class="ngx-fold-body">${certbotPanel(n.certbot)}</div>
+      </details>`;
+
+    renderNginxSites();
+    nginxApps = await api(`/apps?server_id=${currentServerId}`).catch(() => []);
+    renderNginxSites();
+    if ($('#ngx-upstreams')) $('#ngx-upstreams').innerHTML = upstreamPanel(n);
   } catch (err) {
     setTabCount('nginx', '!', 'err');
     box.innerHTML = `${head()}<div class="msg err">${esc(err.message)}</div>`;
   }
 }
 
+/** A certificate's health from its days left: expired, expiring within 14 days, or fine. */
+const certTone = (c) => (typeof c.daysLeft !== 'number' ? (c.valid === false ? 'err' : 'ok') : c.daysLeft < 0 ? 'err' : c.daysLeft < 14 ? 'warn' : 'ok');
+
+/** The fold header's badge: the count, coloured by the worst certificate. */
+function certFoldBadge(cb) {
+  const certs = cb?.certificates || [];
+  const tones = certs.map(certTone);
+  const tone = tones.includes('err') ? 'err' : tones.includes('warn') || (cb?.installed && !cb.autoRenew) ? 'warn' : certs.length ? 'ok' : '';
+  return `<span class="badge ${tone}">${certs.length}${tones.includes('err') ? ' · expired' : tones.includes('warn') ? ' · expiring' : ''}</span>`;
+}
+
+/** One certificate: how long it has, what it covers and which sites use it. */
+function certCard(c) {
+  const tone = certTone(c);
+  const days = c.daysLeft;
+  const pct = typeof days === 'number' ? Math.max(0, Math.min(100, Math.round((days / 90) * 100))) : 100;
+  const big = typeof days !== 'number' ? (c.valid === false ? 'Invalid' : 'Valid')
+    : days < 0 ? `Expired ${-days}d ago` : `${days} day${days === 1 ? '' : 's'} left`;
+  const users = (nginxCache?.sites || []).filter((s) => s.certificate?.name === c.name);
+  const name = esc(c.name);
+  return `<div class="cert-card ${tone}">
+    <div class="cert-head">
+      <span class="cert-icon">${tone === 'err' ? '⛔' : tone === 'warn' ? '⏳' : '🔒'}</span>
+      <div class="cert-name" title="${name}">${name}</div>
+      ${ifCan('create', `<button class="btn tiny ${tone === 'ok' ? '' : 'primary'}" data-nginx="renew" data-name="${name}">Renew</button>`)}
+    </div>
+    <div class="cert-life">
+      <div class="cert-days">${esc(big)}</div>
+      <div class="cert-bar"><span style="width:${pct}%"></span></div>
+      <div class="muted small">${c.expiry ? `Expires ${esc(String(c.expiry).slice(0, 16))}` : 'Expiry unknown'}${tone === 'ok' && nginxCache?.certbot?.autoRenew ? ' · renews by itself about 30 days before' : ''}</div>
+    </div>
+    <div class="cert-domains">${c.domains.map((d) => (/^\*/.test(d)
+    ? `<span class="chip">${esc(d)}</span>`
+    : `<a class="chip" href="https://${esc(d)}" target="_blank" rel="noopener">${esc(d)} ↗</a>`)).join('')}</div>
+    <div class="cert-foot">
+      <span class="muted small">${users.length
+    ? `Used by ${users.map((s) => `<b>${esc(s.domains[0] || s.name)}</b>`).join(', ')}`
+    : 'Not used by any nginx domain'}</span>
+      ${c.path ? `<span class="muted small cert-path" title="${esc(c.path)}"><code>${esc(c.path.replace(/\/[^/]+$/, '/'))}</code></span>` : ''}
+    </div>
+  </div>`;
+}
+
 function certbotPanel(cb) {
-  if (!cb.installed) {
-    return `<div class="card">
-      <div class="msg info" style="margin-top:0">
-        <b>certbot is not installed on this server.</b><br />
-        It is what gets free certificates from Let's Encrypt and renews them before they expire.
-      </div>
-      ${ifCan('create', '<div class="card-actions"><button class="btn tiny primary" data-nginx="install-certbot">Install certbot here</button></div>')}
+  if (!cb?.installed) {
+    return `<div class="cert-empty">
+      <div class="ngx-empty-icon">🔐</div>
+      <div><b>certbot is not installed on this server.</b>
+        <p class="muted small" style="margin:4px 0 0">It gets free SSL certificates from Let's Encrypt — the padlock in the browser — and renews them before they expire.</p></div>
+      ${ifCan('create', '<button class="btn primary" data-nginx="install-certbot">Install certbot</button>')}
     </div>`;
   }
 
+  const certs = [...cb.certificates].sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999));
+  const count = (t) => certs.filter((c) => certTone(c) === t).length;
+  const bad = count('err');
+  const soon = count('warn');
+
   return `
-    <div class="tiles" style="margin-bottom:12px">
-      ${tile('certbot', esc(cb.version || 'installed'), cb.nginxPlugin ? 'with the nginx plugin' : 'without the nginx plugin')}
-      ${tile('Automatic renewal', cb.autoRenew
-    ? '<span class="badge ok">on</span>'
-    : `<span class="badge warn">${esc(cb.timer)}</span>`,
-  cb.autoRenew ? 'certbot.timer is active' : 'certificates will not renew themselves')}
-      ${tile('Certificates', String(cb.certificates.length), 'issued on this server')}
+    <div class="cert-status">
+      <div class="cert-stat">
+        <span class="muted small">certbot</span>
+        <b>${esc(String(cb.version || 'installed').replace(/^certbot\s*/i, '') || 'installed')}</b>
+        <span class="small ${cb.nginxPlugin ? '' : 'cert-warn-text'}">${cb.nginxPlugin ? '✓ nginx plugin' : '✗ no nginx plugin'}</span>
+      </div>
+      <div class="cert-stat">
+        <span class="muted small">Automatic renewal</span>
+        ${cb.autoRenew
+    ? '<b style="color:var(--ok)">● On</b><span class="small muted">certbot.timer is active</span>'
+    : `<b class="cert-warn-text">● Off</b>${ifCan('create', '<button class="btn tiny primary" data-nginx="install-certbot">Turn on</button>') || '<span class="small muted">certificates will not renew</span>'}`}
+      </div>
+      <div class="cert-stat">
+        <span class="muted small">Certificates</span>
+        <b>${certs.length}</b>
+        <span class="small">${certs.length
+    ? [`<span style="color:var(--ok)">${count('ok')} healthy</span>`, soon ? `<span style="color:var(--warn)">${soon} expiring</span>` : '', bad ? `<span style="color:var(--err)">${bad} expired</span>` : ''].filter(Boolean).join(' · ')
+    : '<span class="muted">none yet</span>'}</span>
+      </div>
+      <div class="cert-stat cert-stat-actions">
+        ${ifCan('create', `<button class="btn primary" data-nginx="ssl-new">+ Get a certificate</button>
+          ${certs.length ? '<button class="btn tiny" data-nginx="renew-all">Renew everything due</button>' : ''}`)}
+      </div>
     </div>
-    ${table(
-    [{ label: 'Certificate' }, { label: 'Domains' }, { label: 'Expires' }, { label: '' }],
-    cb.certificates.map((c) => [
-      `<b>${esc(c.name)}</b><div class="muted small"><code>${esc(c.path || '')}</code></div>`,
-      c.domains.map((d) => `<span class="chip">${esc(d)}</span>`).join(' '),
-      `${esc(String(c.expiry || '').slice(0, 16))}
-         <div class="muted small">${c.daysLeft === null ? '' : c.daysLeft < 0 ? `expired ${-c.daysLeft} days ago` : `${c.daysLeft} days left`}</div>`,
-      ifCan('create', `<button class="btn tiny" data-nginx="renew" data-name="${esc(c.name)}">Renew</button>`),
-    ]),
-    'No certificates yet. Add SSL to a domain above and one is issued for it.'
-  )}
-    ${ifCan('create', `<div class="card-actions" style="margin-top:10px">
-      <button class="btn tiny" data-nginx="renew-all">Renew everything due</button>
-    </div>`)}`;
+
+    ${bad || soon ? `<div class="cert-alert ${bad ? 'err' : 'warn'}">
+      <span><b>${bad ? `${bad} certificate${bad > 1 ? 's have' : ' has'} expired` : `${soon} certificate${soon > 1 ? 's expire' : ' expires'} within 14 days`}</b>
+        <span class="muted small">— visitors ${bad ? 'already see a security warning' : 'will see a security warning once it lapses'}.${cb.autoRenew ? '' : ' Automatic renewal is off.'}</span></span>
+      ${ifCan('create', '<button class="btn tiny primary" data-nginx="renew-all">Renew everything due</button>')}
+    </div>` : ''}
+
+    ${certs.length
+    ? `<div class="cert-grid">${certs.map(certCard).join('')}</div>`
+    : `<div class="cert-empty">
+        <div class="ngx-empty-icon">🔓</div>
+        <div><b>No certificates yet.</b>
+          <p class="muted small" style="margin:4px 0 0">Use <b>Add SSL</b> on a domain above, or <b>+ Get a certificate</b>. It takes about half a minute and renews by itself.</p></div>
+      </div>`}`;
 }
 
 /** Whether a backend answers, and what holds its port when it is on this server. */
@@ -13779,44 +15087,111 @@ function backendState(t) {
 
 const backendAddress = (t) => (t.kind === 'unix' ? `unix:${t.path}` : t.kind === 'tcp' ? `${t.host}:${t.port}` : t.address);
 
-/** Upstream blocks, proxied locations and the ports bound on this server. */
+/** How an upstream shares traffic, in words a person would use. */
+const UPSTREAM_METHODS = {
+  'round-robin': ['Take turns', 'Each server in order — right for most apps'],
+  least_conn: ['Least busy', 'The server with the fewest open connections'],
+  ip_hash: ['Same visitor, same server', 'Picked by visitor IP — for apps that keep sessions in memory'],
+  hash: ['By a key', 'Picked by a value you choose, such as a cookie'],
+  random: ['Random', 'Any server, at random'],
+};
+
+const upstreamMethodLabel = (method) => {
+  const key = /^hash /.test(method || '') ? 'hash' : method;
+  const [label] = UPSTREAM_METHODS[key] || [method || 'Take turns'];
+  return key === 'hash' ? `${label} (${String(method).slice(5)})` : label;
+};
+
+/** Live servers out of all of them, for the fold's header. */
+function upstreamHealthBadge(upstreams) {
+  const servers = upstreams.flatMap((u) => u.servers.filter((s) => !s.down));
+  if (!upstreams.length) return '<span class="badge">none</span>';
+  const up = servers.filter((s) => s.up === true).length;
+  const tone = up === servers.length ? 'ok' : up ? 'warn' : 'err';
+  return `<span class="badge ${tone}">${upstreams.length} · ${up}/${servers.length} up</span>`;
+}
+
+/** The panel's app a backend belongs to, when it is on this server. */
+function backendApp(sv) {
+  if (sv.kind !== 'tcp' || !['127.0.0.1', 'localhost', '0.0.0.0', currentServer?.host].includes(sv.host)) return null;
+  return nginxApps.find((a) => (a.ports || []).includes(Number(sv.port))) || null;
+}
+
+/** One upstream as a card: its health, how it shares traffic, every server's share, and who uses it. */
+function upstreamCard(u) {
+  const live = u.servers.filter((s) => !s.down && !s.backup);
+  const total = live.reduce((sum, s) => sum + (Number(s.weight) || 1), 0) || 1;
+  const counted = u.servers.filter((s) => !s.down);
+  const up = counted.filter((s) => s.up === true).length;
+  const tone = !counted.length ? '' : up === counted.length ? 'ok' : up ? 'warn' : 'err';
+  const n = esc(u.name);
+
+  const rows = u.servers.map((sv) => {
+    const share = sv.down || sv.backup ? 0 : Math.round(((Number(sv.weight) || 1) / total) * 100);
+    const app = backendApp(sv);
+    const dot = sv.down ? 'off' : sv.up === true ? 'ok' : sv.up === false ? 'err' : 'unknown';
+    const status = sv.down ? 'paused' : sv.up === true ? 'answering' : sv.up === false ? 'not answering' : 'not checked';
+    return `<div class="ups-server">
+      <span class="ups-dot ${dot}" title="${status}"></span>
+      <div class="ups-server-main">
+        <div><code>${esc(backendAddress(sv))}</code>${app ? ` <span class="ups-app">🚀 ${esc(app.name)}</span>` : ''}
+          ${sv.backup ? '<span class="chip">backup</span>' : ''}${sv.down ? '<span class="chip">paused</span>' : ''}</div>
+        <div class="muted small">${status}${sv.up === false && sv.local && sv.listening === false ? ' — nothing listens on this port' : ''}</div>
+      </div>
+      <div class="ups-share" title="${sv.backup ? 'Only used when the others fail' : sv.down ? 'Gets no traffic while paused' : `weight ${esc(sv.weight)}`}">
+        <div class="ups-bar"><span style="width:${share}%"></span></div>
+        <span class="small">${sv.backup ? 'standby' : sv.down ? '—' : `${share}%`}</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="ups-card ${tone}">
+    <div class="ups-head">
+      <div>
+        <div class="ups-name">${n}</div>
+        <div class="muted small">${esc(upstreamMethodLabel(u.method))}${u.keepalive ? ` · keepalive ${esc(u.keepalive)}` : ''}</div>
+      </div>
+      <span class="badge ${tone}">${counted.length ? `${up}/${counted.length} up` : 'no servers'}</span>
+    </div>
+    <div class="ups-servers">${rows || '<div class="muted small">No servers yet — add one.</div>'}</div>
+    <div class="ups-used">
+      ${u.usedBy.length
+    ? `<span class="muted small">Used by</span> ${u.usedBy.map((d) => `<span class="chip">${esc(d)}</span>`).join(' ')}`
+    : `<span class="muted small">Not used by any domain yet. In a domain, send traffic to <code>http://${n}</code>.</span>`}
+    </div>
+    <div class="ups-foot">
+      <span class="muted small" title="${esc(u.file || '')}"><code>${esc(u.file || '')}</code></span>
+      <div class="row-actions">
+        ${ifCan('edit', `<button class="btn tiny" data-nginx="add-upstream-server" data-name="${n}">+ Server</button>
+          <button class="btn tiny" data-nginx="edit-upstream" data-name="${n}">Edit</button>`)}
+        ${ifCan('delete', `<button class="btn tiny danger" data-nginx="delete-upstream" data-name="${n}">Delete</button>`)}
+      </div>
+    </div>
+  </div>`;
+}
+
+/** Upstream blocks: what they are, then a card each. */
 function upstreamPanel(n) {
   const upstreams = n.upstreams || [];
+  const add = ifCan('create', '<button class="btn tiny primary" data-nginx="add-upstream">+ Add upstream</button>');
+  if (!upstreams.length) {
+    return `<div class="ups-empty">
+      <div><b>Share one domain's traffic between several servers.</b>
+        <p class="muted small" style="margin:4px 0 0">Run two copies of an app (say on ports 3000 and 3001) and nginx spreads visitors across
+        them — if one stops, the other keeps answering.</p></div>
+      ${add}
+    </div>`;
+  }
+  return `<div class="ups-intro">
+      <span class="muted small">Each upstream is a group of servers sharing one domain's traffic.</span>${add}
+    </div>
+    <div class="ups-grid">${upstreams.map(upstreamCard).join('')}</div>`;
+}
+
+/** Where nginx forwards to, and every port bound on this server. */
+function portsPanel(n) {
   const proxies = n.proxies || [];
   const ports = n.listeningPorts || [];
-  const allBackends = [...upstreams.flatMap((u) => u.servers), ...proxies.map((p) => p.target).filter((t) => t.kind === 'tcp' || t.kind === 'unix')];
-  const up = allBackends.filter((t) => t.up === true).length;
-  const down = allBackends.filter((t) => t.up === false && !t.down).length;
-
-  const tiles = `<div class="tiles" style="margin-bottom:14px">
-    ${tile('Upstreams', String(upstreams.length), `${upstreams.reduce((s, u) => s + u.servers.length, 0)} server(s) in them`)}
-    ${tile('Proxied locations', String(proxies.length), `${new Set(proxies.flatMap((p) => p.domains)).size} domain(s) · ${proxies.filter((p) => p.stream).length} TCP stream(s)`)}
-    ${tile('Backends', `${up} <span class="muted small">up</span>${down ? ` · <span style="color:var(--err)">${down} down</span>` : ''}`, 'answering right now')}
-    ${tile('Ports bound', String(ports.length), `${ports.filter((p) => p.nginxListens).length} held by nginx · ${ports.filter((p) => p.container).length} by containers · ${ports.filter((p) => p.localOnly).length} localhost only`)}
-  </div>`;
-
-  const upstreamTable = ifCan('create', '<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn tiny primary" data-nginx="add-upstream">+ Add upstream</button></div>') + table(
-    [{ label: 'Upstream' }, { label: 'Balancing' }, { label: 'Servers' }, { label: 'Used by' }, { label: '' }],
-    upstreams.map((u) => [
-      `<b>${esc(u.name)}</b><div class="muted small"><code>${esc(u.file || '')}</code></div>`,
-      `${esc(u.method)}${u.keepalive ? `<div class="muted small">keepalive ${esc(u.keepalive)}</div>` : ''}`,
-      u.servers.map((sv) => `<div style="margin-bottom:6px">
-        <code class="small">${esc(backendAddress(sv))}</code>
-        ${sv.weight !== 1 ? `<span class="chip">weight ${esc(sv.weight)}</span>` : ''}
-        ${sv.backup ? '<span class="chip">backup</span>' : ''}
-        ${sv.maxConns ? `<span class="chip">max_conns ${esc(sv.maxConns)}</span>` : ''}
-        <span class="muted small">max_fails ${esc(sv.maxFails)} / ${esc(sv.failTimeout)}</span>
-        <div>${backendState(sv)}</div>
-      </div>`).join('') || '<span class="muted small">no servers</span>',
-      u.usedBy.length ? u.usedBy.map((d) => `<span class="chip">${esc(d)}</span>`).join(' ') : '<span class="muted small">not used by any site</span>',
-      `<div class="row-actions">
-        ${ifCan('edit', `<button class="btn tiny" data-nginx="add-upstream-server" data-name="${esc(u.name)}">+ Port</button>
-          <button class="btn tiny" data-nginx="edit-upstream" data-name="${esc(u.name)}">Edit</button>`)}
-        ${ifCan('delete', `<button class="btn tiny danger" data-nginx="delete-upstream" data-name="${esc(u.name)}">Delete</button>`)}
-      </div>`,
-    ]),
-    'No upstream blocks — sites proxy straight to an address.',
-  );
 
   const proxyTable = table(
     [{ label: 'Domain' }, { label: 'Location' }, { label: 'Sends to' }, { label: 'Backend' }],
@@ -13843,10 +15218,16 @@ function upstreamPanel(n) {
   );
 
   return `
-    ${section('Upstreams & backends', tiles + upstreamTable)}
-    ${section('Proxied locations', proxyTable)}
+    ${section('Where nginx sends traffic', proxyTable)}
     ${section(`Ports bound on this server · ${ports.length}`, portTable)}`;
 }
+
+/** Folds that were open stay open when the tab redraws after a change. */
+const nginxOpenFolds = new Set();
+document.addEventListener('toggle', (e) => {
+  const key = { 'ngx-fold-lb': 'lb', 'ngx-fold-ports': 'ports', 'ngx-fold-certs': 'certs' }[e.target.id];
+  if (key) nginxOpenFolds[e.target.open ? 'add' : 'delete'](key);
+}, true);
 
 /* ---------------------------------------------- nginx: upstream editor */
 
@@ -13854,23 +15235,82 @@ const upstreamModal = $('#modal-upstream');
 const upstreamForm = $('#form-upstream');
 let editingUpstream = null;
 
+/** One server of the upstream being edited: address, share of traffic, backup / paused, and the rarely touched limits under "More". */
 function upstreamServerRow(s = {}) {
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td><input data-f="address" value="${esc(s.address || '')}" placeholder="127.0.0.1:3000" autocomplete="off" spellcheck="false" style="min-width:190px" /></td>
-    <td><input data-f="weight" type="number" min="1" max="1000" value="${esc(s.weight ?? 1)}" style="width:70px" /></td>
-    <td><input data-f="maxFails" type="number" min="0" max="1000" value="${esc(s.maxFails ?? 1)}" style="width:70px" /></td>
-    <td><input data-f="failTimeout" value="${esc(s.failTimeout || '10s')}" style="width:70px" /></td>
-    <td><input data-f="maxConns" type="number" min="0" value="${esc(s.maxConns ?? '')}" placeholder="—" style="width:80px" /></td>
-    <td style="text-align:center"><input data-f="backup" type="checkbox" ${s.backup ? 'checked' : ''} /></td>
-    <td style="text-align:center"><input data-f="down" type="checkbox" ${s.down ? 'checked' : ''} /></td>
-    <td><button type="button" class="btn tiny danger" data-upstream-remove title="Remove this server">✕</button></td>`;
-  $('#upstream-servers tbody').appendChild(tr);
-  return tr;
+  const row = document.createElement('div');
+  row.className = 'ups-row';
+  const more = s.maxConns || (s.maxFails ?? 1) !== 1 || (s.failTimeout || '10s') !== '10s';
+  row.innerHTML = `
+    <div class="ups-row-main">
+      <input data-f="address" value="${esc(s.address || '')}" placeholder="127.0.0.1:3000 or 3000" autocomplete="off" spellcheck="false" aria-label="Address" />
+      <label class="ups-weight" title="Share of traffic — a server with weight 2 gets twice as much as one with 1">Weight
+        <input data-f="weight" type="number" min="1" max="1000" value="${esc(s.weight ?? 1)}" />
+      </label>
+      <span class="ups-row-share" data-share></span>
+      <label class="check" title="Only used when the others fail"><input data-f="backup" type="checkbox" ${s.backup ? 'checked' : ''} /> Backup</label>
+      <label class="check" title="Take it out without deleting it"><input data-f="down" type="checkbox" ${s.down ? 'checked' : ''} /> Paused</label>
+      <button type="button" class="btn tiny ghost" data-upstream-remove title="Remove this server" aria-label="Remove this server">✕</button>
+    </div>
+    <details class="ups-row-more" ${more ? 'open' : ''}>
+      <summary>More</summary>
+      <div class="row">
+        <label class="narrow">Max fails<input data-f="maxFails" type="number" min="0" max="1000" value="${esc(s.maxFails ?? 1)}" /></label>
+        <label class="narrow">Fail timeout<input data-f="failTimeout" value="${esc(s.failTimeout || '10s')}" /></label>
+        <label class="narrow">Max connections<input data-f="maxConns" type="number" min="0" value="${esc(s.maxConns ?? '')}" placeholder="no limit" /></label>
+      </div>
+      <p class="muted small" style="margin:4px 0 0">After <b>max fails</b> failed tries within <b>fail timeout</b>, the server is skipped for that long.</p>
+    </details>`;
+  $('#upstream-servers').appendChild(row);
+  refreshUpstreamShares();
+  return row;
+}
+
+/** Each row's share of the traffic, from the weights — backups and paused servers get none. */
+function refreshUpstreamShares() {
+  const rows = $$('#upstream-servers .ups-row');
+  const f = (r, k) => r.querySelector(`[data-f="${k}"]`);
+  const active = rows.filter((r) => !f(r, 'backup').checked && !f(r, 'down').checked);
+  const total = active.reduce((sum, r) => sum + (Number(f(r, 'weight').value) || 1), 0) || 1;
+  rows.forEach((r) => {
+    const share = r.querySelector('[data-share]');
+    share.textContent = f(r, 'down').checked ? 'paused'
+      : f(r, 'backup').checked ? 'standby'
+        : `${Math.round(((Number(f(r, 'weight').value) || 1) / total) * 100)}%`;
+  });
+  renderUpstreamPicks();
+}
+
+/** One-click servers: the panel's apps here and anything else listening, minus what is already on the list. */
+function renderUpstreamPicks() {
+  const taken = new Set($$('#upstream-servers [data-f="address"]').map((i) => {
+    const v = i.value.trim();
+    return /^\d+$/.test(v) ? `127.0.0.1:${v}` : v.replace(/^localhost:/, '127.0.0.1:');
+  }));
+  const picks = [];
+  nginxApps.forEach((a) => (a.ports || []).forEach((p, i) => picks.push({
+    address: `127.0.0.1:${p}`, label: `🚀 ${a.name}${(a.ports || []).length > 1 ? ` #${i + 1}` : ''}`, sub: `:${p}`,
+  })));
+  (nginxCache?.listeningPorts || [])
+    .filter((p) => !p.nginxListens && !picks.some((x) => x.address === `127.0.0.1:${p.port}`))
+    .forEach((p) => picks.push({ address: `127.0.0.1:${p.port}`, label: p.container ? `🐳 ${p.container.name}` : `🔌 ${p.processes[0] || 'port'}`, sub: `:${p.port}` }));
+  const left = picks.filter((x) => !taken.has(x.address));
+  $('#upstream-picks').innerHTML = left.length
+    ? `<span class="muted small">Add with one click:</span>${left.slice(0, 12).map((x) => `<button type="button" class="chip-btn" data-upstream-pick="${esc(x.address)}">${esc(x.label)} <b>${esc(x.sub)}</b></button>`).join('')}`
+    : '';
+}
+
+/** The balancing choices as cards; the hidden select is what is sent. */
+function renderUpstreamMethods() {
+  const current = $('#upstream-method').value;
+  $('#upstream-methods').innerHTML = Object.entries(UPSTREAM_METHODS).map(([key, [label, sub]]) => `
+    <button type="button" class="ngx-kind ${key === current ? 'active' : ''}" data-upstream-method="${key}">
+      <span class="ngx-kind-title">${esc(label)}</span><span class="ngx-kind-sub">${esc(sub)}</span>
+    </button>`).join('');
 }
 
 function applyUpstreamMethod() {
   $('#upstream-hash-field').classList.toggle('hidden', $('#upstream-method').value !== 'hash');
+  renderUpstreamMethods();
 }
 
 /** Add an upstream, or edit one — optionally opening with an empty server row ready for a new port. */
@@ -13880,12 +15320,12 @@ function openUpstreamModal(name = null, { addServer = false } = {}) {
   editingUpstream = u;
   upstreamForm.reset();
   $('#upstream-msg').classList.add('hidden');
-  $('#upstream-servers tbody').innerHTML = '';
+  $('#upstream-servers').innerHTML = '';
   $('#upstream-title').textContent = u ? `Edit upstream ${u.name}` : 'Add upstream';
   $('#btn-upstream-save').textContent = u ? 'Save & reload nginx' : 'Add upstream';
   $('#upstream-note').innerHTML = u
-    ? `In <code>${esc(u.file)}</code>. Only this block is rewritten; <code>nginx -t</code> has to pass before it is kept, otherwise the file is put back.${u.usedBy.length ? ` Used by ${esc(u.usedBy.join(', '))}.` : ''}`
-    : 'Written to its own file in <code>/etc/nginx/conf.d</code>. Point a site at it with <code>proxy_pass http://NAME;</code>.';
+    ? `In <code>${esc(u.file)}</code>. Only this block is rewritten, and nginx is tested before it reloads.${u.usedBy.length ? ` Used by ${esc(u.usedBy.join(', '))}.` : ''}`
+    : 'Spread one domain\'s visitors across several servers — if one stops, the others keep answering. nginx is tested before it reloads.';
 
   if (u) {
     $('#upstream-name').value = u.name;
@@ -13894,27 +15334,50 @@ function openUpstreamModal(name = null, { addServer = false } = {}) {
     upstreamForm.hashKey.value = hash ? hash[1] : '';
     upstreamForm.keepalive.value = u.keepalive ?? '';
     u.servers.forEach((s) => upstreamServerRow({ ...s, address: s.address }));
+  } else {
+    $('#upstream-method').value = 'round-robin';
   }
-  if (!u || addServer) {
+  if (addServer) {
     const row = upstreamServerRow();
     setTimeout(() => row.querySelector('[data-f="address"]').focus(), 0);
   }
+  updateUpstreamSnippet();
+  refreshUpstreamShares();
+  // Nothing to click on this server: start with an empty row to type into.
+  if (!u && !addServer && !$('#upstream-picks').innerHTML) upstreamServerRow();
   applyUpstreamMethod();
   upstreamModal.classList.remove('hidden');
   if (!addServer) $('#upstream-name').focus();
 }
 
-$('#upstream-method').addEventListener('change', applyUpstreamMethod);
+function updateUpstreamSnippet() {
+  $('#upstream-snippet').textContent = `http://${$('#upstream-name').value.trim() || 'shop_backend'}`;
+}
+
+$('#upstream-name').addEventListener('input', updateUpstreamSnippet);
 $('#btn-upstream-add-server').addEventListener('click', () => upstreamServerRow().querySelector('[data-f="address"]').focus());
 $('#upstream-servers').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-upstream-remove]');
-  if (b) b.closest('tr').remove();
+  if (!b) return;
+  b.closest('.ups-row').remove();
+  refreshUpstreamShares();
+});
+$('#upstream-servers').addEventListener('input', refreshUpstreamShares);
+$('#upstream-picks').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-upstream-pick]');
+  if (b) upstreamServerRow({ address: b.dataset.upstreamPick });
+});
+$('#upstream-methods').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-upstream-method]');
+  if (!b) return;
+  $('#upstream-method').value = b.dataset.upstreamMethod;
+  applyUpstreamMethod();
 });
 
 upstreamForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = $('#btn-upstream-save');
-  const servers = $$('#upstream-servers tbody tr').map((tr) => {
+  const servers = $$('#upstream-servers .ups-row').map((tr) => {
     const f = (k) => tr.querySelector(`[data-f="${k}"]`);
     return {
       address: f('address').value.trim(),
@@ -13926,6 +15389,7 @@ upstreamForm.addEventListener('submit', async (e) => {
       down: f('down').checked,
     };
   }).filter((s) => s.address);
+  if (!servers.length) return formMsg($('#upstream-msg'), 'Add at least one server — click an app above, or type an address like 127.0.0.1:3000.', 'err');
   const body = {
     name: $('#upstream-name').value.trim(),
     method: $('#upstream-method').value,
@@ -13958,6 +15422,7 @@ async function nginxPanelAction(btn) {
   if (what === 'add-site') return openDomainModal();
   if (what === 'edit-site') return openDomainModal(siteOf(name));
   if (what === 'ssl') return openSslModal(siteOf(name));
+  if (what === 'ssl-new') return openSslModal(null);
 
   if (what === 'remove-site') {
     const site = siteOf(name);
@@ -14011,7 +15476,12 @@ async function nginxPanelAction(btn) {
       const r = await api(`/servers/${currentServerId}/nginx/install`, {
         method: 'POST', body: { what: label },
       });
-      toast(`${label} installed${r.version ? ` — ${r.version}` : ''}`);
+      // The same call turns certbot's renewal timer on, which is what "Turn on" asks for.
+      if (label === 'certbot' && nginxCache?.certbot?.installed) {
+        toast(r.autoRenew ? 'Automatic renewal is on — certificates renew themselves' : 'certbot.timer would not start — check the server\'s systemd', r.autoRenew ? undefined : 'err');
+      } else {
+        toast(`${label} installed${r.version ? ` — ${r.version}` : ''}`);
+      }
     } catch (err) {
       toast(err.message, 'err');
     }
@@ -14048,21 +15518,110 @@ async function nginxPanelAction(btn) {
 const domainModal = $('#modal-domain');
 let editingSite = null;
 
+const DOMAIN_TARGET_TITLE = { app: 'Which app', proxy: 'Which port', static: 'Which folder' };
+
 function applyDomainKind() {
-  const isStatic = $('#domain-kind').value === 'static';
-  $('#domain-proxy-fields').classList.toggle('hidden', isStatic);
+  const kind = $('#domain-kind').value;
+  const isStatic = kind === 'static';
+  const isApp = kind === 'app';
+  $$('#domain-kind-cards .ngx-kind').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
+  $('#domain-target-title').textContent = DOMAIN_TARGET_TITLE[kind] || 'Where it goes';
+  $('#domain-proxy-fields').classList.toggle('hidden', isStatic || isApp);
   $('#domain-root-field').classList.toggle('hidden', !isStatic);
   $('#domain-spa-field').classList.toggle('hidden', !isStatic);
   $('#domain-ws-field').classList.toggle('hidden', isStatic);
+  // An app's domain is written and kept by the app itself: proxy, WebSockets, always enabled.
+  $('#domain-advanced').classList.toggle('hidden', isApp);
+  $('#domain-raw-toggle').classList.toggle('hidden', isApp);
+  $('#domain-app-fields').classList.toggle('hidden', !isApp);
+  // One hostname per app domain; a plain site may answer on several.
+  $('#domain-names-hint').textContent = isApp
+    ? 'One hostname, like shop.example.com — add www as a second domain if you need it.'
+    : 'Several names? Separate them with spaces — include www if you use it.';
+  updateDomainDnsHint();
+  if (isApp) loadDomainAppPicker();
 }
 
 $('#domain-kind').addEventListener('change', applyDomainKind);
-
-$('#domain-raw-check').addEventListener('change', () => {
-  const raw = $('#domain-raw-check').checked;
-  $('#domain-raw-field').classList.toggle('hidden', !raw);
-  $('#domain-form-fields').classList.toggle('hidden', raw);
+$('#domain-kind-cards').addEventListener('click', (e) => {
+  const card = e.target.closest('.ngx-kind');
+  if (!card) return;
+  $('#domain-kind').value = card.dataset.kind;
+  applyDomainKind();
 });
+
+/** Where the A record must point: the app's server for an app domain, otherwise this one. */
+function updateDomainDnsHint() {
+  const box = $('#domain-dns-hint');
+  let host = currentServer?.host;
+  if ($('#domain-kind').value === 'app' && domainAppData) {
+    host = (domainAppData.servers.find((s) => String(s.id) === $('#domain-app-server').value) || {}).host || host;
+  }
+  const first = $('#domain-names').value.trim().split(/[\s,]+/)[0] || 'your domain';
+  box.innerHTML = host
+    ? `<b>DNS:</b> at your domain provider, add an <b>A record</b> for <code>${esc(first)}</code> → <code>${esc(host)}</code>. SSL works once it points here.`
+    : '';
+  box.classList.toggle('hidden', !host || Boolean(editingSite));
+}
+
+$('#domain-names').addEventListener('input', updateDomainDnsHint);
+
+/* "A custom app on AJ Pilot": server → app → container, then the app's own domain route. */
+
+let domainAppData = null;
+
+async function loadDomainAppPicker() {
+  const serverSel = $('#domain-app-server');
+  if (!domainAppData) {
+    serverSel.innerHTML = '<option value="">Loading…</option>';
+    const [servers, apps] = await Promise.all([api('/servers').catch(() => []), api('/apps').catch(() => [])]);
+    domainAppData = { servers, apps };
+  }
+  const { servers, apps } = domainAppData;
+  const withApps = servers.filter((s) => apps.some((a) => a.server_id === s.id));
+  serverSel.innerHTML = withApps.length
+    ? withApps.map((s) => `<option value="${s.id}">${esc(s.name)}${s.host ? ` — ${esc(s.host)}` : ''}</option>`).join('')
+    : '<option value="">No server runs a custom app yet</option>';
+  if (withApps.some((s) => s.id === Number(currentServerId))) serverSel.value = String(currentServerId);
+  fillDomainAppList();
+  updateDomainDnsHint();
+}
+
+function fillDomainAppList() {
+  const sid = Number($('#domain-app-server').value);
+  const apps = (domainAppData?.apps || []).filter((a) => a.server_id === sid);
+  $('#domain-app').innerHTML = apps.length
+    ? apps.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join('')
+    : '<option value="">No apps on this server</option>';
+  fillDomainAppPorts();
+}
+
+function fillDomainAppPorts() {
+  const app = (domainAppData?.apps || []).find((a) => String(a.id) === $('#domain-app').value);
+  const ports = app?.ports || [];
+  $('#domain-app-port').innerHTML = ports.map((p, i) => `<option value="${p}">port ${p}${ports.length > 1 ? ` (container ${i + 1})` : ''}</option>`).join('');
+  $('#domain-app-port-field').classList.toggle('hidden', ports.length < 2);
+  const server = (domainAppData?.servers || []).find((s) => s.id === app?.server_id);
+  $('#domain-app-note').innerHTML = app
+    ? `nginx on <b>${esc(server?.name || 'the server')}</b> will proxy the domain to ${esc(app.name)}. Point the domain's A record at <code>${esc(server?.host || 'its public IP')}</code>.
+       The domain then shows on the app's page, where it can be retried or removed.${(app.domains || []).length ? ` Already on: ${app.domains.map((d) => `<code>${esc(d.domain)}</code>`).join(', ')}.` : ''}`
+    : '';
+}
+
+$('#domain-app-server').addEventListener('change', () => { fillDomainAppList(); updateDomainDnsHint(); });
+$('#domain-app').addEventListener('change', fillDomainAppPorts);
+$('#domain-ssl-on').addEventListener('change', () => {
+  $('#domain-ssl-email-field').classList.toggle('hidden', !$('#domain-ssl-on').checked);
+  $('#domain-ssl-fields').classList.toggle('on', $('#domain-ssl-on').checked);
+});
+
+/** The file editor replaces the guided steps; the domain names stay. */
+function showDomainRaw(raw) {
+  $('#domain-raw-field').classList.toggle('hidden', !raw);
+  $$('#form-domain .ngx-raw-hide').forEach((el) => el.classList.toggle('hidden', raw));
+}
+
+$('#domain-raw-check').addEventListener('change', () => showDomainRaw($('#domain-raw-check').checked));
 
 /** `site` is null when adding, or the parsed site when editing. */
 async function openDomainModal(site = null) {
@@ -14074,17 +15633,27 @@ async function openDomainModal(site = null) {
   $('#domain-title').textContent = site ? `Edit ${site.domains[0] || site.name}` : 'Add domain';
   $('#btn-domain-save').textContent = site ? 'Save changes' : 'Add domain';
   $('#domain-enabled').checked = site ? site.enabled : true;
+  // SSL on an existing site is "Add SSL" on its card; the add form offers it up front, ticked.
+  $('#domain-ssl-fields').classList.toggle('hidden', Boolean(site));
+  $('#domain-ssl-on').checked = !site;
+  $('#domain-ssl-fields').classList.toggle('on', !site);
+  $('#domain-ssl-email').value = session.user?.email || '';
+  $('#domain-ssl-email-field').classList.toggle('hidden', Boolean(site));
+  $('#domain-kind-cards [data-kind=app]').classList.toggle('hidden', Boolean(site));
+  $('#domain-advanced').open = false;
+  domainAppData = null;
   domainModal.classList.remove('hidden');
 
   if (!site) {
-    $('#domain-sub').textContent = 'Writes an nginx site on the server. The configuration is tested before nginx '
-      + 'is reloaded, and put back as it was if the test fails.';
+    $('#domain-sub').textContent = 'Put a domain in front of something on this server. nginx is tested before it '
+      + 'reloads, so a mistake never takes other sites down.';
     $('#domain-raw-check').checked = false;
     $('#domain-raw-check').disabled = false;
-    $('#domain-raw-toggle').classList.remove('hidden');
-    $('#domain-raw-field').classList.add('hidden');
-    $('#domain-form-fields').classList.remove('hidden');
+    showDomainRaw(false);
+    // Most domains are for an app the panel deployed here, so that is where it starts when there is one.
+    $('#domain-kind').value = nginxApps.length ? 'app' : 'proxy';
     applyDomainKind();
+    setTimeout(() => $('#domain-names').focus(), 0);
     return;
   }
 
@@ -14099,8 +15668,7 @@ async function openDomainModal(site = null) {
   const mustBeRaw = site.ssl || site.kind === 'other' || !site.managed;
   $('#domain-raw-check').checked = mustBeRaw;
   $('#domain-raw-check').disabled = mustBeRaw;
-  $('#domain-raw-field').classList.toggle('hidden', !mustBeRaw);
-  $('#domain-form-fields').classList.toggle('hidden', mustBeRaw);
+  showDomainRaw(mustBeRaw);
   $('#domain-sub').textContent = mustBeRaw
     ? 'This file was not written by the panel — or SSL has been added to it — so it is edited as it is. '
       + 'nginx -t has to pass before it is kept.'
@@ -14123,6 +15691,9 @@ $('#form-domain').addEventListener('submit', async (e) => {
   const log = $('#domain-log');
   const fd = new FormData(e.target);
   const raw = $('#domain-raw-check').checked;
+  const ssl = !editingSite && $('#domain-ssl-on').checked;
+
+  if (!editingSite && !raw && fd.get('kind') === 'app') return addAppDomainFromNginx(fd, ssl);
 
   const body = {
     domains: fd.get('domains'),
@@ -14148,8 +15719,22 @@ $('#form-domain').addEventListener('submit', async (e) => {
       ? `/servers/${currentServerId}/nginx/sites/${encodeURIComponent(editingSite.name)}`
       : `/servers/${currentServerId}/nginx/sites`;
     const r = await api(path, { method: editingSite ? 'PUT' : 'POST', body });
+    const names = r.domains?.length ? r.domains : String(fd.get('domains') || '').split(/[\s,]+/).filter(Boolean);
+    if (ssl) {
+      // The site is written; the certificate is a second step, and failing it keeps the site.
+      formMsg(msg, 'Site saved. Asking Let\'s Encrypt for the certificate…', 'info');
+      busy(btn, true, 'Getting SSL…');
+      try {
+        await api(`/servers/${currentServerId}/nginx/ssl`, {
+          method: 'POST', body: { domains: names.join(' '), email: $('#domain-ssl-email').value.trim(), redirect: true, staging: false },
+        });
+      } catch (err) {
+        loadServerNginx();
+        throw Object.assign(new Error(`The site was saved, but SSL failed: ${err.message} — fix DNS, then press "Add SSL" on its row.`), { detail: err.detail });
+      }
+    }
     domainModal.classList.add('hidden');
-    toast(`${(r.domains || [])[0] || r.name} saved — nginx reloaded`);
+    toast(`${names[0] || r.name} saved${ssl ? ' with SSL' : ''} — nginx reloaded`);
     loadServerNginx();
   } catch (err) {
     formMsg(msg, err.message, 'err');
@@ -14161,6 +15746,33 @@ $('#form-domain').addEventListener('submit', async (e) => {
   busy(btn, false);
 });
 
+/** The Nginx tab's "A custom app on AJ Pilot": the domain becomes the app's own, set up in the background. */
+async function addAppDomainFromNginx(fd, ssl) {
+  const btn = $('#btn-domain-save');
+  const msg = $('#domain-msg');
+  const names = String(fd.get('domains') || '').toLowerCase().split(/[\s,]+/).filter(Boolean);
+  const appId = $('#domain-app').value;
+  if (!appId) return formMsg(msg, 'Pick the app the domain should open', 'err');
+  if (names.length !== 1) return formMsg(msg, 'An app domain is one hostname — add each extra name (like www) as its own domain', 'err');
+
+  busy(btn, true, 'Adding…');
+  try {
+    const r = await api(`/apps/${appId}/domains`, {
+      method: 'POST',
+      body: {
+        domain: names[0], domain_mode: 'nginx', domain_ssl: ssl,
+        domain_email: $('#domain-ssl-email').value.trim(), domain_port: $('#domain-app-port').value || '',
+      },
+    });
+    domainModal.classList.add('hidden');
+    toast(`Setting up ${r.domain} for ${r.name} — follow it on the app's Domains tab`);
+    loadServerNginx();
+  } catch (err) {
+    formMsg(msg, err.message, 'err');
+  }
+  busy(btn, false);
+}
+
 /* ------------------------------------------------------------- SSL */
 
 const sslModal = $('#modal-ssl');
@@ -14171,12 +15783,36 @@ function openSslModal(site) {
   $('#ssl-log').classList.add('hidden');
   $('#ssl-redirect').checked = true;
   $('#ssl-domains').value = site ? site.domains.join(' ') : '';
+  $('#ssl-email').value = session.user?.email || '';
+  $('#ssl-title').textContent = site?.ssl ? `🔒 Renew SSL for ${site.domains[0] || site.name}` : '🔒 Get an SSL certificate';
+  $('#ssl-server-ip').textContent = currentServer?.host || "this server's IP";
+  renderSslPicks();
   sslModal.classList.remove('hidden');
 
   if (!nginxCache?.certbot.installed) {
-    formMsg($('#ssl-msg'), 'certbot is not installed on this server yet — install it from the Nginx tab first.', 'err');
+    formMsg($('#ssl-msg'), 'certbot is not installed on this server yet — click "Install certbot" in the SSL certificates section first.', 'err');
   }
+  setTimeout(() => $('#ssl-domains').focus(), 0);
 }
+
+/** One click adds a domain that has an nginx site here but no certificate yet. */
+function renderSslPicks() {
+  const chosen = new Set($('#ssl-domains').value.toLowerCase().split(/[\s,]+/).filter(Boolean));
+  const open = (nginxCache?.sites || []).filter((s) => !s.ssl && s.enabled)
+    .flatMap((s) => s.domains).filter((d) => /\./.test(d) && !d.startsWith('*') && !chosen.has(d.toLowerCase()));
+  $('#ssl-picks').innerHTML = open.length
+    ? `<span class="muted small">Not secured yet:</span>${[...new Set(open)].slice(0, 12).map((d) => `<button type="button" class="chip-btn" data-ssl-pick="${esc(d)}">+ ${esc(d)}</button>`).join('')}`
+    : '';
+}
+
+$('#ssl-picks').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ssl-pick]');
+  if (!b) return;
+  const input = $('#ssl-domains');
+  input.value = `${input.value.trim()} ${b.dataset.sslPick}`.trim();
+  renderSslPicks();
+});
+$('#ssl-domains').addEventListener('input', renderSslPicks);
 
 $('#form-ssl').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -17752,7 +19388,7 @@ function renderDocArticle() {
   // The guides are written by us (src/lib/docs.js), so their HTML is shown as it is.
   $('#app-docs-body').innerHTML = `
     <nav class="docs-crumbs">Docs › ${esc(d.category)}</nav>
-    <article class="doc"><h1>${esc(d.title)}</h1><p class="docs-lead">${esc(d.summary)}</p>${d.body}</article>
+    <article class="doc"><h1>${esc(d.title)}</h1><p class="docs-lead">${esc(d.summary)}</p>${d.body.replaceAll('%%SITE_URL%%', esc(location.origin))}</article>
     <nav class="docs-pager">
       ${prev ? `<a href="/docs/${prev.slug}" data-doc="${prev.slug}"><small>← Previous</small><b>${esc(prev.title)}</b></a>` : '<span></span>'}
       ${next ? `<a href="/docs/${next.slug}" data-doc="${next.slug}" class="next"><small>Next →</small><b>${esc(next.title)}</b></a>` : '<span></span>'}

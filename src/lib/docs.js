@@ -19,8 +19,113 @@ export const DOC_CATEGORIES = [
   'Databases', 'Accounts & integrations', 'Team & plan', 'Help', 'Platform admin',
 ];
 
+/** A command with a Copy button, on the public docs and inside the app alike. */
+const cmd = (text) => `<div class="su-cmd"><pre><code>${text}</code></pre><button type="button" class="btn su-copy" data-lp-copy>Copy</button></div>`;
+
 export const DOCS = [
   /* ---------------------------------------------------------- getting started */
+  {
+    slug: 'ubuntu-server-setup',
+    category: 'Getting started',
+    title: 'Set up an Ubuntu server (one setup file)',
+    summary: 'Turn any PC, laptop or mini-PC into a 24/7 server: install Ubuntu, run one file, connect it to AJ Pilot.',
+    body: `
+<p>An old PC, a laptop or a mini-PC makes a perfectly good server. Install Ubuntu Server on it, run <b>one setup file</b>,
+and it is ready for AJ Pilot: SSH on, awake around the clock — lid closed, screen off, never sleeping — with a firewall and
+automatic security updates. Then you just type its address into AJ Pilot.</p>
+<p><a class="btn primary" href="/setup/aj-pilot-setup.sh" download>⬇ Download the setup file (aj-pilot-setup.sh)</a></p>
+
+<h2>What you need</h2>
+<ul>
+  <li>A 64-bit PC, laptop or mini-PC — <b>2 GB RAM</b> minimum (4 GB or more is better) and <b>25 GB</b> of disk (an SSD helps a lot).</li>
+  <li>A <b>USB stick of 4 GB or more</b> — it will be wiped.</li>
+  <li>A <b>network cable</b> to your router — far steadier than Wi-Fi.</li>
+  <li>A screen and keyboard, only while installing.</li>
+</ul>
+${warn('Installing Ubuntu <b>erases the whole disk</b> you pick. Copy off anything you want to keep first.')}
+
+<h2>1. Download Ubuntu Server</h2>
+<p>Get the <b>LTS</b> version from <a href="https://ubuntu.com/download/server" target="_blank" rel="noopener">ubuntu.com/download/server</a> —
+the <b>Server</b> edition, not Desktop. LTS means five years of security updates.</p>
+
+<h2>2. Write it to the USB stick</h2>
+<p>With <a href="https://etcher.balena.io" target="_blank" rel="noopener">balenaEtcher</a> (Windows, Mac, Linux) or
+<a href="https://rufus.ie" target="_blank" rel="noopener">Rufus</a> (Windows): pick the downloaded <code>.iso</code>, pick the stick, <b>Flash</b>.</p>
+
+<h2>3. Start the machine from the stick</h2>
+<p>Plug it in, power on and tap the boot-menu key straight away, then choose the USB stick:</p>
+<table class="doc-table">
+  <tr><th>Make</th><th>Boot-menu key</th></tr>
+  <tr><td>Dell, Lenovo, Acer</td><td><kbd>F12</kbd></td></tr>
+  <tr><td>HP</td><td><kbd>F9</kbd> or <kbd>Esc</kbd></td></tr>
+  <tr><td>ASUS</td><td><kbd>F8</kbd> or <kbd>Esc</kbd></td></tr>
+  <tr><td>MSI</td><td><kbd>F11</kbd></td></tr>
+</table>
+${tip('Does not start from USB? Open the BIOS (usually <kbd>F2</kbd> or <kbd>Del</kbd> at power-on), turn off <b>Secure Boot</b>, and try again.')}
+
+<h2>4. Install Ubuntu</h2>
+<ol class="doc-steps">
+  <li><b>Network</b>: leave the cable plugged in — it gets an address by itself.</li>
+  <li><b>Storage</b>: <i>Use an entire disk</i>.</li>
+  <li><b>Profile</b>: your name, a server name (e.g. <code>home-server</code>), a <b>username</b> and a <b>password</b> — AJ Pilot signs in with these.</li>
+  <li><b>SSH</b>: tick <b>Install OpenSSH server</b>.</li>
+  <li>Skip the extra snaps, let it finish, <b>Reboot now</b>, and pull out the stick. Sign in at the <code>login:</code> prompt.</li>
+</ol>
+
+<h2>5. Run the setup file</h2>
+<p><b>The quickest way</b> — on the machine, run:</p>
+${cmd('curl -fsSL %%SITE_URL%%/setup/aj-pilot-setup.sh -o aj-pilot-setup.sh\nsudo bash aj-pilot-setup.sh --dry-run\nsudo bash aj-pilot-setup.sh')}
+<p>The <code>--dry-run</code> line only shows what it would change; the last line does it. It takes a few minutes.</p>
+<p><b>No internet on the machine yet, or prefer a USB stick?</b> <a href="/setup/aj-pilot-setup.sh" download>Download the file</a>,
+copy it onto a stick, plug it into the machine, then:</p>
+${cmd('lsblk -o NAME,SIZE,LABEL\nsudo mount /dev/sdb1 /mnt     # use the name lsblk showed for the stick\nsudo bash /mnt/aj-pilot-setup.sh')}
+<p><b>Already have SSH from another computer?</b> Copy it over (Windows PowerShell, Mac or Linux), then run it there:</p>
+${cmd('scp aj-pilot-setup.sh your-username@192.168.1.50:\nssh your-username@192.168.1.50\nsudo bash aj-pilot-setup.sh')}
+
+<h2>What the file does</h2>
+<table class="doc-table">
+  <tr><th>Setting</th><th>What happens</th></tr>
+  <tr><td>SSH</td><td>Installed and started — how AJ Pilot signs in</td></tr>
+  <tr><td>Never sleep</td><td>No sleep, suspend or hibernate, even if something asks</td></tr>
+  <tr><td>Lid closed</td><td>On a laptop, closing the lid does nothing</td></tr>
+  <tr><td>Screen off</td><td>The screen goes dark after a minute of no typing; the computer keeps running</td></tr>
+  <tr><td>Wi-Fi</td><td>Power saving off, so it never drops off the network</td></tr>
+  <tr><td>Wake-on-LAN</td><td>Another device on the network can switch it on</td></tr>
+  <tr><td>Firewall</td><td>Allows SSH (and web ports 80/443) <i>before</i> switching on — you cannot be locked out</td></tr>
+  <tr><td>fail2ban</td><td>Bans addresses that keep guessing passwords</td></tr>
+  <tr><td>Updates</td><td>Security updates install themselves every day</td></tr>
+  <tr><td>Time</td><td>Automatic clock</td></tr>
+  <tr><td>Sudo</td><td>Your user can use sudo without a password, so AJ Pilot needs none</td></tr>
+  <tr><td>Swap</td><td>A 2 GB swap file on machines with under 4 GB of memory</td></tr>
+</table>
+<p>It is <b>safe to run again</b> — it only changes what is not set up yet. On a virtual machine or cloud server it skips the
+laptop, screen and power settings by itself. If one step fails, the others still run, and the summary says which one and why.
+Run <code>bash aj-pilot-setup.sh --help</code> for every option (SSH port, time zone, machine name, Docker…).</p>
+${tip('Signed in to AJ Pilot? <b>Servers → + Add server → Start from a blank machine</b> lets you tick each setting — SSH port, screen timeout, time zone, Docker — before you download your own copy.')}
+
+<h2>6. Connect it in AJ Pilot</h2>
+<p>When it finishes, the file prints a <b>Connect it in AJ Pilot</b> box:</p>
+<pre><code>    Host / IP       192.168.1.50
+    Port            22
+    SSH username    ajay
+    Sudo password   leave empty (passwordless sudo is on)</code></pre>
+<ol class="doc-steps">
+  <li>Sign in to AJ Pilot and open <b>Servers → + Add server</b>.</li>
+  <li>Paste that box into <b>Paste what the setup file printed</b> (in the <i>Start from a blank machine</i> guide) — or type the address, port and username into <b>My server is ready</b>.</li>
+  <li>Type your password, click <b>Test connection</b>, then <b>Save &amp; connect</b>. See <a href="/docs/add-a-server">Add a server</a>.</li>
+</ol>
+
+<h2>Keep it running for years</h2>
+<ul>
+  <li><b>Switch back on after a power cut</b>: in the BIOS (<kbd>F2</kbd> or <kbd>Del</kbd> at power-on) set <i>Restore on AC power loss</i> (or <i>AC power recovery</i>) to <b>Power On</b>. No file can change this.</li>
+  <li><b>Keep its address</b>: in your router, reserve the address the file showed (<i>DHCP reservation</i>), so it never changes.</li>
+  <li><b>Laptop</b>: keep it plugged in. If the BIOS offers a <i>battery charge limit</i> (60–80%), turn it on.</li>
+  <li><b>Airflow</b>: a hard surface with space around it — heat is what wears out an old laptop running all day.</li>
+  <li><b>AJ Pilot runs elsewhere</b> (in the cloud)? A home address like <code>192.168.x.x</code> cannot be reached from outside — add a
+    <a href="/docs/connectors">Connector</a> on a PC in the same network.</li>
+</ul>
+${warn('Running a file with <code>sudo</code> gives it full control of the machine. This one holds no passwords or keys and only changes what is listed above — download it and read it, or use <code>--dry-run</code>, before you run it.')}`,
+  },
   {
     slug: 'getting-started',
     category: 'Getting started',
@@ -93,7 +198,16 @@ its text goes into the form. Your key is usually in the <code>.ssh</code> folder
 <p>AJ Pilot then reads the whole machine — hardware, disks, network, open ports, services — and keeps an eye on it:
 the dot next to each server turns red within seconds if it goes offline.</p>
 ${tip('Every password and key is encrypted before it is stored, and is never shown again.')}
-${warn('"Connection timed out" means the server could not be reached: check the IP address, and that port 22 is open in the server\'s firewall and in your cloud provider\'s security group.')}`,
+${warn('"Connection timed out" means the server could not be reached: check the IP address, and that port 22 is open in the server\'s firewall and in your cloud provider\'s security group.')}
+<h2>A brand-new machine? Use the setup file</h2>
+<ol class="doc-steps">
+  <li>Click <b>+ Add server → Start from a blank machine</b> and install Ubuntu as the first step shows.</li>
+  <li>In <b>Run the setup file</b>, tick what you want — SSH, never sleep, keep running with the lid closed, screen off, firewall,
+    automatic updates — and click <b>Download aj-pilot-setup.sh</b>.</li>
+  <li>Copy the file to the machine (a USB stick works — the guide shows the commands) and run <code>sudo bash aj-pilot-setup.sh</code>.</li>
+  <li>When it finishes it shows the <b>address, port and username</b> to type into AJ Pilot. Click <b>Next</b> and enter them.</li>
+</ol>
+${tip('Safe to run again. In a virtual machine or cloud server it skips the laptop and power settings by itself.')}`,
   },
   {
     slug: 'connectors',
@@ -226,16 +340,19 @@ it runs them in Docker for you.)</p>
 <ol class="doc-steps">
   <li>Open the server and go to the <b>Services</b> tab.</li>
   <li>Click <b>+ Add service</b>.</li>
-  <li><b>Service name</b> (letters, numbers and dashes) and a short <b>Description</b>.</li>
-  <li><b>Start command</b> — the program to run, e.g. <code>/usr/bin/node /srv/api/server.js</code> — and its <b>Working directory</b>.</li>
-  <li><b>Run as user</b>, any <b>Environment</b> variables, and <b>Restart</b> — when it should be restarted if it stops.</li>
-  <li>Save — the service is written, enabled on boot and started.</li>
+  <li><b>What to run</b>: a name (letters, numbers and dashes), a short description and the start command. Click a template —
+    <b>Node script</b>, <b>npm start</b>, <b>Python</b> or <b>Shell script</b> — to fill it in, then change the path. The form warns you if the command is not a full path.</li>
+  <li><b>Where and as whom</b>: the working directory and the user it runs as.</li>
+  <li><b>Environment</b>: any variables, an environment file, or one of your saved environments.</li>
+  <li><b>Keep it running</b>: <i>Restart if it crashes</i> is right for most programs. Leave <b>Start on boot</b> and <b>Start now</b> on.</li>
+  <li>Click <b>Create service</b> — it is written, enabled on boot and started.</li>
 </ol>
 <h2>Manage services</h2>
 <ul>
-  <li>The list shows every service on the server — running, stopped, failed or installed.</li>
-  <li><b>Start</b>, <b>Stop</b>, <b>Restart</b>, and turn <b>start on boot</b> on or off.</li>
-  <li>Open a service to read its last journal lines — the first place to look when something fails.</li>
+  <li>The counters at the top — <b>Running</b>, <b>Failed</b>, <b>Stopped</b>… — are also filters: click one to see just those.</li>
+  <li>A red banner lists anything that has failed, with <b>Restart</b> and <b>Logs</b> right there.</li>
+  <li>Each row has <b>Start</b>, <b>Stop</b> or <b>Restart</b>, and an <b>On boot</b> switch.</li>
+  <li>Click a service's name for its details and last journal lines — the first place to look when something fails.</li>
 </ul>
 ${tip('Only services AJ Pilot created can be deleted from here, so a system service can never be removed by accident.')}`,
   },
@@ -403,10 +520,16 @@ ${warn('Commands run for real, with the permissions of the server\'s login. A wr
 automatically. Use the <b>Nginx</b> tab of a server when you want to do it by hand.</p>
 <ol class="doc-steps">
   <li>Open the server's <b>Nginx</b> tab. If nginx is not there yet, click <b>Install nginx on this server</b>.</li>
-  <li><b>+ Add upstream</b> — the app(s) nginx should send traffic to (<code>127.0.0.1:3000</code>, or several servers for load balancing).</li>
-  <li><b>+ Add domain</b> — a site for your domain, pointed at the upstream.</li>
-  <li><b>Get an SSL certificate</b> — a free Let's Encrypt certificate (<b>Install certbot here</b> if asked). It renews on its own; you can also renew it here.</li>
+  <li>Click <b>+ Add domain</b> and pick what the domain should open: <b>AJ Pilot app</b>, <b>Port on this server</b> or <b>Static folder</b>.</li>
+  <li>Type the domain, and at your DNS provider point its <b>A record</b> at the address the dialog shows.</li>
+  <li>Leave <b>SSL required</b> ticked for a free Let's Encrypt certificate (installed for you; it renews on its own).</li>
 </ol>
+<p>The <b>SSL certificates</b> section shows each certificate's <b>days left</b> and which domains use it. If <b>Automatic renewal</b> says
+<i>off</i>, click <b>Turn on</b>; if a certificate is expiring or expired, click <b>Renew everything due</b>.</p>
+<p>Each domain is a card: 🔒 means it is secure, ⚠ means it is not — its <b>Add SSL</b> button fixes that. Use the search box and the
+<b>Secure / Not secure / Disabled</b> filters when there are many. Load balancing across several servers is under <b>Load balancing</b> at the bottom of the tab:
+<b>+ Add upstream</b>, give it a name, click the apps or ports that should share the traffic, and choose how it is shared
+(<b>Take turns</b> is right for most apps). Each card shows which servers answer and what share of the traffic each one gets.</p>
 ${tip('Every change is checked with <code>nginx -t</code> before nginx reloads, so a mistake cannot take your sites down.')}`,
   },
   {
@@ -590,9 +713,10 @@ copy of production, say) and <b>Delete</b>. The list shows which apps and servic
     slug: 'app-domains',
     category: 'Domains & SSL',
     title: 'Put an app on your domain',
-    summary: 'DNS + nginx + free SSL, or a Cloudflare Zero Trust tunnel — set up for you.',
+    summary: 'DNS + nginx + free SSL, a Cloudflare Zero Trust tunnel, or direct nginx with your own DNS — set up for you.',
     body: `
-<p>Connect Cloudflare first (<a href="/docs/connect-cloudflare">how</a>) — your domain must be in that Cloudflare account.</p>
+<p>For the two Cloudflare options, connect Cloudflare first (<a href="/docs/connect-cloudflare">how</a>) — your domain must be in that Cloudflare account.
+Domain somewhere else? Use <b>Direct — nginx</b>, below.</p>
 <h2>While creating an app</h2>
 <ol class="doc-steps">
   <li>Tick <b>Add a domain</b>.</li>
@@ -602,11 +726,18 @@ copy of production, say) and <b>Delete</b>. The list shows which apps and servic
     <ul>
       <li><b>DNS — nginx + free SSL certificate</b>: a DNS record pointing at the server's public IP, an nginx site and a Let's Encrypt certificate. The server needs ports 80 and 443 open.</li>
       <li><b>Zero Trust</b>: a Cloudflare Tunnel — no open ports needed, ideal for servers behind a firewall or at home.</li>
+      <li><b>Direct — nginx (your own DNS)</b>: no Cloudflare needed. Type the full hostname, then at your DNS provider add an
+        <b>A record</b> pointing it at the server's public IP. Tick <b>SSL required</b> for a free HTTPS certificate (the A record must be in place);
+        leave it off to serve plain HTTP.</li>
     </ul></li>
 </ol>
 <h2>Later, or more than one domain</h2>
 <p>Open the app's page and click <b>+ Add domain</b>. An app can have as many domains as it needs; each one shows its own status
 and log, and can be retried or removed.</p>
+<h2>From the Nginx tab</h2>
+<p>On a server's <b>Nginx</b> tab, click <b>+ Add domain</b> and choose <b>A custom app on AJ Pilot</b> under <i>What it serves</i>.
+Pick the server, then the app (and its container, if it runs several), type the domain and choose whether <b>SSL is required</b>.
+The domain then appears on the app's page like any other.</p>
 ${warn('The app works on the IP address but not on the domain? DNS can take a few minutes. Then check that ports 80/443 are open (DNS mode), and open the domain\'s log on the app page — it shows which step failed.')}`,
   },
 
@@ -631,15 +762,24 @@ ${tip('After installing a database, add it under <b>Databases</b> to manage it �
     slug: 'docker-containers',
     category: 'Docker & installs',
     title: 'Docker containers',
-    summary: 'See every container, its logs and details; start, stop, restart or remove it.',
+    summary: 'See every container, its live logs and stats; start, stop, restart, back up or remove it.',
     body: `
-<p>The <b>Docker</b> tab of a server lists every container with its image, ports and state.</p>
+<p>The <b>Docker</b> tab of a server shows every container as a card: green when it is running, red when it has stopped or crashed.
+🚀 marks your apps, 📦 services the panel installed, 🐳 anything else.</p>
 <ul>
-  <li>Click <b>Details</b> for everything about a container: ports, volumes, networks, environment, health.</li>
-  <li>Read its <b>logs</b>; <b>start</b>, <b>stop</b>, <b>restart</b>, <b>pause</b> or <b>remove</b> it.</li>
-  <li>Clean up unused <b>images</b>, <b>networks</b> and <b>volumes</b>, and create Docker networks.</li>
+  <li>Each running container shows its <b>CPU</b>, <b>memory</b>, <b>network</b> and <b>disk</b> use, refreshed every 15 seconds.
+    The <b>Docker usage</b> strip adds them up and shows how much disk images, volumes and build cache take — and how much you could free.</li>
+  <li>Use the search box and the <b>Running / Stopped / Apps / Installed</b> filters to find one quickly.</li>
+  <li>Click a port chip such as <code>4200 → 80</code> to open it in the browser.</li>
+  <li>Click a container's name or <b>Details</b> to open its own page. The back button takes you to the Docker tab again.</li>
+  <li><b>Live stats</b> shows CPU, memory, network and disk every few seconds; <b>Logs</b> shows new lines as they are written — use <b>Pause</b>, the filter box or <b>Download .log</b>.</li>
+  <li><b>Volumes</b> lists what the container stores its data in, with the size of each and a <b>Download</b> button.</li>
+  <li>The <b>Download</b> menu saves a <b>Compose file (YAML)</b> to recreate the container, or a <b>Backup (.tar.gz)</b> with the compose file and a copy of every volume. Tick <b>Pause while copying</b> for databases.</li>
+  <li><b>Start</b>, <b>stop</b>, <b>restart</b>, <b>pause</b> or <b>remove</b> it from the top of the page.</li>
+  <li>Clean up unused <b>images</b>, <b>networks</b> and <b>volumes</b>, download any volume, and create Docker networks.</li>
   <li><b>Sign in to a registry</b> to pull private images.</li>
-</ul>`,
+</ul>
+${tip('Downloads need a role that can edit. Compose files and backups contain passwords and your data — keep them somewhere safe.')}`,
   },
 
   /* ---------------------------------------------------------------- databases */

@@ -462,6 +462,14 @@ echo '@@@size'
 docker ps -a --size --filter "id=$(docker inspect -f '{{.Id}}' "$N")" --format '{{.Size}}' 2>/dev/null
 echo '@@@top'
 docker top "$N" -eo pid,user,pcpu,pmem,etime,args 2>/dev/null | head -n 60
+echo '@@@volumes'
+docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\\n"}}{{end}}{{end}}' "$N" 2>/dev/null | while read -r v; do
+  [ -n "$v" ] || continue
+  M="$(docker volume inspect -f '{{.Mountpoint}}' "$v" 2>/dev/null)"
+  S="$([ -d "$M" ] && timeout 10 du -sb "$M" 2>/dev/null | cut -f1)"
+  U="$(docker ps -a --filter "volume=$v" --format '{{.Names}}' 2>/dev/null | tr '\\n' ' ')"
+  printf '%s\\t%s\\t%s\\t%s\\n' "$v" "$M" "$S" "$U"
+done
 echo '@@@logs'
 docker logs --tail 150 --timestamps "$N" 2>&1 | tail -n 150`;
 
@@ -488,6 +496,10 @@ docker logs --tail 150 --timestamps "$N" 2>&1 | tail -n 150`;
     else for (const b of bindings) ports.push({ inside, host: `${b.HostIp || '0.0.0.0'}:${b.HostPort}` });
   }
   const topLines = lines(s.top);
+  const volumes = new Map(lines(s.volumes).map((l) => {
+    const [vol, mountpoint, size, users] = l.split('\t');
+    return [vol, { mountpoint: mountpoint || null, sizeBytes: size ? Number(size) : null, usedBy: String(users || '').split(' ').filter(Boolean) }];
+  }));
 
   return {
     id: String(c.Id || '').slice(0, 12),
@@ -520,7 +532,21 @@ docker logs --tail 150 --timestamps "$N" 2>&1 | tail -n 150`;
       networkMode: host.NetworkMode || null,
     },
     ports,
-    mounts: (c.Mounts || []).map((m) => ({ type: m.Type, source: m.Name || m.Source, destination: m.Destination, readOnly: m.RW === false })),
+    mounts: (c.Mounts || []).map((m) => {
+      const v = m.Type === 'volume' ? volumes.get(m.Name) : null;
+      return {
+        type: m.Type,
+        source: m.Name || m.Source,
+        destination: m.Destination,
+        readOnly: m.RW === false,
+        // A volume Docker named itself (64 hex characters) belongs to this container alone.
+        anonymous: m.Type === 'volume' && /^[0-9a-f]{64}$/.test(m.Name || ''),
+        mountpoint: v?.mountpoint || (m.Type === 'volume' ? m.Source : null),
+        sizeBytes: v?.sizeBytes ?? null,
+        // Other containers that have the same volume.
+        sharedWith: (v?.usedBy || []).filter((u) => u !== String(c.Name || '').replace(/^\//, '')),
+      };
+    }),
     networks: Object.entries(c.NetworkSettings?.Networks || {}).map(([net, n]) => ({ name: net, ip: n.IPAddress || null, gateway: n.Gateway || null, aliases: n.Aliases || [] })),
     env: (cfg.Env || []).map((e) => e.split('=')[0]).filter(Boolean).sort(),
     labels: cfg.Labels || {},
@@ -532,6 +558,306 @@ docker logs --tail 150 --timestamps "$N" 2>&1 | tail -n 150`;
     processes: topLines.length > 1 ? { header: topLines[0].split(/\s+/), rows: topLines.slice(1).map((l) => l.split(/\s+/)) } : null,
     logs: lines(s.logs),
   };
+}
+
+/* ------------------------------------------------- live logs, downloads */
+
+/**
+ * Volume names Docker accepts. Anonymous volumes are 64 hex characters, one
+ * longer than a container name may be, so they get their own check.
+ */
+export function validateVolumeName(name) {
+  const clean = String(name || '').trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(clean)) {
+    return { error: 'A volume name may only use letters, numbers, dot, dash and underscore' };
+  }
+  return { value: clean };
+}
+
+/**
+ * Follow a container's output: the last `tail` lines (or everything after
+ * `since`, a timestamp from an earlier line), then each new one as it is
+ * written, handed to `onLines` in whole lines. Each line starts with Docker's
+ * RFC 3339 timestamp. Returns when the container stops, `signal` aborts or
+ * `seconds` pass — `timeout` on the server makes sure `docker logs -f` cannot
+ * outlive the panel's side of it, since closing an SSH channel does not always
+ * stop the command at the other end.
+ */
+export async function followLogs(conn, server, name, { tail = 200, since = null, seconds = 900, signal, onLines }) {
+  const n = Math.min(Math.max(1, (Number(tail) | 0) || 200), 2000);
+  const from = since && /^[\d\-T:.Z+]+$/.test(since) ? `--since ${q(since)}` : `--tail ${n}`;
+  const limit = Math.max(10, Math.round(seconds));
+  let partial = '';
+  const result = await rootExec(conn, server,
+    `exec timeout ${limit} docker logs -f ${from} --timestamps ${q(name)} 2>&1`, {
+      timeout: (limit + 30) * 1000,
+      signal,
+      onOutput: (text) => {
+        const parts = (partial + text).split('\n');
+        partial = parts.pop();
+        const whole = parts.map((l) => l.replace(/\r$/, '')).filter((l) => l !== '');
+        if (whole.length) onLines(whole);
+      },
+    });
+  if (partial.trim()) onLines([partial]);
+  // 124 is `timeout` ending it on purpose; anything else with no output is a real failure.
+  if (result.code !== 0 && result.code !== 124 && !signal?.aborted && !result.stdout.trim()) {
+    throw dockerError(`Following the logs of ${name}`, result);
+  }
+}
+
+/** The container's `docker inspect`, and its image's — the image's defaults are left out of a compose file. */
+async function inspectWithImage(conn, server, name) {
+  const script = `N=${q(name)}
+docker inspect --type container "$N" >/dev/null 2>&1 || { echo "There is no container called $N" >&2; exit 4; }
+echo '@@@container'
+docker inspect --type container "$N"
+echo '@@@image'
+docker image inspect "$(docker inspect -f '{{.Image}}' "$N")" 2>/dev/null || echo '[]'
+echo '@@@done'`;
+  const result = await rootExec(conn, server, script, { timeout: 60000 });
+  if (result.code === 4) throw new Error(`There is no container called ${name} on this server`);
+  const s = splitSections(result.stdout);
+  let container;
+  try { [container] = JSON.parse(s.container || '[]'); } catch { /* reported below */ }
+  if (!container) throw dockerError(`Inspecting ${name}`, result);
+  let image = null;
+  try { [image] = JSON.parse(s.image || '[]'); } catch { /* an image deleted since: no defaults to leave out */ }
+  return { container, image };
+}
+
+/* A small YAML writer — enough for a compose file. Every string is double-quoted
+   (JSON strings are valid YAML) and `$` is doubled, because compose would
+   otherwise read `$VAR` in a value as a variable to fill in. */
+const yStr = (v) => JSON.stringify(String(v).replace(/\$/g, '$$$$'));
+const yKey = (k) => (/^[A-Za-z0-9_.-]+$/.test(k) ? k : JSON.stringify(k));
+const yScalar = (v) => (typeof v === 'number' || typeof v === 'boolean' ? String(v) : yStr(v));
+
+function toYaml(value, indent = 0) {
+  const pad = ' '.repeat(indent);
+  const out = [];
+  for (const [k, v] of Object.entries(value)) {
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v)) {
+      if (!v.length) continue;
+      out.push(`${pad}${yKey(k)}:`);
+      for (const item of v) out.push(`${pad}  - ${yScalar(item)}`);
+    } else if (typeof v === 'object') {
+      const inner = toYaml(v, indent + 2);
+      out.push(inner ? `${pad}${yKey(k)}:\n${inner}` : `${pad}${yKey(k)}: {}`);
+    } else {
+      out.push(`${pad}${yKey(k)}: ${yScalar(v)}`);
+    }
+  }
+  return out.join('\n');
+}
+
+/** Docker's nanoseconds as a compose duration. */
+const dur = (ns) => (ns ? `${Math.round(ns / 1e6)}ms` : undefined);
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const isAnonymous = (volume) => /^[0-9a-f]{64}$/.test(volume || '');
+
+/**
+ * A docker-compose.yml that recreates this container. Built from inspect, so it
+ * is what the container *is*, whoever made it and however. Settings that are
+ * only the image's defaults — its environment, command, labels — are left out
+ * to keep the file readable.
+ */
+export function composeFromInspect(c, image = null, { at = new Date() } = {}) {
+  const cfg = c.Config || {};
+  const host = c.HostConfig || {};
+  const img = image?.Config || {};
+  const name = String(c.Name || '').replace(/^\//, '');
+
+  const imageEnv = new Set(img.Env || []);
+  const environment = (cfg.Env || []).filter((e) => !imageEnv.has(e));
+
+  const imageLabels = img.Labels || {};
+  const labels = Object.fromEntries(Object.entries(cfg.Labels || {})
+    // Compose writes its own labels on `up`; old ones would point at a project that is not this one.
+    .filter(([k, v]) => !k.startsWith('com.docker.compose.') && imageLabels[k] !== v));
+
+  const ports = [];
+  for (const [inside, bindings] of Object.entries(host.PortBindings || {})) {
+    const [port, proto] = inside.split('/');
+    for (const b of bindings || []) {
+      const ip = b.HostIp && !['0.0.0.0', '::'].includes(b.HostIp) ? `${b.HostIp}:` : '';
+      ports.push(`${ip}${b.HostPort ? `${b.HostPort}:` : ''}${port}${proto && proto !== 'tcp' ? `/${proto}` : ''}`);
+    }
+  }
+
+  const volumes = [];
+  const namedVolumes = {};
+  for (const m of c.Mounts || []) {
+    const ro = m.RW === false ? ':ro' : '';
+    if (m.Type === 'volume') {
+      if (isAnonymous(m.Name)) volumes.push(m.Destination);
+      else {
+        volumes.push(`${m.Name}:${m.Destination}${ro}`);
+        namedVolumes[m.Name] = { name: m.Name };
+      }
+    } else if (m.Type === 'bind') {
+      volumes.push(`${m.Source}:${m.Destination}${ro}`);
+    }
+  }
+
+  const mode = host.NetworkMode || 'default';
+  const nets = Object.keys(c.NetworkSettings?.Networks || {});
+  let networkMode;
+  let networks;
+  const topNetworks = {};
+  if (['host', 'none'].includes(mode) || mode.startsWith('container:')) networkMode = mode;
+  else if (!nets.length || (nets.length === 1 && ['bridge', 'default'].includes(nets[0]))) networkMode = 'bridge';
+  else {
+    networks = nets;
+    for (const n of nets) topNetworks[n] = { name: n };
+  }
+
+  const policy = host.RestartPolicy || {};
+  const restart = policy.Name && policy.Name !== 'no'
+    ? (policy.Name === 'on-failure' && policy.MaximumRetryCount ? `on-failure:${policy.MaximumRetryCount}` : policy.Name)
+    : undefined;
+
+  const hc = cfg.Healthcheck;
+  const healthcheck = hc?.Test?.length && !same(hc, img.Healthcheck)
+    ? (hc.Test[0] === 'NONE' ? { disable: true } : {
+      test: hc.Test, interval: dur(hc.Interval), timeout: dur(hc.Timeout), retries: hc.Retries || undefined, start_period: dur(hc.StartPeriod),
+    })
+    : undefined;
+
+  const service = {
+    image: cfg.Image || c.Image,
+    container_name: name,
+    entrypoint: cfg.Entrypoint && !same(cfg.Entrypoint, img.Entrypoint) ? cfg.Entrypoint : undefined,
+    command: cfg.Cmd && !same(cfg.Cmd, img.Cmd) ? cfg.Cmd : undefined,
+    user: cfg.User && cfg.User !== img.User ? cfg.User : undefined,
+    working_dir: cfg.WorkingDir && cfg.WorkingDir !== img.WorkingDir ? cfg.WorkingDir : undefined,
+    // Docker names a container's host after its id unless told otherwise.
+    hostname: cfg.Hostname && !String(c.Id || '').startsWith(cfg.Hostname) ? cfg.Hostname : undefined,
+    restart,
+    environment,
+    ports,
+    volumes,
+    tmpfs: Object.keys(host.Tmpfs || {}),
+    network_mode: networkMode,
+    networks,
+    privileged: host.Privileged || undefined,
+    cap_add: host.CapAdd || undefined,
+    cap_drop: host.CapDrop || undefined,
+    extra_hosts: host.ExtraHosts || undefined,
+    mem_limit: host.Memory || undefined,
+    cpus: host.NanoCpus ? host.NanoCpus / 1e9 : undefined,
+    shm_size: host.ShmSize && host.ShmSize !== 64 * 1024 * 1024 ? host.ShmSize : undefined,
+    healthcheck,
+    labels: Object.keys(labels).length ? labels : undefined,
+  };
+
+  const doc = { services: { [name]: service } };
+  if (Object.keys(namedVolumes).length) doc.volumes = namedVolumes;
+  if (Object.keys(topNetworks).length) doc.networks = topNetworks;
+
+  return `# ${name} — rebuilt by AJ Pilot from \`docker inspect\` on ${at.toISOString()}
+# Recreate it with: docker compose up -d
+# This file holds the container's environment variables, passwords included. Keep it private.
+${toYaml(doc)}
+`;
+}
+
+/** The compose file for one container, ready to download. */
+export async function containerCompose(conn, server, name) {
+  const { container, image } = await inspectWithImage(conn, server, name);
+  return composeFromInspect(container, image);
+}
+
+/** The `tmp=` and `size=` lines a packing script ends with. */
+const packedFile = (stdout) => ({
+  tmp: (/^tmp=(\S+)$/m.exec(stdout) || [])[1] || null,
+  size: Number((/^size=(\d+)$/m.exec(stdout) || [])[1] || 0),
+});
+
+/**
+ * Pack one container into a .tar.gz on the server and say where it is:
+ * its compose file, its full inspect, a README, and a tar of every volume
+ * mounted, named or anonymous. `pause` freezes a running container while the volumes are copied,
+ * so a database's files are not caught half-written; a trap unpauses it on
+ * any way out. The caller streams the file back and deletes it.
+ */
+export async function prepareContainerBackup(conn, server, name, { pause = false } = {}) {
+  const { container, image } = await inspectWithImage(conn, server, name);
+  const at = new Date();
+  const compose = composeFromInspect(container, image, { at });
+  const top = `${name}-backup-${at.toISOString().slice(0, 10)}`;
+  const named = (container.Mounts || []).filter((m) => m.Type === 'volume' && m.Name).map((m) => m.Name);
+  const binds = (container.Mounts || []).filter((m) => m.Type === 'bind');
+  const readme = [
+    `Backup of the container ${name}, made by AJ Pilot on ${at.toISOString()}.`,
+    '',
+    'docker-compose.yml       recreates the container (docker compose up -d)',
+    'inspect.json             Docker\'s full description of it, as it was',
+    `volumes/<name>.tar.gz    the contents of each volume it uses${named.length ? ':' : ' (it has none)'}`,
+    ...named.map((v) => `  - ${v}`),
+    '',
+    ...(pause ? ['The container was paused while its volumes were copied.', ''] : []),
+    ...(binds.length ? ['Folders mounted from the server are NOT in this backup — copy them separately:',
+      ...binds.map((b) => `  - ${b.Source} -> ${b.Destination}`), ''] : []),
+    'To restore a volume, create it and unpack into it:',
+    '  docker volume create <name>',
+    '  docker run --rm -v <name>:/v -v "$PWD/volumes":/b alpine tar -xzf /b/<name>.tar.gz -C /v',
+    'then start the container with: docker compose up -d',
+    '',
+  ].join('\n');
+  const b64 = (t) => Buffer.from(t, 'utf8').toString('base64');
+
+  const script = `set -uo pipefail
+N=${q(name)}
+D="$(mktemp -d /tmp/.auto-deploy-bk-XXXXXXXX)"
+T="$(mktemp /tmp/.auto-deploy-XXXXXXXXXXXX)"
+paused=0
+trap '[ "$paused" = 1 ] && docker unpause "$N" >/dev/null 2>&1; rm -rf "$D"' EXIT
+fail() { echo "$1" >&2; rm -f "$T"; exit "$2"; }
+B="$D/${top}"
+mkdir -p "$B/volumes"
+echo ${b64(compose)} | base64 -d > "$B/docker-compose.yml"
+echo ${b64(readme)} | base64 -d > "$B/README.txt"
+docker inspect --type container "$N" > "$B/inspect.json" || fail "Could not inspect $N" 4
+${pause ? `if [ "$(docker inspect -f '{{.State.Running}} {{.State.Paused}}' "$N")" = "true false" ]; then
+  docker pause "$N" >/dev/null && paused=1
+fi` : ''}
+for v in ${named.map(q).join(' ')}; do
+  M="$(docker volume inspect -f '{{.Mountpoint}}' "$v" 2>/dev/null)" || fail "The volume $v is gone" 5
+  # tar exits 1 when a file changed while it was read: still a usable copy.
+  tar -czf "$B/volumes/$v.tar.gz" -C "$M" . 2>/dev/null; rc=$?
+  [ $rc -le 1 ] || fail "Could not copy the volume $v (tar exit $rc)" 6
+done
+if [ "$paused" = 1 ]; then docker unpause "$N" >/dev/null 2>&1; paused=0; fi
+tar -czf "$T" -C "$D" ${q(top)} || fail "Could not pack the backup" 7
+chown ${q(server.username)} -- "$T" 2>/dev/null || chmod 644 -- "$T"
+echo "tmp=$T"
+echo "size=$(stat -c %s -- "$T")"`;
+
+  const result = await rootExec(conn, server, script, { timeout: 60 * 60 * 1000 });
+  const file = packedFile(result.stdout);
+  if (result.code !== 0 || !file.tmp) throw dockerError(`Backing up ${name}`, result);
+  return { ...file, fileName: `${top}.tar.gz`, volumes: named };
+}
+
+/** Pack one named volume's contents into a .tar.gz on the server and say where it is. */
+export async function prepareVolumeArchive(conn, server, volume) {
+  const script = `set -uo pipefail
+V=${q(volume)}
+M="$(docker volume inspect -f '{{.Mountpoint}}' "$V" 2>/dev/null)" || { echo "This server has no volume called $V" >&2; exit 4; }
+[ -d "$M" ] || { echo "The volume $V is not a folder on this server (driver $(docker volume inspect -f '{{.Driver}}' "$V"))" >&2; exit 5; }
+T="$(mktemp /tmp/.auto-deploy-XXXXXXXXXXXX)"
+tar -czf "$T" -C "$M" . 2>/dev/null; rc=$?
+[ $rc -le 1 ] || { rm -f "$T"; echo "Could not pack the volume (tar exit $rc)" >&2; exit 6; }
+chown ${q(server.username)} -- "$T" 2>/dev/null || chmod 644 -- "$T"
+echo "tmp=$T"
+echo "size=$(stat -c %s -- "$T")"`;
+  const result = await rootExec(conn, server, script, { timeout: 60 * 60 * 1000 });
+  if (result.code === 4) throw new Error(`This server has no volume called "${volume}"`);
+  const file = packedFile(result.stdout);
+  if (result.code !== 0 || !file.tmp) throw dockerError(`Packing the volume "${volume}"`, result);
+  return { ...file, fileName: `${volume}.tar.gz` };
 }
 
 /**

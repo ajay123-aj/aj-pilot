@@ -13,6 +13,7 @@ Everything in sections 1–3 was observed in the code. Section 4 is a recommenda
 | L5 | **The front end is one large file** (`public/app.js`, ~18k lines) with no build step | Harder to navigate, test and share between pages | Split into ES modules per feature (still no bundler needed) |
 | L6 | **Ubuntu-centric server scripts** | Other distributions are unsupported | Abstract package-manager calls if demand appears |
 | L7 | **Node.js-only build pipeline** | Python, Go, PHP and others need their own `Dockerfile` | Add buildpacks or templates per language |
+| L9 | **Setup file does not register the server** | The default file can be fetched on the machine from the public `/setup/aj-pilot-setup.sh`; a file with custom options is still downloaded in the browser and carried over (USB stick or `scp`). Power-on after a power cut is a BIOS setting no script can change. The machine still has to be added in the panel by hand afterwards (the guide's paste box fills the form) | A one-time token in the file so it can register the server itself; a short-lived public link for a custom-options file |
 | L8 | **Build-time env needs BuildKit** | The generated Dockerfile uses `RUN --mount=type=secret` when an app has variables; Docker older than 23 without BuildKit cannot build it. A repository's own Dockerfile gets the vars only if it mounts the `appenv` secret itself | Detect the Docker version in the prepare step and explain, or fall back to building without the variables |
 
 ## 2. Product gaps
@@ -25,6 +26,7 @@ Everything in sections 1–3 was observed in the code. Section 4 is a recommenda
 | No email notifications for operations | No email for a server going offline, a failed deploy or a trial about to end |
 | Activity log has no filters, retention or export | Only the last 50 entries are shown |
 | No backups of managed databases | Installing MySQL/Postgres/Mongo/Redis/Elasticsearch does not schedule backups (no Elasticsearch snapshot repository is set up either) |
+| Container backups are download-only | The container page's *Backup* archive has no restore button, no schedule and no remote storage; bind-mounted host folders are listed but not copied, and without *pause* a busy database's volume copy may be inconsistent. Restoring is by hand: untar each volume into a fresh volume, then `docker compose up -d` |
 | No rollback to a previous release | Redeploy builds the current branch head; there is no "deploy this earlier SHA" |
 | Terminal permission | Editors can open a shell, which is broader than "never delete". Needs a product decision |
 | `projects` table is unused | Left from an early design; can be dropped |

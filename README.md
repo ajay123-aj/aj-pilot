@@ -143,8 +143,69 @@ organisation under whatever name you type. The console says so when it happens:
 3. Click **Test connection** to confirm the credentials before saving.
 4. **Save & connect** stores the server and immediately collects its full system profile.
 
+The **×** in the popup's top corner, or the **Esc** key, closes it at any step — choosing how to start,
+the setup guide, or the form — without saving anything.
+
 Use **Fetch system details** any time to re-read a server. Each collection is stored as a snapshot in
 `server_facts`, so you keep a history of how a machine changed.
+
+### Setting up a new machine with one file
+
+Turning an ordinary PC, laptop or mini-PC into a server? **+ Add server → Start from a blank machine** walks
+through installing Ubuntu, then gives you **one setup file** that does the rest. Tick what you want, press
+**Download aj-pilot-setup.sh**, copy the file onto the machine and run:
+
+```bash
+sudo bash aj-pilot-setup.sh
+```
+
+**No account needed to get it.** The home page has a **Server setup** section (in the header menu) and the
+docs have **Set up an Ubuntu server** (first under *Getting started*, and in the docs header menu): the
+whole path from downloading Ubuntu to connecting, with a **Download the setup file** button. The default
+file can also be fetched straight onto the new machine, so no USB stick is needed:
+
+```bash
+curl -fsSL https://your-panel/setup/aj-pilot-setup.sh -o aj-pilot-setup.sh
+sudo bash aj-pilot-setup.sh --dry-run   # see what it will change
+sudo bash aj-pilot-setup.sh
+```
+
+That public file has every option at its default; the one from **+ Add server** carries the choices you
+ticked.
+
+| Option (ticked by default unless noted) | What the file does                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| SSH                                     | installs and starts the SSH server on the port you choose (22 unless you change it) — always on        |
+| Never sleep                             | the machine never sleeps, suspends or hibernates, even if something asks it to                         |
+| Lid closed keeps running                | on a laptop, closing the lid does nothing                                                              |
+| Screen turns off                        | the screen goes dark after the minutes you choose; the computer keeps running                          |
+| Wi-Fi never dozes                       | turns Wi-Fi power saving off, and keeps it off after a restart                                         |
+| Wake-on-LAN                             | lets another device on the network switch it on                                                        |
+| Time zone and clock sync                | your time zone (taken from your browser) and automatic time                                            |
+| Firewall                                | allows SSH (and web ports 80/443, if ticked), then turns the firewall on                               |
+| Block password guessing                 | fail2ban bans addresses that keep failing to sign in over SSH                                          |
+| Security updates                        | installed automatically                                                                                |
+| Passwordless sudo for your user         | the panel can manage the machine without you typing a sudo password                                    |
+| Swap                                    | adds a swap file on machines with under 4 GB of memory and none set up                                 |
+| Docker *(off by default)*               | installs Docker now — the panel can also do it later                                                   |
+| Server name / SSH public key *(optional)* | renames the machine; lets a key sign in as well as your password                                     |
+
+The file is safe to run again — it changes only what is not set up yet. It works out what kind of machine it
+is on: in a virtual machine or a cloud server it leaves out the laptop, screen, Wi-Fi and power settings; on a
+machine without a battery it leaves out the lid setting. Each step is checked on its own, so one that fails
+does not stop the others; an SSH or sudo change that would not pass its own check is put back as it was.
+It waits for Ubuntu's own updates to finish rather than failing, says plainly when there is no internet, and
+refuses anything that is not Ubuntu or Debian. Run it with `--dry-run` to see what it would do without
+changing anything, and `--help` for every option.
+
+At the end it prints a summary of every step and **exactly what to type into AJ Pilot**: the address, the
+SSH port and the username. Press **Next** in the guide (or use **My server is ready** in **+ Add server**)
+and paste that box into **Paste what the setup file printed** — the address, port and username fill in by
+themselves. You only need your login password, and no sudo password when passwordless sudo was ticked. Everything it did is also written
+to `/var/log/aj-pilot-setup.log` on the machine.
+
+One thing no file can do: **switching back on after a power cut** is a BIOS setting (*Restore on AC power
+loss → Power On*). The guide shows where to find it.
 
 ### Editing a server
 
@@ -309,14 +370,21 @@ the **Sudo password** field on the server form — managing services and install
 ## Services
 
 Every server page lists **every** systemd service on the host, read live over SSH rather than from the stored
-profile: running, stopped, failed and the ones that are only installed. Filter by name or by state, and for
-each unit:
+profile: running, stopped, failed and the ones that are only installed.
+
+The tab opens with counters — **Running**, **Failed**, **Stopped**, **Starts on boot**, **Created here** and
+**All** — and clicking one shows just those services. When anything has failed, a red banner names it with
+**Restart** and **Logs** buttons beside each. A search box narrows the list by name or description.
+
+Each service is a row: a coloured dot (green running, red failed, grey stopped), its name without the
+`.service` ending and its description, an **On boot** switch, and the actions. Failed services come first,
+then the ones created here. Services that keep the server reachable are marked 🛡.
 
 | Action                 | What happens                                                                  |
 | ---------------------- | ----------------------------------------------------------------------------- |
-| Click the unit name    | Status, PID, memory, the unit file and the last 200 journal lines             |
+| Click the name / Logs  | Status, PID, memory, the unit file and the last 200 journal lines, with Start / Stop / Restart there too |
 | Start / Stop / Restart | `systemctl <action>`, then the new state and journal tail come back           |
-| Enable / Disable       | Whether it starts on boot                                                     |
+| On boot switch         | Enable / disable — whether it starts on boot                                  |
 | Delete                 | Only for units this panel created — stops, disables and removes the unit file |
 
 Stopping something that keeps the server reachable (`ssh`, `systemd-networkd`, `dbus`…) asks for confirmation
@@ -325,11 +393,15 @@ first.
 ### Adding a service
 
 **+ Add service** writes a unit to `/etc/systemd/system`, runs `daemon-reload`, then enables and starts it.
-The form covers the description, start command, working directory, user and group, environment variables, an
-environment file, service type, restart policy and what it starts after.
+The form walks through four steps: **what to run** (name, description and the start command, with one-click
+templates for a Node script, an npm start script, a Python script or a shell script), **where and as whom**
+(working directory, user, group), **environment** (variables, an environment file or a saved environment)
+and **keep it running** — *Restart if it crashes*, *Always restart* or *Never restart*, how long to wait, and
+switches for starting on boot and starting now. The service type, what it starts after and replacing an
+existing unit are under **Advanced**.
 
 The start command must be an absolute path — systemd does not run a shell, so `npm start` will not work
-whereas `/usr/bin/npm run start` will. The form says so before anything is written. If the unit fails to
+whereas `/usr/bin/npm run start` will. The form warns as you type, and says so again before anything is written. If the unit fails to
 start, the error comes back with the journal attached instead of a bare exit code.
 
 Units created here are recorded in `managed_services` and marked **created here** in the list, which is what
@@ -403,6 +475,68 @@ comes back with it — verified by a Redis instance moved
 from 6399 to 6398 that reloaded its append-only file on the other side. If the new container fails to start,
 the previous one is renamed back and restarted, so a bad port never costs you the service.
 
+### The Docker tab
+
+A server's **Docker** tab opens with a status header — whether the engine is running, its version, Docker
+Compose and the registry it is signed in to — with **+ Install a service** and **Refresh** beside it, then
+four counters: running containers, stopped ones, volumes (and how many are used by nothing) and networks.
+
+**Containers come first, as cards.** Each card has a coloured edge for its state (green running, yellow
+paused or restarting, red exited or dead) and shows:
+
+- a mark for who put it there — 🚀 one of your apps, 📦 a service installed by the panel, 🐳 anything else;
+- its name (click to open the container's own page), its state and how long it has been in it;
+- the image it runs;
+- its published ports as chips — `4200 → 80` — where a port published on all addresses is a link that
+  opens `http://<server>:<port>`;
+- **Logs**, **Details**, **Start** / **Stop** / **Resume** and **Restart**.
+
+Every running container's card also shows **what it uses right now**: CPU as a share of the whole server,
+memory with a bar against its limit, network received and sent, disk read and written, and its process
+count. Above the cards, a **Docker usage** strip adds them up — CPU and memory used by all containers
+together, the busiest container — and shows **Docker's disk use**: images, containers, volumes and build
+cache, with how much of it could be reclaimed by cleaning up. The numbers load a moment after the page (they
+come from `docker stats` and `docker system df` on the server) and refresh every 15 seconds while the tab
+is on screen; **Pause** stops that.
+
+A search box and **All / Running / Stopped / Apps / Installed** filters sit above them; containers that are
+restarting or dead are listed first. **Installed services**, **Volumes**, **Networks** and **Registry sign-in**
+follow as folding sections, each with its count in the header; one that is open stays open after a refresh.
+
+### The container page
+
+Clicking a container's name or **Details** opens a page of its own — not a popup — so it has room, keeps its
+place when you refresh, and the browser's back button returns you to the server's Docker tab. Its header has
+the container's state and health, **Start** / **Stop** / **Pause** / **Resume** / **Restart** / **Remove**, and
+a **Download** menu. Below it are tabs:
+
+| Tab              | What it shows                                                                                                                                 |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview         | state and uptime, restarts, size, image, command, working folder, memory and CPU limits, labels                                                |
+| Live stats       | CPU, memory against its limit, network and disk traffic per second with small charts, processes and restarts — updated every 3 seconds        |
+| Logs             | **live**: the last 200 lines, then each new line as the container writes it — also after it is stopped and started again. **Follow** keeps the newest in view (scroll up to read and it lets go); **Pause**, **Clear**, **Timestamps**, a filter box and **Download .log**. Error lines show in red, warnings in amber |
+| Volumes          | everything mounted into the container: each named volume with its size, where it lives on the server, what else uses it, and **Download**; folders from the server and temporary mounts are listed too |
+| Ports & networks | published ports and the Docker networks it is on, with addresses                                                                              |
+| Environment      | the names of its variables (values are not shown here)                                                                                        |
+| Processes        | what is running inside it                                                                                                                     |
+
+The live numbers and live logs stop as soon as you leave the page, and pick up again when you come back.
+
+**Downloads** (needs a role that can edit):
+
+- **Compose file (YAML)** — a `docker-compose.yml` that describes this container: image, command, environment
+  variables *with their values*, ports, volumes, networks, restart policy, limits and health check. Run
+  `docker compose up -d` next to it to create the same container again, here or on another machine.
+- **Backup (.tar.gz)** — one archive for this container only: the compose file, Docker's full description of
+  the container, a `README.txt` saying how to restore it, and a copy of every volume it uses. Tick **Pause while copying** for a database, so the
+  copy is taken while nothing is writing. Folders mounted from the server itself are named in the archive's
+  `README.txt` but not copied — download those from the file manager.
+- **Volume** — on the Volumes tab, or in the server's Volumes section, any named volume downloads on its own
+  as a `.tar.gz` of its contents.
+
+These files can hold passwords and your data, so keep them somewhere safe. Every download is recorded in the
+activity log.
+
 ### Registry sign-in
 
 The Docker panel shows which registry accounts that server is signed in as — Docker Hub and anything else
@@ -433,7 +567,8 @@ empty rather than dropping the volume.
 
 The fact worth having is the one neither `docker volume ls` nor `docker ps` gives on its own: a volume with
 **nothing** attached is flagged, because it is either last week's database or free disk space and only you
-know which. Those — and only those — get a **Remove** button, behind a confirmation that says the data goes
+know which. Every volume has **Download**, which saves its contents as a `.tar.gz`
+(needs a role that can edit). Those with nothing attached — and only those — also get a **Remove** button, behind a confirmation that says the data goes
 with it. A volume belonging to a service this panel installed is refused: remove the service instead, which
 offers to delete its volume with it. Docker itself refuses to delete a volume a container still references,
 and the panel names the container rather than passing the error through.
@@ -561,6 +696,27 @@ files, exactly as on any other host. A repository with its own Dockerfile can op
 line with `RUN --mount=type=secret,id=appenv` and loading `/run/secrets/appenv`
 (`set -a; . /run/secrets/appenv; set +a; npm run build`).
 
+### A domain for the app
+
+Tick **Add a domain** on the form (or press **+ Add domain** on the app later) and choose how it is
+published:
+
+| Option                                   | Needs                                                   | What the panel does                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **DNS — nginx + free SSL certificate**   | a connected Cloudflare account; ports 80 and 443 open   | creates the DNS record, an nginx site and a certificate                                                     |
+| **Zero Trust — Cloudflare Tunnel**       | a connected Cloudflare account                          | adds the hostname to a tunnel; no open ports                                                                |
+| **Direct — nginx (your own DNS)**        | nothing on Cloudflare; you point the domain yourself    | writes an nginx site in front of the app and, if **SSL required** is ticked, gets a free certificate        |
+
+**Direct** is for domains that are not on Cloudflare — managed at GoDaddy, Namecheap, Hostinger or anywhere
+else. Type the full hostname (`shop.example.com`) and, at your DNS provider, add an **A record** for it
+pointing at the server's public IP address. With **SSL required** ticked, the panel waits up to two minutes for
+that record to be visible, then gets a Let's Encrypt certificate and redirects HTTP to HTTPS; if the record is
+not there yet the domain shows an error that says so, and **Retry** picks it up once it is. Without SSL, the app
+answers on plain `http://` right away. Ports 80 (and 443 for SSL) must be open on the server.
+
+The same thing can be done from the server side: on a server's **Nginx** tab, **+ Add domain** → **A custom
+app on AJ Pilot** — see [Domains](#domains) below.
+
 **When a build fails**, the message on the card quotes the error lines from the build itself (a type error,
 a missing module, a missing variable) rather than Docker's closing summary. The full build log is under
 **Deploy log** on the card.
@@ -628,41 +784,99 @@ and a domain is a file in `sites-available` (or `conf.d` on a server whose `ngin
 **If nginx is not installed**, the tab says so and offers to install it: `nginx` from the distribution's
 packages, enabled and started, and — only if ufw is actually active — `Nginx Full` allowed through it.
 
-**If it is**, the tab opens with its version and configuration path, whether the service is running and
-enabled at boot, how many workers it has and what it is listening on, and how many domains it serves. When
-`nginx -t` does not pass, that comes first in red with the output, because nothing else on the tab can be
-trusted until it does. **Test config** and **Reload** are in the corner; a reload is refused if the
+**If it is**, the tab opens with a status header that says in one line whether nginx is healthy — running
+or stopped, the version, the ports it listens on, whether the configuration test passes and whether
+certificates renew themselves — with **+ Add domain**, **Test config** and **Reload** beside it. Below it,
+four counters: domains, how many are secured with SSL, how many **need attention** (no SSL, a certificate
+expiring within 14 days, or disabled) and certificates. When `nginx -t` does not pass, that comes first in red
+with the output, because nothing else on the tab can be trusted until it does; a reload is refused if the
 configuration does not pass, so a broken edit cannot take the site down.
 
 ### Domains
 
-Every server block on the machine is listed — the ones this panel wrote and the ones that were already
-there — with its domains, whether it proxies to something or serves files, **whether it is on SSL and how
-many days that certificate has left**, whether it is enabled, and the file it lives in.
+Every server block on the machine is shown as a card — the ones this panel wrote and the ones that were
+already there. Each card has a 🔒 (secure) or ⚠ (not secure) marker, the domain as a link that opens it, its
+other names, **where it points** — named by app when it forwards to one of your AJ Pilot apps on this
+server, otherwise the address or the folder — **how many days its certificate has left**, whether it is
+enabled, and the file it lives in. A domain without SSL says so on its card with an **Add SSL** button. A
+search box and **All / Secure / Not secure / Disabled** filters narrow a long list. With no domains yet, the
+tab explains the three ways to add one.
 
-**+ Add domain** writes a vhost: give it the domain names and either the port on this server to reverse
-proxy to (WebSockets passed through, the usual `X-Forwarded-*` headers set) or a folder to serve as a static
-site, with a single-page fallback if it needs one. **Edit** reopens it — as the form for a site the panel
+**+ Add domain** opens a dialog that starts with three choices: **AJ Pilot app** (an app deployed by the
+panel), **Port on this server** (anything listening on a port — WebSockets passed through, the usual
+`X-Forwarded-*` headers set) or **Static folder** (files on disk, with a single-page fallback if it needs one).
+Then the domain names, then **SSL required**. The dialog shows the server's address, which the domain's
+A record must point at. Upload size, WebSockets and enabling the site are under **Advanced**. **Edit** reopens it — as the form for a site the panel
 wrote, or as the file itself, which is what you get for a site nginx already had or one certbot has
 rewritten, because regenerating those would throw away their HTTPS block. **Enable** / **Disable** switches
 the `sites-enabled` link without touching the file, and **Remove** deletes it. The certificate is kept when
 a domain is removed, so adding it back does not mean asking Let's Encrypt for a new one.
 
+**SSL required** on the add form gets a certificate as soon as the site is written, the same as pressing
+**Add SSL** afterwards — the domain must already point at this server. Leave it unticked for a site that stays
+on plain HTTP, or one whose DNS is not ready yet.
+
+**A custom app on AJ Pilot** is the third choice under *What it serves*. Pick the **server** and then one of
+the **apps** deployed on it (and which of its containers, if it runs several); the domain is attached to that
+app, so it appears on the app's page with its status and setup log, can be retried there, and is removed with
+the app. nginx and, with **SSL required**, certbot are installed if missing. No Cloudflare account is needed —
+point the domain's A record at the server yourself.
+
 **No write is ever trusted.** Each one keeps a backup, writes the file, runs `nginx -t`, and — if the test
 fails — puts back exactly what was there before reporting the `[emerg]` line. nginx is only reloaded once
 the test has passed.
 
+### Load balancing (upstreams)
+
+An **upstream** is a group of servers that share the traffic of a domain — two copies of an app on ports
+3000 and 3001, say, so one can restart while the other answers. The **Load balancing** section near the
+bottom of the tab shows each one as a card:
+
+- a health pill — how many of its servers answer right now — and how traffic is shared, in plain words;
+- every server with a green or red dot, the app it belongs to when it is one of your AJ Pilot apps on this
+  server, and a bar showing **what share of the traffic it gets**; backups and paused servers are marked;
+- the domains that use it — or, when none does yet, the line to put in a domain to use it.
+
+**+ Add upstream** walks through three steps: a **name**; the **servers**, where one click adds any of your
+apps or any port already listening on this server (or type `host:port`); and **how traffic is shared**:
+
+| Choice              | What it does                                               |
+| ------------------- | ---------------------------------------------------------- |
+| Take turns          | each server in order (nginx's round robin) — the default   |
+| Least busy          | the server with the fewest open connections                |
+| Same visitor, same server | by visitor IP, so a visitor keeps landing on one server |
+| By a key            | by a value you choose, such as a cookie                    |
+| Random              | any server                                                 |
+
+Each server has a **weight** (its share of traffic), **Backup** (only used when the others fail) and
+**Paused** (taken out without deleting it). Failure limits, timeouts, connection caps and keepalive are under
+**More**. As before, the file is tested with `nginx -t` and put back if the test fails.
+
+**Ports & proxies**, folded below it, lists every place nginx forwards to and every port bound on the server.
+
 ### Certificates
 
-The same tab shows certbot: its version, whether `certbot.timer` is active (so certificates renew
-themselves), and every certificate on the machine with its domains and expiry, counted in days and turning
-red once it is past. **If certbot is not installed**, one button installs it with its nginx plugin and
-enables the renewal timer.
+Load balancing, ports and certificates are folded into their own sections at the bottom of the tab, each
+showing its count; open one to see it in full. The **SSL certificates** section's header turns yellow when a
+certificate expires within 14 days and red when one has expired.
 
-**Add SSL** on a domain runs `certbot --nginx` for it: it proves you control the domain over port 80, writes
-the certificate into that vhost and, unless you say otherwise, adds the HTTP→HTTPS redirect. There is an
-email box for expiry notices and a **staging** option that asks Let's Encrypt's test service instead, which
-is the way to try a setup without spending one of the real rate-limited issuances.
+Inside, a status strip shows certbot's version (and whether its nginx plugin is there), whether **automatic
+renewal** is on — with a **Turn on** button when `certbot.timer` is not active — and how many certificates are
+healthy, expiring soon or expired. When any need attention, a banner says so with **Renew everything due**.
+
+Each certificate is a card, soonest expiry first: a large **days left** with a bar showing how much of its
+90-day life remains (green, yellow under 14 days, red once expired), the expiry date, its domains as links,
+**which nginx domains use it**, where its files are, and a **Renew** button. **+ Get a certificate** is at the
+top. **If certbot is not installed**, the section explains what it is for and one button installs it with
+its nginx plugin and enables the renewal timer.
+
+**Add SSL** on a domain (or **+ Get a certificate**) opens a dialog with a short **before you start**
+checklist — the domain's A record must point at this server's address, which it shows, and port 80 must be
+open — then the domain names (with one-click chips for every domain on this server that is not secured yet),
+an email for expiry notices and a **Redirect HTTP to HTTPS** switch. It runs `certbot --nginx`, which proves
+you control the domain over port 80 and writes the certificate into that vhost. Under **Advanced**, the
+**staging** option asks Let's Encrypt's test service instead, which is the way to try a setup without
+spending one of the real rate-limited issuances.
 
 **Renew** runs `certbot renew` for one certificate, and **Renew everything due** for all of them; either way
 nginx is reloaded afterwards and the panel says plainly when nothing was due yet. The failures that actually
@@ -1139,6 +1353,10 @@ page, the same line under its name, kept up to date while you are on it.
 | `GET`                     | `/api/servers/:id/stats/stream`                                                                                                    | the same, pushed every few seconds over server-sent events                                     |
 | `POST`                    | `/api/servers/:id/containers/:name/action`                                                                                         | `start` / `stop` / `restart` any container on the host                                         |
 | `GET`                     | `/api/servers/:id/containers/:name/logs`                                                                                           | that container's recent output                                                                 |
+| `GET`                     | `/api/servers/:id/containers/:name/stream`                                                                                         | live stats and live logs for the container page (server-sent events)                           |
+| `GET`                     | `/api/servers/:id/containers/:name/compose`                                                                                        | download the container as a `docker-compose.yml`                                               |
+| `GET`                     | `/api/servers/:id/containers/:name/backup`                                                                                         | download a backup: compose file, inspect and every volume (`?pause=1`)                         |
+| `GET`                     | `/api/servers/:id/docker/volumes/:name/download`                                                                                   | download one volume's contents as `.tar.gz`                                                    |
 | `GET`                     | `/api/servers/:id/nginx`                                                                                                           | nginx, its sites with their SSL state, and certbot with every certificate                      |
 | `POST`                    | `/api/servers/:id/nginx/install`                                                                                                   | install `nginx`, or `certbot` with its nginx plugin                                            |
 | `POST`                    | `/api/servers/:id/nginx/action`                                                                                                    | `reload` / `restart` / `start` / `stop` / `test`                                               |

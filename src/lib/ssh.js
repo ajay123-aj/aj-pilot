@@ -192,8 +192,9 @@ function directConnection(connectCfg, fn, { serverId = null, hostKey = null } = 
 /**
  * Run one command and collect stdout/stderr/exit code. Never throws on a non-zero exit.
  * `onOutput(text)` sees stdout and stderr as they arrive, for anything that shows live progress.
+ * Aborting `signal` closes the channel, for a command that follows output until told to stop.
  */
-export function exec(conn, command, { timeout = config.ssh.execTimeout, stdin = null, onOutput = null } = {}) {
+export function exec(conn, command, { timeout = config.ssh.execTimeout, stdin = null, onOutput = null, signal = null } = {}) {
   return new Promise((resolve, reject) => {
     conn.exec(command, { pty: false }, (err, stream) => {
       if (err) return reject(err);
@@ -212,6 +213,10 @@ export function exec(conn, command, { timeout = config.ssh.execTimeout, stdin = 
       });
       stream.on('data', (d) => { const t = d.toString('utf8'); stdout += t; onOutput?.(t); });
       stream.stderr.on('data', (d) => { const t = d.toString('utf8'); stderr += t; onOutput?.(t); });
+      if (signal) {
+        if (signal.aborted) stream.close();
+        else signal.addEventListener('abort', () => stream.close(), { once: true });
+      }
 
       if (stdin !== null) {
         stream.write(stdin);

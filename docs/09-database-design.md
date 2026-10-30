@@ -570,7 +570,7 @@ MySQL does not validate these. The shapes below are what the code writes and exp
 | `plans.limits` | `{ "servers": 3, "apps": 10, "users": 5, "databases": 2, "domains": 5 }`. Missing or `null` key means unlimited |
 | `plans.features` | `["Auto deploy", "Custom domains", …]` |
 | `credentials.extra` | Provider-specific: `host`, `port`, `database` and `tls` for DB credentials (for Elasticsearch `database` is the default index for the query console, and `tls` means HTTPS); OAuth `refresh_token_enc`, `expires_at`, account login for git; account id/zone info for Cloudflare |
-| `app_domains.config` | `{ "mode": "dns" \| "tunnel", … }` plus Cloudflare zone/record or tunnel ids needed to remove it later |
+| `app_domains.config` | `{ "mode": "dns" \| "zerotrust" \| "nginx", … }`. `dns` / `zerotrust`: `credentialId`, `proxied`, `email`, tunnel ids needed to remove it later. `nginx` (direct, no Cloudflare): `{ "mode": "nginx", "ssl": true \| false, "email": … }` |
 | `apps.container_ports` | Array of host ports, one per instance |
 | `apps.volumes` | `[{ "source": "...", "target": "/data" }]` |
 | `apps.containers` | Array of container ids/names for multi-instance apps |

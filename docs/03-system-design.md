@@ -77,8 +77,9 @@ docs/                 these documents
 | Tenancy and commerce | `organisations`, `plans` (subscriptions, limits, trial), `razorpay` (orders, verification, webhook, reconciliation) |
 | Server access | `ssh` (connect, route, exec, root exec, host keys), `connectorHub` (PC relay over WebSocket), `netGuard` (blocks private targets), `terminal` (interactive shell) |
 | Server knowledge | `probe.sh` + `systemInfo` (profile), `liveStats`, `healthMonitor`, `serverSummary` |
+| Server onboarding | `setupScript` — builds the one-file `aj-pilot-setup.sh` for a blank Ubuntu machine from the guide's options (pure function, no SSH; served signed-in by `GET /api/servers/setup-script` and publicly, for the home page, docs and `curl` on a new machine, by `GET /setup/aj-pilot-setup.sh`) |
 | Server administration | `services` (systemd), `cron`, `sysUsers`, `files`, `nginx`, `nginxLogs`, `docker` |
-| Delivery | `nodeApp` (repo inspection, Dockerfile), `deploy` (remote build script), `autoDeploy` (webhooks and polling), `appDomain` (DNS/tunnel + nginx + certificate), `envVars`, `environments`, `catalog` (installable services) |
+| Delivery | `nodeApp` (repo inspection, Dockerfile), `deploy` (remote build script), `autoDeploy` (webhooks and polling), `appDomain` (DNS/tunnel/direct nginx + certificate), `envVars`, `environments`, `catalog` (installable services) |
 | Integrations | `git`, `gitAccounts`, `oauth`, `dockerhub`, `cloudflare`, `tunnel`, `runnerInstall`, `mysql`, `engines/*` |
 | Public site | `landing`, `docs`, `docsPage`, `geoip`, `device`, `mailer` |
 | Cross-cutting | `crypto` (AES-256-GCM), `security` (headers, CSP, same-origin, client IP), `envFile` |
@@ -184,6 +185,25 @@ sequenceDiagram
 
 Both check the app's trigger (`push` = every commit, or `merge` = merged pull/merge requests only) and skip a SHA that has already been deployed.
 
+### 6.1a App domain — direct nginx (no Cloudflare)
+
+Reached from the create-app form, the app page, or a server's Nginx tab ("A custom app on AJ Pilot"). All three create an `app_domains` row with `mode: "nginx"` through the app routes; `setupDomain` then runs:
+
+```mermaid
+flowchart TD
+  A[app_domains row, mode nginx] --> B{nginx installed?}
+  B -- no --> B1[install nginx] --> C
+  B -- yes --> C[write site: domain → http://127.0.0.1:port, nginx -t, reload]
+  C --> D{ssl?}
+  D -- no --> P[probe http://domain] --> OK[status active]
+  D -- yes --> E[public IP of server]
+  E --> F[wait ≤ 2 min for A record via 1.1.1.1 / 8.8.8.8]
+  F -- resolves --> G[install certbot, certbot --nginx with redirect] --> P2[probe https://domain] --> OK
+  F -- not yet --> X[status error: point an A record at IP, then Retry]
+```
+
+Removal deletes the nginx site and the certificate; there is no DNS record to remove, because the customer owns it.
+
 ### 6.2 Domain for an app
 
 - **DNS mode:** Cloudflare A record → server's public IP → nginx site proxying to the app's port → Let's Encrypt certificate.
@@ -231,6 +251,36 @@ sequenceDiagram
 | App *Live stats* tab | `GET /api/apps/:id/stats/stream` (SSE), same lifecycle as the server stream, capped by `APP_STATS_STREAMS_PER_ORG` | Every 5 s |
 
 Network and block I/O come back as totals since the container started; the browser turns two samples into a rate.
+
+**Per container (the container page).** `GET /api/servers/:id/containers/:name/stream` is one SSE stream over one SSH connection carrying two things: a `sample` every `?every=` ms (default 3000) from `collectContainerStats(conn, server, [name])`, and `log` events from a second channel on the same connection running `timeout <seconds left> docker logs -f --tail <n> --timestamps`. `docker logs -f` returns when the container stops, so `followContainer()` follows again every 4 s with `--since <last timestamp sent>` and drops lines at or before it (timestamps padded to nanoseconds to compare), so a stop, start or restart is picked up with no line repeated. The browser applies the same rule on an EventSource reconnect. It takes a slot from the same `STATS_MAX_STREAMS` / `STATS_MAX_STREAMS_PER_ORG` pool as the server stream and ends after `STATS_STREAM_MINUTES`; when the browser leaves the page the request closes, the log channel is closed, and the `timeout` wrapper guarantees `docker logs -f` cannot outlive the stream on the server.
+
+```mermaid
+sequenceDiagram
+  participant B as Browser (container page)
+  participant P as Panel
+  participant S as Server (SSH)
+  B->>P: GET /servers/:id/containers/:name/stream
+  P->>S: one SSH connection
+  par stats
+    loop every 3 s
+      P->>S: docker inspect + docker stats --no-stream <name>
+      P-->>B: event: sample
+    end
+  and logs
+    P->>S: timeout 15m docker logs -f --tail 200 <name>
+    S-->>P: lines as written
+    P-->>B: event: log { lines[] }
+  end
+  B--xP: page left → request closed → log channel closed
+```
+
+**Container downloads.** `docker.js` builds them on the server and the panel streams the result back over SFTP (`files.sendTempFile`), deleting the temporary file afterwards:
+
+| Download | How |
+|----------|-----|
+| Compose file | `docker inspect` of the container and its image → `composeFromInspect()` in the panel → `docker-compose.yml` text, sent directly. Settings equal to the image's defaults (environment, command, entrypoint, labels, healthcheck) are left out, `com.docker.compose.*` labels are dropped, and every `$` is doubled so compose does not interpolate it |
+| Backup | A `mktemp -d` folder on the server gets `docker-compose.yml`, `inspect.json`, `README.txt` and `volumes/<name>.tar.gz` (`tar -czf -C <mountpoint> .`) per volume mounted (named or anonymous), optionally between `docker pause` / `docker unpause` (a `trap` unpauses on any exit); the folder is packed into one `.tar.gz` |
+| Volume | `docker volume inspect` → `tar -czf -C <mountpoint> .` into a temp file |
 
 ### 6.6 Statistics history
 

@@ -40,6 +40,7 @@ Some routes check more inside the handler, for example:
 | `GET` | `/api/public/plans` | public | Plans for the pricing section |
 | `POST` | `/api/public/leads` | public, rate-limited | Landing page "Get started" form |
 | `GET` | `/api/public/docs` | public | The guide list |
+| `GET` | `/setup/aj-pilot-setup.sh` | public | The machine setup file with default options (or the same query options as `/api/servers/setup-script`), as an attachment — linked from the home page and the docs, and fetched on a new machine with `curl -fsSL <site>/setup/aj-pilot-setup.sh -o aj-pilot-setup.sh`. Holds no secrets. `400` for a bad option |
 | `GET` | `/api/activity` | view | Last 50 activity log entries for the organisation |
 | `POST` | `/api/hooks/apps/:token` | webhook token | Git push / merge webhook → auto deploy |
 | `POST` | `/api/hooks/razorpay` | HMAC signature | Razorpay payment events |
@@ -165,6 +166,7 @@ Source: [src/routes/servers.js](../src/routes/servers.js)
 | `GET` | `/api/servers` | view |  |
 | `GET` | `/api/servers/status` | view | Just the statuses, for the list to poll |
 | `POST` | `/api/servers/test` | create |  |
+| `GET` | `/api/servers/setup-script` | view | Downloads `aj-pilot-setup.sh` (`text/x-shellscript`, attachment). Query, all optional: `ssh_port` (1–65535, default 22), `timezone` (IANA name), `hostname`, `user` (account to give passwordless sudo; default the one running `sudo`), `ssh_key` (one OpenSSH public key line), `screen_minutes` (1–60, default 1), and on/off flags `sleep`, `lid`, `screen`, `wifi`, `wol`, `time`, `firewall`, `web_ports`, `fail2ban`, `updates`, `sudo`, `swap`, `docker`, `tools` (`1`/`0`; all default on except `docker`). `400` with `{ error }` for a bad value. Contains no secrets |
 | `POST` | `/api/servers` | create |  |
 | `GET` | `/api/servers/:id` | view |  |
 | `GET` | `/api/servers/:id/history` | view | Every profile ever collected for this server, newest first |
@@ -182,6 +184,7 @@ Source: [src/routes/servers.js](../src/routes/servers.js)
 | `POST` | `/api/servers/:id/services` | create | Create a new systemd service from the add-service form |
 | `DELETE` | `/api/servers/:id/services/:unit` | delete | Remove a unit this panel wrote |
 | `GET` | `/api/servers/:id/docker` | view | Is Docker there, its networks, and everything running on it |
+| `GET` | `/api/servers/:id/docker/stats` | view | What every running container uses right now, and Docker's disk use, in one SSH call → `{ at, host: { cores, memoryBytes }, containers: { [name]: { cpuPct, memoryBytes, memoryLimitBytes, memoryPct, netRxBytes, netTxBytes, blockReadBytes, blockWriteBytes, pids } }, disk: [{ type, total, active, sizeBytes, reclaimableBytes }] }`. `cpuPct` is Docker's (100 = one core). `400` when Docker is missing or stopped |
 | `POST` | `/api/servers/:id/docker/networks` | create | A user-defined network, so installed services can reach each other by name |
 | `POST` | `/api/servers/:id/docker/login` | create | Sign this server in to a container registry, so it can pull private images |
 | `POST` | `/api/servers/:id/docker/logout` | create |  |
@@ -207,6 +210,10 @@ Source: [src/routes/servers.js](../src/routes/servers.js)
 | `GET` | `/api/servers/:id/containers/:name` | view | Everything about one container |
 | `DELETE` | `/api/servers/:id/containers/:name` | delete | Remove a container that is not one of the panel's own |
 | `GET` | `/api/servers/:id/containers/:name/logs` | view |  |
+| `GET` | `/api/servers/:id/containers/:name/stream` | view | SSE for the container page: `sample` = `{ at, host, containers:[one], usage }` every `?every=` ms (2000–60000, default 3000); `log` = `{ lines[] }`, each `<RFC 3339 timestamp> <text>`, first the last `?tail=` lines (1–2000, default 200) then new ones as written, resumed after a stop or restart; `problem`, `end`. Shares the `STATS_MAX_STREAMS` / `STATS_MAX_STREAMS_PER_ORG` slots (else `429`) |
+| `GET` | `/api/servers/:id/containers/:name/compose` | edit | Download `<name>.docker-compose.yml`, rebuilt from `docker inspect`, environment values included |
+| `GET` | `/api/servers/:id/containers/:name/backup` | edit | Download `<name>-backup-<date>.tar.gz`: compose file, `inspect.json`, `README.txt`, `volumes/<volume>.tar.gz` per volume mounted (named or anonymous). `?pause=1` pauses a running container while its volumes are copied |
+| `GET` | `/api/servers/:id/docker/volumes/:name/download` | edit | Download one named volume's contents as `<name>.tar.gz` |
 | `GET` | `/api/servers/:id/nginx` | view | nginx, its sites and its certificates — everything the tab draws |
 | `POST` | `/api/servers/:id/nginx/install` | create |  |
 | `POST` | `/api/servers/:id/nginx/action` | create | reload / restart / start / stop / test |
@@ -263,7 +270,7 @@ Source: [src/routes/apps.js](../src/routes/apps.js)
 | `POST` | `/api/apps/:id/deploy` | create | Build and run the current branch again — the same path as the first deploy |
 | `POST` | `/api/apps/:id/deploy/stop` | create | Stop a deploy that is running — a manual one or an auto deploy |
 | `POST` | `/api/apps/:id/deploy/restart` | create | Stop the running deploy and start a fresh one from the branch as it is now |
-| `POST` | `/api/apps/:id/domains` | create | Add another domain to an app |
+| `POST` | `/api/apps/:id/domains` | create | Add another domain to an app. Body `{ domain, domain_mode: "dns" \| "zerotrust" \| "nginx", domain_port?, domain_email? }`; `dns` and `zerotrust` also need `domain_cred_id` (Cloudflare), `nginx` takes `domain_ssl: true\|false` and needs no credential. `202` — set up in the background. The same `domain_*` fields (plus `domain_enabled: true`) add a domain in `POST /api/apps` |
 | `POST` | `/api/apps/:id/domains/:domainId/retry` | create | Run one domain's setup again |
 | `DELETE` | `/api/apps/:id/domains/:domainId` | delete | Take one domain off an app |
 | `GET` | `/api/apps/:id/env` | view | The variables as they are, so they can be edited rather than retyped |

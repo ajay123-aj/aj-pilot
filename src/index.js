@@ -22,6 +22,7 @@ import { requirePlan, enforceLimits, DB_PROVIDERS, FREE_TRIAL_DAYS, blockIfExpir
 import { submitLead } from './routes/leads.js';
 import { renderLanding, robotsTxt, sitemapXml } from './lib/landing.js';
 import { renderDocsHome, renderDoc } from './lib/docsPage.js';
+import { setupOptionsFrom, buildSetupScript } from './lib/setupScript.js';
 import { renderTerms } from './lib/terms.js';
 import { docsFor } from './lib/docs.js';
 import { ensureSuperAdmin } from './lib/superAdmin.js';
@@ -74,6 +75,17 @@ app.get('/verify-email', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 app.get('/terms', (req, res) => res.set('Cache-Control', 'no-cache').type('html').send(renderTerms(req)));
+// The machine setup file, public: the home page and docs link it, and a new machine fetches it with curl.
+// It holds no secrets — only the options in the query, checked the same way as the signed-in download.
+app.get('/setup/aj-pilot-setup.sh', (req, res) => {
+  const opts = setupOptionsFrom(req.query);
+  if (opts.error) return res.status(400).type('text/plain').send(`${opts.error}\n`);
+  res.set({
+    'Content-Type': 'text/x-shellscript; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="aj-pilot-setup.sh"',
+    'Cache-Control': 'no-cache',
+  }).send(buildSetupScript(opts.value));
+});
 app.get('/robots.txt', (req, res) => res.type('text/plain').send(robotsTxt(req)));
 app.get('/sitemap.xml', (req, res) => res.type('application/xml').send(sitemapXml(req)));
 

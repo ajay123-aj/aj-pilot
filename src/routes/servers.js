@@ -11,8 +11,9 @@ import {
   dockerState, createNetwork, removeNetwork, removeVolume, validateName,
   registryLogin, registryLogout, registryLabel, DOCKER_HUB,
   requireDocker, DockerMissingError, containerAction, containerLogs, containerDetails, removeAnyContainer, CONTAINER_ACTIONS,
+  followLogs, containerCompose, prepareContainerBackup, prepareVolumeArchive, validateVolumeName,
 } from '../lib/docker.js';
-import { collectLiveStats } from '../lib/liveStats.js';
+import { collectLiveStats, collectContainerStats, collectAllContainerStats, appUsage } from '../lib/liveStats.js';
 import { metricSeries, latestLevels } from '../lib/metrics.js';
 import { runnerState } from '../lib/runnerInstall.js';
 import { collectSummary } from '../lib/serverSummary.js';
@@ -36,9 +37,11 @@ import {
   nginxLogReport, installAnalyzer, removeAnalyzer, blockIps, unblockIps, installFail2ban, validateBlockTarget, parseCidr,
 } from '../lib/nginxLogs.js';
 import { decrypt } from '../lib/crypto.js';
+import { setupOptionsFrom, buildSetupScript } from '../lib/setupScript.js';
 import { requirePermission } from '../lib/authGuard.js';
 import {
   listDir, readFile, writeFile, uploadFile, downloadTo, makeFolder, makeFile, move, copy, remove, setPermissions, extract,
+  sendTempFile,
 } from '../lib/files.js';
 
 export const serversRouter = Router();
@@ -209,6 +212,21 @@ serversRouter.get('/status', async (req, res, next) => {
 });
 
 /* -------------------------------------------------- test before saving */
+
+/**
+ * The one-file setup for a blank machine, as a download. It holds only the
+ * options in the query — nothing secret — so anyone who can see servers may have it.
+ */
+serversRouter.get('/setup-script', (req, res) => {
+  const opts = setupOptionsFrom(req.query);
+  if (opts.error) return res.status(400).json({ error: opts.error });
+  res.set({
+    'Content-Type': 'text/x-shellscript; charset=utf-8',
+    'Content-Disposition': 'attachment; filename="aj-pilot-setup.sh"',
+    'Cache-Control': 'no-store',
+  });
+  res.send(buildSetupScript(opts.value));
+});
 
 serversRouter.post('/test', async (req, res, next) => {
   try {
@@ -553,6 +571,9 @@ serversRouter.get('/:id/docker', serverRoute(async (conn, row) => ({
   docker: await dockerState(conn, row),
 })));
 
+/** What every running container uses now, and Docker's disk use — the Docker tab's cards poll this. */
+serversRouter.get('/:id/docker/stats', serverRoute(async (conn, row) => collectAllContainerStats(conn, row)));
+
 /** A user-defined network, so installed services can reach each other by name. */
 serversRouter.post('/:id/docker/networks', async (req, res, next) => {
   try {
@@ -627,6 +648,17 @@ serversRouter.post('/:id/docker/logout', async (req, res, next) => {
     }
   } catch (err) { next(err); }
 });
+
+/** One named volume's contents as a .tar.gz. */
+serversRouter.get('/:id/docker/volumes/:name/download', requirePermission('edit'), downloadRoute(async (conn, row, req) => {
+  const named = validateVolumeName(req.params.name);
+  if (named.error) throw new Error(named.error);
+  return {
+    ...await prepareVolumeArchive(conn, row, named.value),
+    activity: 'docker_volume_downloaded',
+    summary: `Downloaded the Docker volume "${named.value}"`,
+  };
+}));
 
 /** Remove a named volume — with the data in it. */
 serversRouter.delete('/:id/docker/volumes/:name', async (req, res, next) => {
@@ -1087,6 +1119,38 @@ const STREAM_MINUTES = Number(process.env.STATS_STREAM_MINUTES || 15);
 let openStreams = 0;
 const streamsByOrg = new Map(); // orgId → open live views
 
+/**
+ * Take a live-view slot, or null when the panel or the organisation is full.
+ * The server's Live tab and a container page share the pool; whoever takes a
+ * slot must call the returned release exactly once.
+ */
+function takeStreamSlot(orgId) {
+  if (openStreams >= MAX_STREAMS || (streamsByOrg.get(orgId) || 0) >= MAX_STREAMS_PER_ORG) return null;
+  openStreams += 1;
+  streamsByOrg.set(orgId, (streamsByOrg.get(orgId) || 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    openStreams = Math.max(0, openStreams - 1);
+    const left = (streamsByOrg.get(orgId) || 1) - 1;
+    if (left > 0) streamsByOrg.set(orgId, left); else streamsByOrg.delete(orgId);
+  };
+}
+
+/** Open a server-sent events response. */
+function startEvents(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    // Tells nginx, if the panel is behind one, not to buffer this.
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(`retry: 5000\n\n`);
+  res.flushHeaders?.();
+}
+
 serversRouter.get('/:id/stats/stream', async (req, res, next) => {
   let row;
   try {
@@ -1095,26 +1159,12 @@ serversRouter.get('/:id/stats/stream', async (req, res, next) => {
     return next(err);
   }
   if (!row) return res.status(404).json({ error: 'Server not found' });
-  if (openStreams >= MAX_STREAMS || (streamsByOrg.get(req.orgId) || 0) >= MAX_STREAMS_PER_ORG) {
-    return res.status(429).json({ error: 'Too many live views are open at once. Close one and try again.' });
-  }
-
   // From here a slot is taken, so every path below has to give it back.
-  const orgId = req.orgId;
-  openStreams += 1;
-  streamsByOrg.set(orgId, (streamsByOrg.get(orgId) || 0) + 1);
+  const release = takeStreamSlot(req.orgId);
+  if (!release) return res.status(429).json({ error: 'Too many live views are open at once. Close one and try again.' });
   try {
     const intervalMs = Math.max(2000, Math.min(60000, Number(req.query.every) || 5000));
-
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      // Tells nginx, if the panel is behind one, not to buffer this.
-      'X-Accel-Buffering': 'no',
-    });
-    res.write(`retry: 5000\n\n`);
-    res.flushHeaders?.();
+    startEvents(res);
 
     let open = true;
     const stop = () => { open = false; };
@@ -1167,9 +1217,7 @@ serversRouter.get('/:id/stats/stream', async (req, res, next) => {
       next(err);
     }
   } finally {
-    openStreams = Math.max(0, openStreams - 1);
-    const left = (streamsByOrg.get(orgId) || 1) - 1;
-    if (left > 0) streamsByOrg.set(orgId, left); else streamsByOrg.delete(orgId);
+    release();
   }
 });
 
@@ -1240,6 +1288,182 @@ serversRouter.get('/:id/containers/:name/logs', async (req, res, next) => {
     }
   } catch (err) { next(err); }
 });
+
+/** Docker's timestamps drop trailing zeros; padded to nanoseconds they sort as text. */
+const sortableTs = (ts) => String(ts || '').replace(/(?:\.(\d+))?Z$/, (_, frac = '') => `.${frac.padEnd(9, '0')}Z`);
+
+/**
+ * Keep following a container's output until the stream ends. `docker logs -f`
+ * returns when the container stops, so a stop and start — or a restart — is
+ * picked up again a few seconds later from the last line already sent, with no
+ * line repeated.
+ */
+async function followContainer(conn, row, name, { tail, endAt, signal, send }) {
+  let since = null;
+  let failures = 0;
+  while (!signal.aborted && Date.now() < endAt) {
+    try {
+      await followLogs(conn, row, name, {
+        tail,
+        since,
+        seconds: (endAt - Date.now()) / 1000,
+        signal,
+        onLines: (lines) => {
+          const last = since ? sortableTs(since) : null;
+          const fresh = last ? lines.filter((l) => sortableTs(l.split(' ')[0]) > last) : lines;
+          const ts = lines[lines.length - 1].split(' ')[0];
+          if (/^\d{4}-\d\d-\d\dT/.test(ts)) since = ts;
+          if (fresh.length) send('log', { lines: fresh });
+        },
+      });
+      failures = 0;
+    } catch (err) {
+      failures += 1;
+      send('problem', { error: err.message, source: 'logs' });
+      if (failures >= 3) return;
+    }
+    if (signal.aborted) return;
+    await new Promise((resolve) => {
+      const t = setTimeout(resolve, 4000);
+      signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+    });
+  }
+}
+
+/**
+ * The container page's live feed: a stats `sample` every few seconds and its
+ * output as `log` events as it is written, both over one SSH connection and
+ * one live-view slot. Leaving the page closes the request, which closes the
+ * log channel; the stream also ends itself after STATS_STREAM_MINUTES.
+ */
+serversRouter.get('/:id/containers/:name/stream', async (req, res, next) => {
+  let row;
+  try {
+    row = await getRow(req.params.id, req.orgId);
+  } catch (err) {
+    return next(err);
+  }
+  if (!row) return res.status(404).json({ error: 'Server not found' });
+  const named = validateName(req.params.name, 'container name');
+  if (named.error) return res.status(400).json({ error: named.error });
+  const release = takeStreamSlot(req.orgId);
+  if (!release) return res.status(429).json({ error: 'Too many live views are open at once. Close one and try again.' });
+
+  try {
+    const intervalMs = Math.max(2000, Math.min(60000, Number(req.query.every) || 3000));
+    const tail = Math.max(1, Math.min(2000, Number(req.query.tail) || 200));
+    startEvents(res);
+
+    const stopLogs = new AbortController();
+    let open = true;
+    req.on('close', () => { open = false; stopLogs.abort(); });
+    const send = (event, payload) => {
+      if (open) res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const endAt = Date.now() + STREAM_MINUTES * 60000;
+    try {
+      await withConnection(connectionFromRow(row), async (conn) => {
+        const logs = followContainer(conn, row, named.value, {
+          tail, endAt, signal: stopLogs.signal, send,
+        });
+
+        let failures = 0;
+        while (open && Date.now() < endAt) {
+          const started = Date.now();
+          try {
+            const sample = await collectContainerStats(conn, row, [named.value]);
+            failures = 0;
+            send('sample', { ...sample, usage: appUsage(sample.containers, sample.host) });
+          } catch (err) {
+            failures += 1;
+            send('problem', { error: err.message, source: 'stats' });
+            if (failures >= 3) break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, intervalMs - (Date.now() - started))));
+        }
+        stopLogs.abort();
+        await logs;
+      });
+    } catch (err) {
+      send('problem', { error: err.message, fatal: true });
+    }
+    send('end', { reason: open ? 'The live view timed out — it will reconnect.' : 'closed' });
+    res.end();
+  } catch (err) {
+    if (res.headersSent) {
+      res.write(`event: problem\ndata: ${JSON.stringify({ error: err.message, fatal: true })}\n\n`);
+      res.end();
+    } else {
+      next(err);
+    }
+  } finally {
+    release();
+  }
+});
+
+/**
+ * A download the server packs first. Until the first byte goes out an error is
+ * an ordinary JSON 400; after that the only way to say so is to cut the transfer.
+ */
+function downloadRoute(prepare) {
+  return async (req, res, next) => {
+    try {
+      const row = await getRow(req.params.id, req.orgId);
+      if (!row) return res.status(404).json({ error: 'Server not found' });
+      try {
+        await withConnection(connectionFromRow(row), async (conn) => {
+          const file = await prepare(conn, row, req);
+          res.setHeader('Content-Disposition', `attachment; filename="${file.fileName.replace(/["\\\r\n]/g, '_')}"`);
+          if (file.text !== undefined) {
+            res.setHeader('Content-Type', file.contentType || 'text/plain; charset=utf-8');
+            res.end(file.text);
+          } else {
+            res.setHeader('Content-Type', 'application/gzip');
+            if (file.size) res.setHeader('Content-Length', String(file.size));
+            await sendTempFile(conn, row, file.tmp, res);
+            res.end();
+          }
+          await logActivity('server', row.id, file.activity, `${file.summary} from ${row.name}`);
+        });
+      } catch (err) {
+        if (res.headersSent) return res.destroy(err);
+        res.status(400).json({ ok: false, error: err.message, detail: err.cause || null });
+      }
+    } catch (err) { next(err); }
+  };
+}
+
+const containerNamed = (req) => {
+  const named = validateName(req.params.name, 'container name');
+  if (named.error) throw new Error(named.error);
+  return named.value;
+};
+
+/** The container as a docker-compose.yml — environment values included, so `edit` only. */
+serversRouter.get('/:id/containers/:name/compose', requirePermission('edit'), downloadRoute(async (conn, row, req) => {
+  const name = containerNamed(req);
+  return {
+    fileName: `${name}.docker-compose.yml`,
+    contentType: 'application/yaml; charset=utf-8',
+    text: await containerCompose(conn, row, name),
+    activity: 'container_compose_downloaded',
+    summary: `Downloaded the compose file of ${name}`,
+  };
+}));
+
+/** This container only: compose file, inspect and every named volume, as one .tar.gz. */
+serversRouter.get('/:id/containers/:name/backup', requirePermission('edit'), downloadRoute(async (conn, row, req) => {
+  const name = containerNamed(req);
+  const pause = req.query.pause === '1';
+  const file = await prepareContainerBackup(conn, row, name, { pause });
+  const vols = file.volumes.length;
+  return {
+    ...file,
+    activity: 'container_backup_downloaded',
+    summary: `Downloaded a backup of ${name}${vols ? ` with ${vols} volume${vols === 1 ? '' : 's'}` : ''}${pause ? ' (paused while copying)' : ''}`,
+  };
+}));
 
 /* -------------------------------------------------------------- nginx */
 
