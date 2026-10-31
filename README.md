@@ -351,6 +351,24 @@ never redrawn under your click. **Details** — or a click on the container's na
 Docker tab opens (details, live stats, live logs, volumes, downloads and backup); its back button returns to
 **Live**.
 
+**What is using the memory.** Click the **Memory** tile, or **See what is using it** beside a *Memory at …%*
+warning, to open a list of everything holding memory on the server, biggest first. Every process on the
+machine is counted and grouped by what it belongs to:
+
+| Shown as          | Means                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| **App**           | a container of one of your custom services, by the service's name                  |
+| **Installed**     | a container of a database or other service installed from the catalog              |
+| **Container**     | any other Docker container on the machine                                          |
+| **System service**| a service the operating system runs (nginx, Docker itself, MySQL installed directly…) |
+| **Logins**        | programs started from an SSH or terminal session, per user                         |
+| **Other**         | everything else, such as the system's own start-up process                         |
+
+Each row shows its memory, its share of the server's memory with a bar, how many processes it has and the
+biggest of them. A search box finds a row by name, and **Refresh** reads the server again. Click the name of
+an **App**, **Installed** or **Container** row to open that container's page. Memory that several processes share is counted for each of them, so
+the rows can add up to a little more than the *used* figure on the tile.
+
 The first time you open **Live**, every part of the page shows a shimmering placeholder in the shape of
 what will fill it, until the first reading arrives a few seconds later. If the server cannot be read, the
 placeholders stop shimmering and the reason is shown at the top.
@@ -627,7 +645,8 @@ merges deploy it by themselves. The app type and the health badge sit at the car
 ### It checks the project first
 
 Pick the git account, repository and branch, and the panel reads `package.json` through the provider's API —
-nothing is cloned yet. **No `package.json` at the root means the repository is refused**, with the reason
+nothing is cloned yet. For a repository with many branches, type part of a name in the search box above the
+**Branch** list to narrow it down; the first match is picked as you type. **No `package.json` at the root means the repository is refused**, with the reason
 said plainly, rather than a build that fails ten minutes later. A project with no `start` script is refused
 the same way, with a hint about what to add.
 
@@ -1268,6 +1287,11 @@ Bitbucket _app password_ also works: put your Bitbucket username in the email fi
 `Re-authenticate` re-checks a token and refreshes the stored account — useful after rotating a token or
 changing its scopes.
 
+Bitbucket repositories are gathered workspace by workspace, so the token needs read access to workspaces as
+well as repositories. An account is marked **invalid** only when the provider rejects the token itself. If the
+token signs in but cannot read something (for example a missing scope), the account stays valid and the error
+is shown where the list would be.
+
 ## Credentials
 
 The **Credentials** tab stores access for the deployment phase. Each secret is encrypted before it is
@@ -1285,6 +1309,13 @@ written to disk and never leaves the API — the UI only ever sees a masked hint
 Git, Cloudflare and Docker Hub accounts all live under **Account management** in the sidebar, one tab each. MySQL connections stay under **Databases**.
 
 **Cloudflare browser sign-in.** Cloudflare does not offer OAuth to self-hosted panels, so **+ Connect Cloudflare** opens your Cloudflare dashboard with a _Create API token_ form already filled in (name, Zone:Edit, Zone Settings:Read, DNS:Edit, Account Settings:Read, User Details:Read, all zones). Sign in there, press _Continue to summary_ → _Create Token_ → _Copy_, and come back: the panel reads the token from the clipboard (or from the paste box), verifies it, then fetches and stores your email, accounts and zones. Open the account to browse zones and each zone's DNS records.
+
+**Zero Trust on an account you were invited to.** A Cloudflare token can never do more than your own role in an
+account. If you are a member of someone else's Cloudflare account (for example a company account) and your role
+there does not include Zero Trust, the Zero Trust page says so and asks you to have that account's owner give you
+the **Super Administrator**, **Administrator**, or **Cloudflare Zero Trust** + **Cloudflare Tunnel** role, or to connect
+a token created by a user who has one. Reconnecting with a new token of your own does not help in that case. If
+the page instead says the token itself is missing Zero Trust access, use **Reconnect with Zero Trust access**.
 
 ## Security notes
 
@@ -1430,6 +1461,7 @@ page, the same line under its name, kept up to date while you are on it.
 | `GET`                     | `/api/servers/:id/runners`                                                                                                         | the runners on this server as the machine reports them, and any it did not install             |
 | `GET`                     | `/api/servers/:id/stats`                                                                                                           | one live sample: CPU, memory, load, disks, network, containers, alerts                         |
 | `GET`                     | `/api/servers/:id/stats/stream`                                                                                                    | the same, pushed every few seconds over server-sent events                                     |
+| `GET`                     | `/api/servers/:id/memory`                                                                                                          | what is using memory, grouped by app, container, system service or login, biggest first        |
 | `POST`                    | `/api/servers/:id/containers/:name/action`                                                                                         | `start` / `stop` / `restart` any container on the host                                         |
 | `GET`                     | `/api/servers/:id/containers/:name/logs`                                                                                           | that container's recent output                                                                 |
 | `GET`                     | `/api/servers/:id/containers/:name/stream`                                                                                         | live stats and live logs for the container page (server-sent events)                           |

@@ -178,6 +178,8 @@ sequenceDiagram
   U->>P: Polls status every few seconds while building
 ```
 
+Reading a repository before it is cloned (files, folder listing, the project-folder scan, recent commits) goes through the provider's API with the branch as the ref. Bitbucket's `/src/{ref}/…` and `/commits/{ref}` answer *Commit not found* for a branch name containing `/` (`feature/x`), however it is encoded, so for Bitbucket such a branch is first resolved to its head commit through `/refs/branches/{name}` (then `/refs/tags/{name}`), and the commit hash is used in those URLs. A branch that does not exist reads as empty, as before.
+
 **Auto deploy** reaches the same deploy path from two triggers:
 
 - a **webhook** at `/api/hooks/apps/:token` (GitHub push, GitLab push or merge-request hook, Bitbucket), or
@@ -242,6 +244,19 @@ sequenceDiagram
 ### 6.5 Live statistics
 
 `GET /api/servers/:id/stats/stream` is a Server-Sent Events stream backed by one SSH session that samples `/proc` twice, one second apart, and computes rates on the machine itself. It is capped at `STATS_MAX_STREAMS` concurrent streams and `STATS_STREAM_MINUTES` per stream; the browser reconnects after that.
+
+**Memory breakdown.** `GET /api/servers/:id/memory` runs `liveStats.collectMemoryUsage(conn, server)` in one SSH pass: `/proc/meminfo`, `ps -eo pid,rss,user,cgroup,comm` for every process, and `docker ps --no-trunc` for container ids. Each process is put in a group by its cgroup path: `docker-<id>.scope` or `/docker/<id>` is a container, `/system.slice/<name>.service` a systemd service, anything under `/user.slice/` the login sessions of its user, the rest "other". The route then names containers after the panel's own records (`apps.containers` / `apps.container_id` → app, `installations.name` / `container_id` → installed service) and returns the groups sorted by resident memory (RSS).
+
+```mermaid
+flowchart LR
+  T[Memory tile or warning] --> R[GET /api/servers/:id/memory]
+  R --> S[SSH: meminfo + ps cgroup + docker ps]
+  S --> G[group by cgroup path]
+  R --> DB[(apps, installations)]
+  G --> N[name containers after apps / installs]
+  DB --> N
+  N --> L[list, biggest first]
+```
 
 **Per app.** `liveStats.collectContainerStats(conn, server, names)` asks only for an app's containers: `docker inspect` (state, start time, restarts, health, OOM-killed) and `docker stats --no-stream` for the running ones, by name. `appUsage()` adds them up and expresses CPU and memory as a share of the host (Docker reports CPU per core, so 200% is two cores).
 

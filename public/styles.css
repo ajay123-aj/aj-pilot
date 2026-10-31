@@ -3628,3 +3628,11 @@ a.ct-port:hover { background: var(--accent); color: var(--accent-contrast); }
 .osu-card-foot .btn { display: inline-flex; align-items: center; gap: 5px; }
 .osu-more { margin-left: auto; }
 .osu-more .act-toggle { height: 28px; }
+
+/* The Live tab's Memory tile opens the "what is using memory" list. */
+.live-kpi[data-memory-open] { cursor: pointer; transition: border-color .15s; }
+.live-kpi[data-memory-open]:hover, .live-kpi[data-memory-open]:focus-visible { border-color: var(--accent); outline: none; }
+.memory-share { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.memory-share .meter { flex: 1; }
+.memory-share span { font-size: 12px; font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+.live-alert [data-memory-open] { margin-left: auto; }

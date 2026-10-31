@@ -2198,7 +2198,10 @@ sudo bash aj-pilot-setup.sh</code></pre>
         <label>Git account<select name="credential_id" id="app-account" required></select></label>
         <label>Repository<select name="repo" id="app-repo" required></select></label>
       </div>
-      <label>Branch<select name="branch" id="app-branch"></select></label>
+      <label>Branch
+        <input type="search" id="app-branch-search" placeholder="Search branches…" autocomplete="off" spellcheck="false" aria-label="Search branches" />
+        <select name="branch" id="app-branch" style="margin-top:6px"></select>
+      </label>
       <label>Project folder <span class="muted small">(for a repository with several projects in it)</span>
         <select name="root_dir" id="app-folder"><option value="">Repository root</option></select>
       </label>
@@ -2931,6 +2934,25 @@ sudo bash aj-pilot-setup.sh</code></pre>
 </div>
 
 <!-- ------------------------------------------------ container logs modal -->
+<div class="modal-backdrop hidden" id="modal-memory">
+  <div class="modal" style="max-width:860px">
+    <h2>What is using memory</h2>
+    <p class="muted small" id="memory-sub">—</p>
+    <div class="section-tools" style="margin:10px 0">
+      <label class="search-box">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="search" id="memory-q" placeholder="Find a service" autocomplete="off" spellcheck="false" aria-label="Find a service" />
+      </label>
+      <button type="button" class="btn tiny" id="btn-memory-refresh">Refresh</button>
+    </div>
+    <div id="memory-body"></div>
+    <p class="muted small" style="margin:10px 0 0">Memory shared between processes is counted for each of them, so the rows can add up to a little more than the used total.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop hidden" id="modal-container-logs">
   <div class="modal" style="max-width:860px">
     <h2 id="container-logs-name">Logs</h2>

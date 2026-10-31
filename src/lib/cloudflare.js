@@ -329,6 +329,9 @@ function dnsRecord(r) {
  */
 
 const TUNNEL_PERMISSION_MESSAGE = 'This token is not allowed to manage Zero Trust — it needs Cloudflare Tunnel: Edit and Zero Trust: Edit. Connect the account again with a new token.';
+const ROLE_PERMISSION_MESSAGE = 'Cloudflare refused this for your role on this account. The token has Zero Trust access, but a token can never do more than its user\'s role — ask the account owner for the Super Administrator, Administrator, or Cloudflare Zero Trust + Cloudflare Tunnel role.';
+
+const isRefusal = (err) => err.status === 403 || err.code === 10000 || err.code === 9109;
 
 function zeroTrustError(err) {
   if (err.status === 403 || err.code === 9109 || err.code === 10000) throw Object.assign(new Error(TUNNEL_PERMISSION_MESSAGE), { permission: true });
@@ -415,7 +418,7 @@ function deviceSummary(d) {
  * private network routes and enrolled devices. Each part may fail on its own
  * (a narrow token, or Zero Trust not set up yet) without hiding the others.
  */
-export async function getZeroTrust(token, accountId) {
+export async function getZeroTrust(token, accountId, otherAccountIds = []) {
   checkIds(accountId);
   const [tunnelList0, routes0, devices, team, vnets] = await Promise.all([
     optional(cfList(token, `/accounts/${accountId}/cfd_tunnel?is_deleted=false`).catch(zeroTrustError)),
@@ -428,8 +431,13 @@ export async function getZeroTrust(token, accountId) {
   // Without Cloudflare Tunnel permission the tunnel and route lists answer
   // 200 with nothing in them rather than refusing, which reads as "no tunnels".
   // Virtual networks do refuse, so they tell the two apart.
-  const noTunnelAccess = !vnets.ok && (vnets.err.status === 403 || vnets.err.code === 10000 || vnets.err.code === 9109);
-  const denied = { ok: false, err: new Error(TUNNEL_PERMISSION_MESSAGE) };
+  const noTunnelAccess = !vnets.ok && isRefusal(vnets.err);
+  // The same refusal comes from a token made without the permissions and from a
+  // user whose role on this account lacks them. If the token reads Zero Trust on
+  // another account it can see, the token is fine and the role is the problem.
+  const roleLimited = noTunnelAccess && await tokenReadsZeroTrustElsewhere(token, otherAccountIds.filter((id) => id !== accountId && isCfId(id)));
+  const denied = { ok: false, err: new Error(roleLimited ? ROLE_PERMISSION_MESSAGE : TUNNEL_PERMISSION_MESSAGE) };
+  const refused = (part) => (roleLimited && !part.ok ? denied : part);
   const tunnels = noTunnelAccess && tunnelList0.ok && !tunnelList0.v.length ? denied : tunnelList0;
   const routes = noTunnelAccess && routes0.ok && !routes0.v.length ? denied : routes0;
 
@@ -449,13 +457,22 @@ export async function getZeroTrust(token, accountId) {
     routes: routes.ok ? routes.v.map(routeSummary) : null,
     routesError: routes.ok ? null : routes.err.message,
     devices: devices.ok ? devices.v.map(deviceSummary).filter((d) => !d.revoked) : null,
-    devicesError: devices.ok ? null : devices.err.message,
+    devicesError: devices.ok ? null : refused(devices).err.message,
     // null with no error means Zero Trust has not been set up on this account yet.
     team: team.ok ? team.v : null,
-    teamError: team.ok ? null : team.err.message,
+    teamError: team.ok ? null : refused(team).err.message,
+    // The user's role on this account lacks Zero Trust; a new token would not help.
+    needsRole: roleLimited,
     // The token was made without the Zero Trust permissions; reconnecting fixes it.
-    needsReconnect: noTunnelAccess || (!devices.ok && Boolean(devices.err.permission)),
+    needsReconnect: !roleLimited && (noTunnelAccess || (!devices.ok && Boolean(devices.err.permission))),
   };
+}
+
+/** Whether the token may read Zero Trust on any of these accounts. */
+async function tokenReadsZeroTrustElsewhere(token, accountIds) {
+  const results = await Promise.all(accountIds.slice(0, 5).map((id) =>
+    cf(token, `/accounts/${id}/teamnet/virtual_networks`).then(() => true, () => false)));
+  return results.some(Boolean);
 }
 
 /* --- team domain (<team>.cloudflareaccess.com) */
@@ -483,7 +500,8 @@ export async function getTeamDomain(token, accountId) {
     const o = (await cf(token, `/accounts/${accountId}/access/organizations`)).result;
     return o && o.auth_domain ? teamSummary(o) : null;
   } catch (err) {
-    if (err.status === 404) return null;
+    // "access.api.error.not_enabled" — Zero Trust has simply not been set up on this account yet.
+    if (err.status === 404 || /not_enabled/.test(err.message)) return null;
     return teamError(err);
   }
 }

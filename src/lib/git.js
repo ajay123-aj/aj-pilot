@@ -67,7 +67,7 @@ async function request(url, token, s, { method = 'GET', body = null, raw = false
 
   // A missing file is an answer, not a failure, when the caller says so.
   if (res.status === 404 && allow404) return { body: null, headers: res.headers, missing: true };
-  if (!res.ok) throw await describeFailure(res, s.kind);
+  if (!res.ok) throw Object.assign(await describeFailure(res, s.kind), { status: res.status });
 
   return {
     body: raw ? await res.text().catch(() => null) : await res.json().catch(() => null),
@@ -173,7 +173,17 @@ export async function listRepositories(token, extra = {}, { perPage = 100 } = {}
   const s = gitSettings(extra);
 
   if (s.kind === 'bitbucket') {
-    const repos = await bitbucketPages(`${s.apiUrl}/repositories?role=member&sort=-updated_on&pagelen=${Math.min(perPage, 100)}`, token, s, 5);
+    // The cross-workspace /repositories listing is gone (it answers 404); read each workspace instead.
+    const workspaces = await bitbucketWorkspaces(token, s);
+    const results = await Promise.allSettled(workspaces.map((w) => bitbucketPages(
+      `${s.apiUrl}/repositories/${encodeURIComponent(w.slug)}?role=member&sort=-updated_on&pagelen=${Math.min(perPage, 100)}`,
+      token, s, 2
+    )));
+    // A workspace the token cannot read is skipped; only fail when none could be read.
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (workspaces.length && failed.length === results.length) throw failed[0].reason;
+    const repos = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+      .sort((a, b) => String(b.updated_on || '').localeCompare(String(a.updated_on || '')));
     return repos.map((r) => {
       const clone = (name) => (r.links?.clone || []).find((c) => c.name === name)?.href || null;
       return {
@@ -276,7 +286,9 @@ export async function listCommits(token, extra, fullName, branch, limit = 10) {
   const s = gitSettings(extra);
 
   if (s.kind === 'bitbucket') {
-    const { body } = await request(`${s.apiUrl}/repositories/${fullName}/commits/${encodeURIComponent(branch)}?pagelen=${limit}`, token, s);
+    const ref = await bitbucketRef(token, s, fullName, branch);
+    if (!ref) throw new Error(`Bitbucket has no branch "${branch}" in ${fullName}`);
+    const { body } = await request(`${s.apiUrl}/repositories/${fullName}/commits/${encodeURIComponent(ref)}?pagelen=${limit}`, token, s);
     return (body?.values || []).slice(0, limit).map((c) => ({
       sha: (c.hash || '').slice(0, 7),
       message: firstLine(c.message),
@@ -323,7 +335,9 @@ export async function readRepoFile(token, extra, fullName, path, ref) {
   const s = gitSettings(extra);
 
   if (s.kind === 'bitbucket') {
-    const url = `${s.apiUrl}/repositories/${fullName}/src/${encodeURIComponent(ref)}/${encodePath(path)}`;
+    const commit = await bitbucketRef(token, s, fullName, ref);
+    if (!commit) return null;
+    const url = `${s.apiUrl}/repositories/${fullName}/src/${encodeURIComponent(commit)}/${encodePath(path)}`;
     const { body } = await request(url, token, s, { raw: true, allow404: true });
     return body || null;
   }
@@ -348,7 +362,9 @@ export async function listRepoRoot(token, extra, fullName, ref, dir = '') {
   const s = gitSettings(extra);
 
   if (s.kind === 'bitbucket') {
-    const url = `${s.apiUrl}/repositories/${fullName}/src/${encodeURIComponent(ref)}/${dir ? `${encodePath(dir)}/` : ''}?pagelen=100`;
+    const commit = await bitbucketRef(token, s, fullName, ref);
+    if (!commit) return [];
+    const url = `${s.apiUrl}/repositories/${fullName}/src/${encodeURIComponent(commit)}/${dir ? `${encodePath(dir)}/` : ''}?pagelen=100`;
     const { body } = await request(url, token, s, { allow404: true });
     return (body?.values || []).map((e) => e.path.split('/').pop());
   }
@@ -384,7 +400,10 @@ export async function findProjectFolders(token, extra, fullName, ref) {
     }
   } else if (s.kind === 'bitbucket') {
     // Bitbucket lists a whole tree to a given depth, a page at a time.
-    const entries = await bitbucketPages(`${s.apiUrl}/repositories/${fullName}/src/${encodeURIComponent(ref)}/?max_depth=6&pagelen=100`, token, s, 20, { allow404: true });
+    const commit = await bitbucketRef(token, s, fullName, ref);
+    const entries = commit
+      ? await bitbucketPages(`${s.apiUrl}/repositories/${fullName}/src/${encodeURIComponent(commit)}/?max_depth=6&pagelen=100`, token, s, 20, { allow404: true })
+      : [];
     for (const e of entries) if (e.type === 'commit_file') paths.push(e.path);
   } else {
     const { body } = await request(`${s.apiUrl}/repos/${fullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`, token, s, { allow404: true });
@@ -418,8 +437,7 @@ export async function listOrganizations(token, extra = {}) {
   const s = gitSettings(extra);
 
   if (s.kind === 'bitbucket') {
-    const rows = await bitbucketPages(`${s.apiUrl}/user/permissions/workspaces?pagelen=100`, token, s, 3);
-    return rows.map((r) => r.workspace).filter(Boolean).map((w) => ({
+    return (await bitbucketWorkspaces(token, s)).map((w) => ({
       login: w.slug,
       name: w.name || w.slug,
       id: w.uuid,
@@ -619,6 +637,27 @@ async function bitbucketPages(url, token, s, maxPages = 5, opts = {}) {
     next = body?.next || null;
   }
   return out;
+}
+
+/**
+ * What to put where Bitbucket wants a commit in a URL path. /src/{ref} and
+ * /commits/{ref} answer "Commit not found" for a branch with a "/" in its name
+ * (feature/x) however it is encoded, so such a branch is looked up and its head
+ * commit used instead. Null when no branch or tag has that name.
+ */
+async function bitbucketRef(token, s, fullName, ref) {
+  if (!String(ref).includes('/')) return ref;
+  for (const kind of ['branches', 'tags']) {
+    const { body } = await request(`${s.apiUrl}/repositories/${fullName}/refs/${kind}/${encodeURIComponent(ref)}`, token, s, { allow404: true });
+    if (body?.target?.hash) return body.target.hash;
+  }
+  return null;
+}
+
+/** Workspaces the signed-in user belongs to (replaces the removed /user/permissions/workspaces). */
+async function bitbucketWorkspaces(token, s) {
+  const rows = await bitbucketPages(`${s.apiUrl}/user/workspaces?pagelen=100`, token, s, 3);
+  return rows.map((r) => r.workspace).filter((w) => w?.slug);
 }
 
 /** "Jane Doe <jane@example.com>" → "Jane Doe". */

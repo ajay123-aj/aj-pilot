@@ -8498,6 +8498,11 @@ function renderZeroTrust() {
       Connect again — the new token asks for <b>Cloudflare Tunnel: Edit</b> and <b>Zero Trust: Edit</b> — and this account is updated in place.
       ${ifCan('create', '<div style="margin-top:8px"><button class="btn tiny primary" data-zt-reconnect>Reconnect with Zero Trust access</button></div>')}
     </div>` : ''}
+    ${zt.needsRole ? `<div class="msg err" style="margin-top:12px">
+      Your token has Zero Trust access, but your role on <b>${esc(zt.account.name)}</b> does not, and Cloudflare never lets a token do more than its user's role.
+      Ask the owner of this account to give you the <b>Super Administrator</b>, <b>Administrator</b>, or <b>Cloudflare Zero Trust</b> + <b>Cloudflare Tunnel</b> role
+      (Cloudflare dashboard → Manage Account → Members), then press Reload. Or connect a token created by a user who has that role. A new token of your own will not help.
+    </div>` : ''}
     <div class="card" style="margin-top:12px">${team}</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin:14px 0">
       ${tabs.map(([key, label, n]) => `<button class="btn ${key === ztTab ? 'primary' : ''}" data-zt-tab="${key}">${esc(label)}${n ? ` · ${n}` : ''}</button>`).join('')}
@@ -11213,19 +11218,42 @@ async function loadAppRepos() {
   }
 }
 
+// Every branch of the chosen repository; the search box narrows the list to these.
+let appBranches = [];
+
 async function loadAppBranches() {
-  const select = $('#app-branch');
   const repo = $('#app-repo').value;
   const fallback = $('#app-repo').selectedOptions[0]?.dataset.branch || '';
   if (!repo) return;
-  select.innerHTML = `<option value="${esc(fallback)}">${esc(fallback || 'default branch')}</option>`;
+  $('#app-branch-search').value = '';
+  appBranches = [fallback];
+  renderAppBranches(fallback);
   try {
     const r = await api(`/credentials/${$('#app-account').value}/git/branches`, { method: 'POST', body: { repo } });
-    select.innerHTML = r.branches.map((b) =>
-      `<option value="${esc(b.name)}" ${b.name === fallback ? 'selected' : ''}>${esc(b.name)}</option>`).join('');
+    appBranches = r.branches.map((b) => b.name);
+    renderAppBranches(fallback);
   } catch { /* the default branch is still there to deploy */ }
   loadAppFolders();
 }
+
+/** The branches matching the search box; keeps `keep` selected while it still matches, else the first match. */
+function renderAppBranches(keep) {
+  const select = $('#app-branch');
+  const q = $('#app-branch-search').value.trim().toLowerCase();
+  const shown = appBranches.filter((b) => b.toLowerCase().includes(q));
+  const pick = shown.includes(keep) ? keep : shown[0];
+  select.innerHTML = shown.length
+    ? shown.map((b) => `<option value="${esc(b)}" ${b === pick ? 'selected' : ''}>${esc(b || 'default branch')}</option>`).join('')
+    : `<option value="">No branch matches "${esc(q)}"</option>`;
+}
+
+$('#app-branch-search').addEventListener('input', () => {
+  const before = $('#app-branch').value;
+  renderAppBranches(before);
+  if ($('#app-branch').value !== before) loadAppFolders();
+});
+// Enter in the search box picks the match rather than submitting the form.
+$('#app-branch-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
 
 /**
  * The folders on the chosen branch that hold a project (a package.json), for
@@ -11267,6 +11295,11 @@ $('#form-app-pick').addEventListener('submit', async (e) => {
   const btn = $('#btn-app-inspect');
   const msg = $('#app-pick-msg');
   const fd = new FormData(e.target);
+  // A search that matches nothing must not quietly fall back to the default branch.
+  if (!fd.get('branch') && $('#app-branch-search').value.trim()) {
+    formMsg(msg, 'No branch matches the search — clear it or pick a branch.', 'err');
+    return;
+  }
 
   busy(btn, true, 'Checking…');
   formMsg(msg, 'Reading package.json from the branch…', 'info');
@@ -13584,8 +13617,8 @@ function setLiveState(kind, text, target = '#live-state') {
 const toneColor = (p) => ({ err: 'var(--err)', warn: 'var(--warn)' }[meterClass(p)] || 'var(--accent)');
 
 /** One of the four headline numbers, with room for a sparkline under it. */
-const liveKpi = (key, label, prefix = 'live') => `
-  <div class="live-kpi">
+const liveKpi = (key, label, prefix = 'live', attrs = '') => `
+  <div class="live-kpi" ${attrs}>
     <div class="live-kpi-head"><span>${label}</span><span class="live-kpi-tag" id="${prefix}-${key}-tag"></span></div>
     <div class="live-kpi-value" id="${prefix}-${key}">—</div>
     <div class="live-kpi-sub" id="${prefix}-${key}-sub">&nbsp;</div>
@@ -13638,7 +13671,7 @@ function liveFrame() {
 
     <div class="live-kpis">
       ${liveKpi('cpu', 'CPU')}
-      ${liveKpi('mem', 'Memory')}
+      ${liveKpi('mem', 'Memory', 'live', 'data-memory-open role="button" tabindex="0" title="See what is using the memory"')}
       ${liveKpi('load', 'Load average')}
       ${liveKpi('net', 'Network')}
     </div>
@@ -14243,9 +14276,76 @@ function drawLiveAlerts(s) {
         <span class="badge ${a.level === 'critical' ? 'err' : 'warn'}">${a.level === 'critical' ? 'critical' : 'warning'}</span>
         <b>${esc(a.title)}</b>
         ${a.detail ? `<span class="muted small">${esc(a.detail)}</span>` : ''}
+        ${a.key === 'memory' || a.key === 'swap' ? '<button type="button" class="btn tiny" data-memory-open>See what is using it</button>' : ''}
       </div>`).join('')}
   </div>`;
 }
+
+/* ------------------------------------------- what is using the memory */
+
+const memoryModal = $('#modal-memory');
+let memoryGroups = [];
+const MEMORY_KIND = { app: ['App', 'ok'], install: ['Installed', ''], container: ['Container', ''], service: ['System service', ''], user: ['Logins', 'warn'], other: ['Other', ''] };
+
+async function openMemoryModal() {
+  memoryModal.classList.remove('hidden');
+  $('#memory-q').value = '';
+  await loadMemoryGroups();
+}
+
+async function loadMemoryGroups() {
+  const id = currentServerId;
+  $('#memory-sub').textContent = 'Reading every process on the server…';
+  $('#memory-body').innerHTML = skeleton('table', { label: 'Grouping memory by service…', cols: ['name', 'pill', 'num', 'num'] });
+  try {
+    const r = await api(`/servers/${id}/memory`);
+    if (String(id) !== String(currentServerId)) return;
+    memoryGroups = r.groups;
+    const m = r.memory;
+    $('#memory-sub').innerHTML = `<b class="${meterClass(m.usedPct)}">${m.usedPct}% used</b> — ${bytes(m.usedBytes)} of ${bytes(m.totalBytes)}, ${bytes(m.availableBytes)} available · read ${esc(new Date(r.at).toLocaleTimeString())}`;
+    drawMemoryGroups();
+  } catch (err) {
+    $('#memory-sub').textContent = '';
+    $('#memory-body').innerHTML = `<div class="msg err">${esc(err.message)}</div>`;
+  }
+}
+
+function drawMemoryGroups() {
+  const q = $('#memory-q').value.trim().toLowerCase();
+  const shown = memoryGroups.filter((g) => !q || `${g.name} ${g.top?.command || ''} ${MEMORY_KIND[g.kind]?.[0] || ''}`.toLowerCase().includes(q));
+  $('#memory-body').innerHTML = liveTable(
+    [{ label: 'Service' }, { label: 'Type' }, { label: 'Memory', num: true }, { label: 'Of server' }, { label: 'Processes', num: true }],
+    shown.map((g) => {
+      const [kind, tone] = MEMORY_KIND[g.kind] || [g.kind, ''];
+      const name = g.container
+        ? `<button type="button" class="link-db" data-memory-ct="${esc(g.container)}"><b>${esc(g.name)}</b></button>`
+        : `<b>${esc(g.name)}</b>`;
+      return [
+        `${name}${g.top ? `<div class="muted small">largest: ${esc(g.top.command)} #${g.top.pid} · ${bytes(g.top.rssBytes)}</div>` : ''}`,
+        `<span class="badge ${tone}">${kind}</span>`,
+        `<b>${bytes(g.rssBytes)}</b>`,
+        `<div class="memory-share">${liveBar(g.pctOfTotal)}<span class="${meterClass(g.pctOfTotal)}">${g.pctOfTotal}%</span></div>`,
+        String(g.processes),
+      ];
+    }),
+    q ? `Nothing matches "${q}".` : 'No process is holding memory.'
+  );
+}
+
+$('#view-server-detail').addEventListener('click', (e) => {
+  if (e.target.closest('[data-memory-open]')) openMemoryModal();
+});
+$('#view-server-detail').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-memory-open]')) { e.preventDefault(); openMemoryModal(); }
+});
+$('#memory-q').addEventListener('input', drawMemoryGroups);
+$('#btn-memory-refresh').addEventListener('click', loadMemoryGroups);
+memoryModal.addEventListener('click', (e) => {
+  const ct = e.target.closest('[data-memory-ct]');
+  if (!ct) return;
+  memoryModal.classList.add('hidden');
+  openContainerPage(currentServerId, ct.dataset.memoryCt, 'overview', { from: 'live' });
+});
 
 /** Start / stop / restart / logs for any container on the machine. */
 $('#view-server-detail').addEventListener('click', async (e) => {

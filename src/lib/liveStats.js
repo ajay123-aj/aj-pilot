@@ -507,6 +507,68 @@ echo ok`;
   };
 }
 
+/**
+ * What is using the server's memory, grouped by owner. Every process's resident
+ * memory is added to the group its cgroup puts it in: a Docker container, a
+ * systemd service, a user's login sessions, or "other". Containers come back by
+ * id and name; the caller names them after the panel's own apps and installs.
+ */
+export async function collectMemoryUsage(conn, server) {
+  const script = `export LC_ALL=C
+echo '@@@mem'
+cat /proc/meminfo
+echo '@@@ps'
+ps -eo pid=,rss=,user:32=,cgroup:4096=,comm= 2>/dev/null
+echo '@@@containers'
+docker ps --no-trunc --format '{{.ID}}\\t{{.Names}}' 2>/dev/null
+echo '@@@done'
+echo ok`;
+
+  const result = await rootExec(conn, server, script, { timeout: 30000 });
+  const s = splitSections(result.stdout);
+  if (!s.done) {
+    throw new Error(`Could not read memory use: ${(result.stderr || result.stdout || '').trim().slice(0, 200) || 'the probe returned nothing'}`);
+  }
+
+  const containerNames = new Map(lines(s.containers).map((l) => l.split('\t')).filter(([id]) => id).map(([id, name]) => [id, name]));
+  const groups = new Map();
+
+  for (const line of lines(s.ps)) {
+    const [pid, rss, user, cgroup, ...command] = line.split(/\s+/);
+    const rssBytes = num(rss) * 1024;
+    // Kernel threads hold no resident memory of their own.
+    if (!rssBytes) continue;
+    const owner = cgroupOwner(cgroup, user);
+    if (owner.kind === 'container') owner.name = containerNames.get(owner.container) || owner.container.slice(0, 12);
+    const g = groups.get(owner.key) || { ...owner, rssBytes: 0, processes: 0, top: null };
+    g.rssBytes += rssBytes;
+    g.processes += 1;
+    if (!g.top || rssBytes > g.top.rssBytes) g.top = { pid: num(pid), command: command.join(' '), rssBytes };
+    groups.set(owner.key, g);
+  }
+
+  return { at: new Date().toISOString(), memory: memoryOf(s.mem), groups: [...groups.values()] };
+}
+
+/**
+ * Who a process belongs to, from `ps -o cgroup`. cgroup v2 prints one
+ * "0::/path"; v1 prints every hierarchy, comma-separated, and the memory one
+ * (or systemd's) is the path that matters.
+ */
+export function cgroupOwner(cgroup, user) {
+  const entries = String(cgroup || '').split(',');
+  const pick = entries.find((e) => /^\d+:memory:/.test(e)) || entries.find((e) => e.startsWith('0::'))
+    || entries.find((e) => /:name=systemd:/.test(e)) || entries[0] || '';
+  const path = pick.replace(/^\d+:[^:]*:/, '');
+
+  const container = /(?:docker-|\/docker\/)([0-9a-f]{64})/.exec(path);
+  if (container) return { key: `container:${container[1]}`, kind: 'container', container: container[1] };
+  if (path.includes('/user.slice/')) return { key: `user:${user}`, kind: 'user', name: user };
+  const service = /\/system\.slice\/(?:.*\/)?([^/]+)\.service(?:\/|$)/.exec(path);
+  if (service) return { key: `service:${service[1]}`, kind: 'service', name: service[1] };
+  return { key: 'other', kind: 'other', name: 'Other' };
+}
+
 /** One app's containers added up, for a card or a headline tile. */
 export function appUsage(containers, host) {
   const sum = (key) => containers.reduce((t, c) => t + (c[key] || 0), 0);

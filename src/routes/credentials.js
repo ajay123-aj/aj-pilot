@@ -443,7 +443,8 @@ function gitRoute(handler) {
       await checkGitUrls(settings);
       res.json({ ok: true, ...(await handler(await usableGitToken(row), settings, req, row)) });
     } catch (err) {
-      await run("UPDATE credentials SET status='invalid', last_error=? WHERE id=?", [err.message, row.id]);
+      // Only a rejected token makes the account invalid; a listing the token cannot read does not.
+      if (err.status === 401) await run("UPDATE credentials SET status='invalid', last_error=? WHERE id=?", [err.message, row.id]);
       res.status(400).json({ ok: false, error: err.message });
     }
   };
@@ -750,7 +751,8 @@ const ZT = '/:id/cloudflare/accounts/:accountId';
 /** Tunnels with their public hostnames, private networks and enrolled devices. */
 credentialsRouter.post(`${ZT}/zero-trust`, cloudflareRoute(async (token, req, row) => {
   const { acc } = ztAccount(row, req.params.accountId);
-  return { account: { id: acc.id, name: acc.name }, ...(await getZeroTrust(token, acc.id)) };
+  const others = (asJson(row.extra).account?.accounts || []).map((a) => a.id);
+  return { account: { id: acc.id, name: acc.name }, ...(await getZeroTrust(token, acc.id, others)) };
 }));
 
 /** Set up Zero Trust with a team domain, <team>.cloudflareaccess.com. */

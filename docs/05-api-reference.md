@@ -207,6 +207,7 @@ Source: [src/routes/servers.js](../src/routes/servers.js)
 | `DELETE` | `/api/servers/:id/cron/jobs` | delete |  |
 | `GET` | `/api/servers/:id/runners` | view | The CI runners on this server, as the machine itself reports them |
 | `GET` | `/api/servers/:id/stats` | view | One sample, for anything that wants a number rather than a stream |
+| `GET` | `/api/servers/:id/memory` | view | What is using memory, grouped by owner. Response `{ ok, at, memory: { totalBytes, usedBytes, availableBytes, usedPct }, groups: [{ key, kind: app\|install\|container\|service\|user\|other, name, appId?, container?, rssBytes, pctOfTotal, processes, top: { pid, command, rssBytes } }] }`, biggest first |
 | `GET` | `/api/servers/:id/stats/stream` | view | SSE: `sample`, `problem`, `end` events every `?every=` ms (2000–60000, default 5000) |
 | `POST` | `/api/servers/:id/containers/:name/action` | create | start / stop / restart a container, whoever put it there |
 | `GET` | `/api/servers/:id/containers/:name` | view | Everything about one container |
@@ -327,10 +328,12 @@ Source: [src/routes/credentials.js](../src/routes/credentials.js)
 | `POST` | `/api/credentials/test-mysql` | view | Test MySQL details before saving them |
 | `POST` | `/api/credentials/test-git` | view | Authenticate a git token before saving it |
 | `POST` | `/api/credentials/:id/git/account` | view | Re-authenticate and refresh the stored account details |
-| `POST` | `/api/credentials/:id/git/repositories` | view | Repositories this account can reach |
+| `POST` | `/api/credentials/:id/git/repositories` | view | Repositories this account can reach. Bitbucket: read workspace by workspace (`GET /2.0/user/workspaces`, then `GET /2.0/repositories/{workspace}`), because Bitbucket removed the cross-workspace `/2.0/repositories` listing |
 | `POST` | `/api/credentials/:id/git/branches` | view | Branches of one repository — `full` is "owner/repo" |
 | `POST` | `/api/credentials/:id/git/commits` | view | Recent commits on a branch |
-| `POST` | `/api/credentials/:id/git/organizations` | view | Organisations (GitHub) or groups (GitLab) a runner can be registered in |
+| `POST` | `/api/credentials/:id/git/organizations` | view | Organisations (GitHub), groups (GitLab) or workspaces (Bitbucket, from `GET /2.0/user/workspaces`) a runner can be registered in |
+
+Every `/api/credentials/:id/git/*` route answers `400 { ok: false, error }` when the provider refuses. Only a `401` from the provider (token wrong, revoked or expired) marks the credential `invalid`; any other failure (a missing scope, a resource the token cannot see, a provider outage) is returned to the caller and leaves the stored status alone.
 | `POST` | `/api/credentials/:id/git/runners` | view | Runners the provider itself knows about for one repository, organisation or group — including ones this panel never installed |
 | `GET` | `/api/credentials/dockerhub/token-link` | view | Where the browser flow sends the person to create a token |
 | `POST` | `/api/credentials/dockerhub/connect` | create | Finish the browser flow |
@@ -347,6 +350,7 @@ Source: [src/routes/credentials.js](../src/routes/credentials.js)
 | `PUT` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records/:recordId` | edit | Change a DNS record |
 | `DELETE` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns/records/:recordId` | delete | Delete a DNS record |
 | `POST` | `/api/credentials/:id/cloudflare/zones/:zoneId/dns` | view | DNS records of one zone this token can see |
+| `POST` | `/api/credentials/:id/cloudflare/accounts/:accountId/zero-trust` | view | Tunnels with public hostnames, private networks, enrolled devices and the team domain of one account. Each part has its own `…Error`. When Cloudflare refuses the Zero Trust reads, the same token is tried on the login's other accounts: if it works there, the answer has `needsRole: true` (the token is fine, the signed-in user's role on this account lacks Zero Trust / Tunnel), otherwise `needsReconnect: true` (the token itself lacks the permissions). "Access is not enabled" is reported as no team domain yet (`team: null`, no error) |
 | `POST` | `/api/credentials/:id/mysql/overview` | view |  |
 | `POST` | `/api/credentials/:id/mysql/databases/:database` | view |  |
 | `POST` | `/api/credentials/:id/mysql/databases/:database/tables/:table` | view |  |

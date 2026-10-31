@@ -30,6 +30,8 @@ Everything in sections 1–3 was observed in the code. Section 4 is a recommenda
 | No rollback to a previous release | Redeploy builds the current branch head; there is no "deploy this earlier SHA" |
 | Terminal permission | Editors can open a shell, which is broader than "never delete". Needs a product decision |
 | `projects` table is unused | Left from an early design; can be dropped |
+| Bitbucket repository list is capped | Repositories are read per workspace (up to 2 pages of 100 per workspace, workspaces read in parallel), then sorted by last update. A workspace the token cannot read is skipped; the list fails only if every workspace fails. Very large workspaces show their 200 most recently updated repositories |
+| Memory breakdown is a snapshot of RSS | The *what is using memory* list sums each process's resident memory, so shared pages (shared libraries, a forked worker's copy-on-write memory) count once per process and the total can exceed *used*. Page cache and kernel memory are not attributed to anyone. There is no history: it shows only the moment it was read. Reading each cgroup's `memory.current` would be exact on cgroup v2 hosts |
 | No server history chart in the UI | The server *Statistics* chart (CPU, memory, disk over a day, week or month) was taken off the Live tab on request. Samples are still recorded (they drive the cards' health level) and `GET /api/servers/:id/metrics` still answers, so the chart can come back elsewhere, for example on the Overview, if wanted |
 
 ## 3. Engineering health

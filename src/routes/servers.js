@@ -13,7 +13,7 @@ import {
   requireDocker, DockerMissingError, containerAction, containerLogs, containerDetails, removeAnyContainer, CONTAINER_ACTIONS,
   followLogs, containerCompose, prepareContainerBackup, prepareVolumeArchive, validateVolumeName,
 } from '../lib/docker.js';
-import { collectLiveStats, collectContainerStats, collectAllContainerStats, appUsage } from '../lib/liveStats.js';
+import { collectLiveStats, collectContainerStats, collectAllContainerStats, collectMemoryUsage, appUsage } from '../lib/liveStats.js';
 import { metricSeries, latestLevels } from '../lib/metrics.js';
 import { runnerState } from '../lib/runnerInstall.js';
 import { collectSummary, collectTabCounts } from '../lib/serverSummary.js';
@@ -1132,6 +1132,46 @@ serversRouter.get('/:id/runners', serverRoute(async (conn, row, req) => {
 serversRouter.get('/:id/stats', serverRoute(async (conn, row, req) => ({
   stats: await collectLiveStats(conn, row, { withDocker: req.query.docker !== '0' }),
 })));
+
+/**
+ * What is using the memory, biggest first. Containers are named after the
+ * panel's own apps and installed services where they belong to one.
+ */
+serversRouter.get('/:id/memory', serverRoute(async (conn, row, req) => {
+  const [usage, apps, installs] = await Promise.all([
+    collectMemoryUsage(conn, row),
+    all('SELECT id, name, container_id, containers FROM apps WHERE server_id = ? AND org_id = ?', [row.id, req.orgId]),
+    all('SELECT id, name, container_id FROM installations WHERE server_id = ?', [row.id]),
+  ]);
+
+  // Container id or name → the app or install it belongs to. Ids may be stored short.
+  const owners = [];
+  for (const a of apps) {
+    const refs = [a.container_id, ...(asJson(a.containers) || []).flatMap((c) => [c.id, c.name])].filter(Boolean);
+    owners.push({ refs, kind: 'app', name: a.name, appId: a.id });
+  }
+  for (const i of installs) owners.push({ refs: [i.container_id, i.name].filter(Boolean), kind: 'install', name: i.name });
+  const ownerOf = (id, name) => owners.find((o) => o.refs.some((r) => r === name || (r.length >= 12 && id.startsWith(r))));
+
+  const total = usage.memory.totalBytes;
+  const groups = usage.groups.map((g) => {
+    const owner = g.kind === 'container' ? ownerOf(g.container, g.name) : null;
+    return {
+      key: g.key,
+      kind: owner ? owner.kind : g.kind,
+      name: owner && owner.name !== g.name ? `${owner.name} (${g.name})` : g.name,
+      ...(owner?.appId ? { appId: owner.appId } : {}),
+      ...(g.kind === 'container' ? { container: g.name } : {}),
+      rssBytes: g.rssBytes,
+      pctOfTotal: total ? Math.round((g.rssBytes / total) * 1000) / 10 : 0,
+      processes: g.processes,
+      top: g.top,
+    };
+  }).sort((a, b) => b.rssBytes - a.rssBytes);
+
+  const { totalBytes, usedBytes, availableBytes, usedPct } = usage.memory;
+  return { at: usage.at, memory: { totalBytes, usedBytes, availableBytes, usedPct }, groups };
+}));
 
 /**
  * The live view: one SSH connection held open, a sample pushed every few
